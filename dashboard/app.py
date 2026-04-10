@@ -108,10 +108,10 @@ def format_timestamp(ts):
 
 
 def time_ago(dt):
-    """Human-readable relative time."""
+    """Human-readable relative time. GDELT timestamps are UTC."""
     if not dt:
         return ""
-    delta = datetime.now() - dt
+    delta = datetime.utcnow() - dt
     seconds = int(delta.total_seconds())
     if seconds < 60:
         return "just now"
@@ -149,7 +149,7 @@ def api_articles():
     # Time filter
     hours = request.args.get("hours", type=int)
     if hours:
-        cutoff = datetime.now() - timedelta(hours=hours)
+        cutoff = datetime.utcnow() - timedelta(hours=hours)
         cutoff_ts = int(cutoff.strftime("%Y%m%d%H%M%S"))
         conditions.append('"V1DATE" >= ?')
         params.append(cutoff_ts)
@@ -308,7 +308,7 @@ def api_top_entities():
     if con is None:
         return jsonify({"error": "Database busy"}), 503
     hours = request.args.get("hours", 24, type=int)
-    cutoff = datetime.now() - timedelta(hours=hours)
+    cutoff = datetime.utcnow() - timedelta(hours=hours)
     cutoff_ts = int(cutoff.strftime("%Y%m%d%H%M%S"))
 
     # Sample recent articles and extract top entities

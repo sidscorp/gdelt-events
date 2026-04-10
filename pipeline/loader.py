@@ -44,8 +44,13 @@ def _configure(con: duckdb.DuckDBPyConnection) -> None:
     con.execute("SET threads = 2")  # Keep CPU usage modest on the shared box
 
 
-def _open_connection(db_path: Path, max_retries: int = 5) -> duckdb.DuckDBPyConnection:
-    """Open DuckDB for write, retrying briefly on lock conflicts from readers."""
+def _open_connection(db_path: Path, max_retries: int = 20) -> duckdb.DuckDBPyConnection:
+    """Open DuckDB for write, retrying persistently on lock conflicts from readers.
+
+    During bulk load, the dashboard's read-only connections can briefly collide
+    with the writer when we reopen between batches. Retry for up to ~60 seconds
+    before giving up.
+    """
     last_err = None
     for attempt in range(max_retries):
         try:
@@ -56,7 +61,9 @@ def _open_connection(db_path: Path, max_retries: int = 5) -> duckdb.DuckDBPyConn
         except duckdb.IOException as e:
             last_err = e
             if attempt < max_retries - 1:
-                time.sleep(1 * (attempt + 1))
+                wait = min(5, 1 + attempt * 0.5)
+                log.warning("DB lock conflict, retrying in %.1fs (attempt %d/%d)", wait, attempt + 1, max_retries)
+                time.sleep(wait)
     raise last_err
 
 

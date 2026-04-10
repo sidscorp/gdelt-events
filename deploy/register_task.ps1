@@ -16,10 +16,11 @@ $action = New-ScheduledTaskAction `
     -Argument "`"$script`"" `
     -WorkingDirectory $repoDir
 
-# Trigger: every 15 minutes, repeating forever, starting now
+# Trigger: every 15 minutes, starting now, running for 1000 days
+# (Task Scheduler rejects TimeSpan.MaxValue as "out of range")
 $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
     -RepetitionInterval (New-TimeSpan -Minutes 15) `
-    -RepetitionDuration ([TimeSpan]::MaxValue)
+    -RepetitionDuration (New-TimeSpan -Days 1000)
 
 # Settings: don't wake computer, don't run on battery restrictions, allow start if missed
 $settings = New-ScheduledTaskSettingsSet `
@@ -29,9 +30,10 @@ $settings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 10) `
     -MultipleInstances IgnoreNew
 
-# Principal: run as current user, only when logged in (adjust as needed)
+# Principal: run as current user, only when logged in
+$currentUser = (whoami).Trim()
 $principal = New-ScheduledTaskPrincipal `
-    -UserId "$env:USERDOMAIN\$env:USERNAME" `
+    -UserId $currentUser `
     -LogonType Interactive `
     -RunLevel Limited
 

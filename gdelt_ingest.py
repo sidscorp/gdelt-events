@@ -12,7 +12,6 @@ Usage:
 """
 
 import argparse
-import fcntl
 import logging
 import os
 import shutil
@@ -45,17 +44,55 @@ def check_disk_space() -> float:
 
 
 def acquire_lock():
-    """Acquire an exclusive file lock. Returns the lock file handle or None."""
+    """Cross-platform PID-file lock. Returns a lock handle (file path) or None.
+
+    If a lock file exists with a live PID, return None.
+    Otherwise, write our PID and return the path for release.
+    """
     LOCK_FILE.parent.mkdir(parents=True, exist_ok=True)
-    lock_fd = open(LOCK_FILE, "w")
-    try:
-        fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        lock_fd.write(str(os.getpid()))
-        lock_fd.flush()
-        return lock_fd
-    except BlockingIOError:
-        lock_fd.close()
-        return None
+
+    if LOCK_FILE.exists():
+        try:
+            old_pid = int(LOCK_FILE.read_text().strip())
+            # Check if the PID is still alive
+            if _pid_alive(old_pid):
+                return None
+            # Stale lock — previous run crashed
+        except (ValueError, OSError):
+            pass  # Corrupt lock file, overwrite it
+
+    LOCK_FILE.write_text(str(os.getpid()))
+    return LOCK_FILE
+
+
+def _pid_alive(pid: int) -> bool:
+    """Return True if a process with the given PID exists."""
+    if pid <= 0:
+        return False
+    if os.name == "nt":
+        # Windows: use tasklist or ctypes
+        import ctypes
+        PROCESS_QUERY_INFORMATION = 0x0400
+        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, False, pid)
+        if handle:
+            ctypes.windll.kernel32.CloseHandle(handle)
+            return True
+        return False
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+
+def release_lock(lock_handle):
+    """Release the PID lock file."""
+    if lock_handle and lock_handle.exists():
+        try:
+            lock_handle.unlink()
+        except OSError:
+            pass
 
 
 def print_status() -> None:
@@ -124,16 +161,15 @@ def run_ingest(force_prune: bool = False, prune_days: int | None = None) -> None
         new_files = download_batch(entries)
         log.info("Downloaded %d new files", len(new_files))
 
-        # Load any un-loaded zips into DuckDB (covers both new downloads and retries)
-        all_zips = list(RAW_DIR.glob("*.zip")) if RAW_DIR.exists() else []
-        if all_zips:
-            summary = load_batch(all_zips)
-            loaded = summary["events"] + summary["mentions"] + summary["gkg"]
-            if loaded > 0 or summary["errors"] > 0:
-                log.info(
-                    "Loaded — events: %d, mentions: %d, gkg: %d, errors: %d",
-                    summary["events"], summary["mentions"], summary["gkg"], summary["errors"],
-                )
+        # Load only the newly-downloaded files. The `_ingest_log` table is the
+        # source of truth for what has been loaded — no need to scan the whole
+        # raw dir every 15 minutes (17K files means 17K pointless is_loaded checks).
+        if new_files:
+            summary = load_batch(new_files)
+            log.info(
+                "Loaded — events: %d, mentions: %d, gkg: %d, errors: %d",
+                summary["events"], summary["mentions"], summary["gkg"], summary["errors"],
+            )
 
         # Prune: daily or forced
         now = datetime.now(tz=None)
@@ -147,8 +183,7 @@ def run_ingest(force_prune: bool = False, prune_days: int | None = None) -> None
         log.exception("Ingest failed")
         sys.exit(1)
     finally:
-        fcntl.flock(lock_fd, fcntl.LOCK_UN)
-        lock_fd.close()
+        release_lock(lock_fd)
 
 
 def main():

@@ -27,8 +27,9 @@ $settings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit ([TimeSpan]::Zero) `
     -MultipleInstances IgnoreNew
 
+$currentUser = (whoami).Trim()
 $principal = New-ScheduledTaskPrincipal `
-    -UserId "$env:USERDOMAIN\$env:USERNAME" `
+    -UserId $currentUser `
     -LogonType Interactive `
     -RunLevel Limited
 
@@ -40,7 +41,7 @@ Register-ScheduledTask `
     -Trigger @($trigger1, $trigger2) `
     -Settings $settings `
     -Principal $principal `
-    -Description "GDELT News Dashboard — Flask app via waitress on port 8015"
+    -Description "GDELT News Dashboard - Flask app via waitress on port 8015"
 
 Write-Host "Dashboard scheduled task '$taskName' registered."
 

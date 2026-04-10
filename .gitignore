@@ -1,0 +1,5 @@
+data/
+.venv/
+__pycache__/
+*.pyc
+data-exploration-march-2026/

@@ -1,6 +1,7 @@
 """GDELT News Dashboard — Tufte-inspired breaking news viewer."""
 
 import re
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -12,9 +13,15 @@ DB_PATH = Path(__file__).resolve().parent.parent / "data" / "gdelt.duckdb"
 app = Flask(__name__)
 
 
-def get_db():
-    """Get a read-only DuckDB connection."""
-    return duckdb.connect(str(DB_PATH), read_only=True)
+def get_db(max_retries=3):
+    """Get a read-only DuckDB connection, retrying briefly on lock conflicts."""
+    for attempt in range(max_retries):
+        try:
+            return duckdb.connect(str(DB_PATH), read_only=True)
+        except duckdb.IOException:
+            if attempt < max_retries - 1:
+                time.sleep(0.5 * (attempt + 1))
+    return None
 
 
 def parse_tone(tone_str):
@@ -127,6 +134,8 @@ def index():
 def api_articles():
     """Main API endpoint for article list with filtering."""
     con = get_db()
+    if con is None:
+        return jsonify({"error": "Database is busy (backfill in progress). Try again shortly.", "articles": [], "total": 0, "page": 1, "per_page": 50, "pages": 0}), 503
 
     # Pagination
     page = max(1, request.args.get("page", 1, type=int))
@@ -270,6 +279,8 @@ def api_articles():
 def api_stats():
     """Quick stats for the header."""
     con = get_db()
+    if con is None:
+        return jsonify({"error": "Database busy", "total_articles": 0, "sources": 0, "latest_ago": "loading..."}), 503
     row = con.execute("""
         SELECT count(*),
                min("V1DATE"),
@@ -294,6 +305,8 @@ def api_stats():
 def api_top_entities():
     """Top persons, orgs, themes, locations for filter suggestions."""
     con = get_db()
+    if con is None:
+        return jsonify({"error": "Database busy"}), 503
     hours = request.args.get("hours", 24, type=int)
     cutoff = datetime.now() - timedelta(hours=hours)
     cutoff_ts = int(cutoff.strftime("%Y%m%d%H%M%S"))

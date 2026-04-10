@@ -2,6 +2,7 @@
 
 import logging
 import tempfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -43,12 +44,20 @@ def _configure(con: duckdb.DuckDBPyConnection) -> None:
     con.execute("SET threads = 2")  # Keep CPU usage modest on the shared box
 
 
-def _open_connection(db_path: Path) -> duckdb.DuckDBPyConnection:
-    """Open DuckDB with memory limits and ensure tables exist."""
-    con = duckdb.connect(str(db_path))
-    _configure(con)
-    create_tables(con)
-    return con
+def _open_connection(db_path: Path, max_retries: int = 5) -> duckdb.DuckDBPyConnection:
+    """Open DuckDB for write, retrying briefly on lock conflicts from readers."""
+    last_err = None
+    for attempt in range(max_retries):
+        try:
+            con = duckdb.connect(str(db_path))
+            _configure(con)
+            create_tables(con)
+            return con
+        except duckdb.IOException as e:
+            last_err = e
+            if attempt < max_retries - 1:
+                time.sleep(1 * (attempt + 1))
+    raise last_err
 
 
 def load_file(con: duckdb.DuckDBPyConnection, zip_path: Path, tmp_dir: str) -> int:

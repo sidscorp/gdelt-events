@@ -562,6 +562,14 @@ async function fetchArticles() {
     const data = await resp.json();
 
     const meta = document.getElementById('resultsMeta');
+
+    if (data.error) {
+      meta.textContent = '';
+      list.innerHTML = `<li class="loading">${data.error}<br><small>The dashboard will populate once the backfill finishes. Refresh in a minute.</small></li>`;
+      document.getElementById('pagination').innerHTML = '';
+      return;
+    }
+
     meta.textContent = `${data.total.toLocaleString()} articles`;
 
     if (data.articles.length === 0) {
@@ -580,6 +588,10 @@ async function fetchStats() {
   try {
     const resp = await fetch('/api/stats');
     const data = await resp.json();
+    if (data.error) {
+      document.getElementById('stats').innerHTML = `<span>backfill in progress — loading initial 60 days of data</span>`;
+      return;
+    }
     document.getElementById('stats').innerHTML =
       `<span>${data.total_articles.toLocaleString()} articles</span>` +
       `<span>${data.sources.toLocaleString()} sources</span>` +
@@ -593,8 +605,8 @@ async function fetchStats() {
 fetchStats();
 fetchArticles();
 
-// Auto-refresh every 5 minutes
-setInterval(() => { fetchStats(); if (state.page === 1) fetchArticles(); }, 300000);
+// Auto-refresh every 60 seconds while backfill is running, then every 5 min normally
+setInterval(() => { fetchStats(); if (state.page === 1) fetchArticles(); }, 60000);
 </script>
 
 </body>

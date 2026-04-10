@@ -27,10 +27,13 @@ $settings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit ([TimeSpan]::Zero) `
     -MultipleInstances IgnoreNew
 
+# Use S4U so task runs regardless of whether the user is logged in.
+# S4U lets us run as the user without storing a password and without
+# requiring an interactive session.
 $currentUser = (whoami).Trim()
 $principal = New-ScheduledTaskPrincipal `
     -UserId $currentUser `
-    -LogonType Interactive `
+    -LogonType S4U `
     -RunLevel Limited
 
 Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue

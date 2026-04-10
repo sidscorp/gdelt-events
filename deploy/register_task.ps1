@@ -30,11 +30,11 @@ $settings = New-ScheduledTaskSettingsSet `
     -ExecutionTimeLimit (New-TimeSpan -Minutes 10) `
     -MultipleInstances IgnoreNew
 
-# Principal: run as current user, only when logged in
+# S4U: runs as current user, no interactive logon needed (survives logout)
 $currentUser = (whoami).Trim()
 $principal = New-ScheduledTaskPrincipal `
     -UserId $currentUser `
-    -LogonType Interactive `
+    -LogonType S4U `
     -RunLevel Limited
 
 # Remove old task if it exists

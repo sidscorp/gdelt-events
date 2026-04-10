@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GDELT News</title>
+<style>
+  /* Tufte-inspired: high data-ink ratio, no decoration */
+  :root {
+    --text: #111;
+    --text-secondary: #555;
+    --text-tertiary: #888;
+    --border: #ddd;
+    --bg: #fffff8;
+    --bg-hover: #f5f5ef;
+    --accent: #333;
+    --tone-neg: #8b0000;
+    --tone-pos: #006400;
+    --tone-neutral: #888;
+    --tag-bg: #f0ede6;
+    --tag-border: #d4d0c8;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'ET Book', Palatino, 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+    color: var(--text);
+    background: var(--bg);
+    line-height: 1.5;
+    font-size: 15px;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 1.5rem 1rem;
+  }
+
+  /* Header */
+  header {
+    border-bottom: 1px solid var(--text);
+    padding-bottom: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  header h1 {
+    font-size: 1.4rem;
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .header-stats {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-top: 0.2rem;
+  }
+
+  .header-stats span { margin-right: 1.5rem; }
+
+  /* Filters */
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 1rem;
+    align-items: center;
+  }
+
+  .filters input, .filters select {
+    font-family: inherit;
+    font-size: 0.82rem;
+    padding: 0.3rem 0.5rem;
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--text);
+    outline: none;
+  }
+
+  .filters input:focus, .filters select:focus {
+    border-color: var(--accent);
+  }
+
+  .filters input[type="text"] { width: 180px; }
+  .filters input[type="date"] { width: 130px; }
+  .filters select { cursor: pointer; }
+
+  .filter-label {
+    font-size: 0.72rem;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-left: 0.5rem;
+  }
+
+  .filter-label:first-child { margin-left: 0; }
+
+  .btn-clear {
+    font-family: inherit;
+    font-size: 0.78rem;
+    padding: 0.3rem 0.6rem;
+    border: none;
+    background: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    text-decoration: underline;
+  }
+
+  .btn-clear:hover { color: var(--text); }
+
+  /* Time pills */
+  .time-pills {
+    display: flex;
+    gap: 0;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .time-pill {
+    font-family: inherit;
+    font-size: 0.78rem;
+    padding: 0.3rem 0.8rem;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+
+  .time-pill:hover { color: var(--text); }
+  .time-pill.active {
+    color: var(--text);
+    border-bottom-color: var(--text);
+  }
+
+  /* Active filters display */
+  .active-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-bottom: 0.8rem;
+    min-height: 0;
+  }
+
+  .active-filter {
+    font-size: 0.72rem;
+    padding: 0.15rem 0.5rem;
+    background: var(--tag-bg);
+    border: 1px solid var(--tag-border);
+    cursor: pointer;
+    color: var(--text-secondary);
+  }
+
+  .active-filter:hover {
+    text-decoration: line-through;
+    color: var(--tone-neg);
+  }
+
+  /* Results count */
+  .results-meta {
+    font-size: 0.78rem;
+    color: var(--text-tertiary);
+    margin-bottom: 0.6rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.4rem;
+  }
+
+  /* Article list */
+  .article-list { list-style: none; }
+
+  .article {
+    padding: 0.6rem 0;
+    border-bottom: 1px solid #eee;
+  }
+
+  .article:hover { background: var(--bg-hover); margin: 0 -0.5rem; padding: 0.6rem 0.5rem; }
+
+  .article-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .article-source {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    flex-shrink: 0;
+  }
+
+  .article-time {
+    font-size: 0.72rem;
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+  }
+
+  .article-tone {
+    font-size: 0.72rem;
+    flex-shrink: 0;
+    font-weight: 600;
+  }
+
+  .tone-negative { color: var(--tone-neg); }
+  .tone-positive { color: var(--tone-pos); }
+  .tone-neutral { color: var(--tone-neutral); }
+
+  .article-title {
+    font-size: 0.95rem;
+    line-height: 1.35;
+    margin: 0.15rem 0;
+  }
+
+  .article-title a {
+    color: var(--text);
+    text-decoration: none;
+  }
+
+  .article-title a:hover { text-decoration: underline; }
+
+  .article-entities {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.25rem;
+  }
+
+  .entity-tag {
+    font-size: 0.68rem;
+    padding: 0.05rem 0.35rem;
+    background: var(--tag-bg);
+    border: 1px solid var(--tag-border);
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .entity-tag:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+
+  .entity-tag.person::before { content: ""; }
+  .entity-tag.org::before { content: ""; }
+  .entity-tag.location::before { content: ""; }
+  .entity-tag.theme { font-size: 0.64rem; color: var(--text-tertiary); border-style: dashed; }
+
+  /* Pagination */
+  .pagination {
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .pagination button {
+    font-family: inherit;
+    font-size: 0.82rem;
+    padding: 0.3rem 0.8rem;
+    border: 1px solid var(--border);
+    background: #fff;
+    cursor: pointer;
+    color: var(--text);
+  }
+
+  .pagination button:disabled {
+    color: var(--text-tertiary);
+    cursor: default;
+  }
+
+  .pagination button:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
+
+  .page-info {
+    font-size: 0.78rem;
+    color: var(--text-tertiary);
+    align-self: center;
+  }
+
+  /* Loading */
+  .loading {
+    text-align: center;
+    padding: 3rem;
+    color: var(--text-tertiary);
+    font-style: italic;
+  }
+
+  /* Sidebar suggestions (entity lists) */
+  .suggestions {
+    display: none;
+    position: absolute;
+    background: #fff;
+    border: 1px solid var(--border);
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 10;
+    width: 250px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  }
+
+  .suggestions.visible { display: block; }
+
+  .suggestion-item {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.78rem;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .suggestion-item:hover { background: var(--bg-hover); }
+  .suggestion-count { color: var(--text-tertiary); font-size: 0.72rem; }
+
+  /* Footer */
+  footer {
+    margin-top: 2rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.72rem;
+    color: var(--text-tertiary);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>GDELT News Monitor</h1>
+  <div class="header-stats" id="stats">loading...</div>
+</header>
+
+<div class="time-pills" id="timePills">
+  <button class="time-pill active" data-hours="1">1h</button>
+  <button class="time-pill" data-hours="6">6h</button>
+  <button class="time-pill" data-hours="24">24h</button>
+  <button class="time-pill" data-hours="72">3d</button>
+  <button class="time-pill" data-hours="168">7d</button>
+  <button class="time-pill" data-hours="720">30d</button>
+  <button class="time-pill" data-hours="">all</button>
+</div>
+
+<div class="filters">
+  <span class="filter-label">Search</span>
+  <input type="text" id="searchInput" placeholder="keyword..." autocomplete="off">
+
+  <span class="filter-label">Person</span>
+  <input type="text" id="personInput" placeholder="name..." autocomplete="off">
+
+  <span class="filter-label">Org</span>
+  <input type="text" id="orgInput" placeholder="organization..." autocomplete="off">
+
+  <span class="filter-label">Place</span>
+  <input type="text" id="locationInput" placeholder="location..." autocomplete="off">
+
+  <span class="filter-label">Source</span>
+  <input type="text" id="sourceInput" placeholder="domain..." autocomplete="off">
+
+  <span class="filter-label">Theme</span>
+  <input type="text" id="themeInput" placeholder="theme..." autocomplete="off">
+
+  <span class="filter-label">From</span>
+  <input type="date" id="dateFrom">
+
+  <span class="filter-label">To</span>
+  <input type="date" id="dateTo">
+
+  <button class="btn-clear" onclick="clearFilters()">clear all</button>
+</div>
+
+<div class="active-filters" id="activeFilters"></div>
+
+<div class="results-meta" id="resultsMeta"></div>
+
+<ul class="article-list" id="articleList">
+  <li class="loading">Loading articles...</li>
+</ul>
+
+<div class="pagination" id="pagination"></div>
+
+<footer>
+  Data from <a href="https://www.gdeltproject.org">GDELT Project</a> &middot; updated every 15 minutes
+</footer>
+
+<script>
+const state = {
+  page: 1,
+  hours: 1,
+  q: '', person: '', org: '', location: '', source: '', theme: '',
+  date_from: '', date_to: '',
+};
+
+let debounceTimer = null;
+
+// Time pills
+document.getElementById('timePills').addEventListener('click', (e) => {
+  if (!e.target.classList.contains('time-pill')) return;
+  document.querySelectorAll('.time-pill').forEach(p => p.classList.remove('active'));
+  e.target.classList.add('active');
+  state.hours = e.target.dataset.hours;
+  state.page = 1;
+  fetchArticles();
+});
+
+// Filter inputs
+['searchInput', 'personInput', 'orgInput', 'locationInput', 'sourceInput', 'themeInput'].forEach(id => {
+  const field = id.replace('Input', '').replace('search', 'q');
+  document.getElementById(id).addEventListener('input', (e) => {
+    state[field] = e.target.value;
+    state.page = 1;
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(fetchArticles, 300);
+  });
+});
+
+['dateFrom', 'dateTo'].forEach(id => {
+  const field = id === 'dateFrom' ? 'date_from' : 'date_to';
+  document.getElementById(id).addEventListener('change', (e) => {
+    state[field] = e.target.value;
+    state.page = 1;
+    fetchArticles();
+  });
+});
+
+function clearFilters() {
+  state.q = ''; state.person = ''; state.org = '';
+  state.location = ''; state.source = ''; state.theme = '';
+  state.date_from = ''; state.date_to = '';
+  state.page = 1;
+  document.getElementById('searchInput').value = '';
+  document.getElementById('personInput').value = '';
+  document.getElementById('orgInput').value = '';
+  document.getElementById('locationInput').value = '';
+  document.getElementById('sourceInput').value = '';
+  document.getElementById('themeInput').value = '';
+  document.getElementById('dateFrom').value = '';
+  document.getElementById('dateTo').value = '';
+  fetchArticles();
+}
+
+function applyFilter(type, value) {
+  const inputMap = {
+    person: 'personInput', org: 'orgInput', organization: 'orgInput',
+    location: 'locationInput', source: 'sourceInput', theme: 'themeInput'
+  };
+  const stateKey = type === 'organization' ? 'org' : type;
+  const inputId = inputMap[type];
+  if (inputId) {
+    state[stateKey] = value;
+    document.getElementById(inputId).value = value;
+    state.page = 1;
+    fetchArticles();
+  }
+}
+
+function toneClass(tone) {
+  if (!tone) return 'tone-neutral';
+  if (tone.tone < -3) return 'tone-negative';
+  if (tone.tone > 3) return 'tone-positive';
+  return 'tone-neutral';
+}
+
+function toneLabel(tone) {
+  if (!tone) return '';
+  const v = tone.tone.toFixed(1);
+  return v > 0 ? `+${v}` : v;
+}
+
+function renderActiveFilters() {
+  const el = document.getElementById('activeFilters');
+  const filters = [];
+  if (state.q) filters.push({ label: `search: ${state.q}`, clear: () => { state.q = ''; document.getElementById('searchInput').value = ''; }});
+  if (state.person) filters.push({ label: `person: ${state.person}`, clear: () => { state.person = ''; document.getElementById('personInput').value = ''; }});
+  if (state.org) filters.push({ label: `org: ${state.org}`, clear: () => { state.org = ''; document.getElementById('orgInput').value = ''; }});
+  if (state.location) filters.push({ label: `place: ${state.location}`, clear: () => { state.location = ''; document.getElementById('locationInput').value = ''; }});
+  if (state.source) filters.push({ label: `source: ${state.source}`, clear: () => { state.source = ''; document.getElementById('sourceInput').value = ''; }});
+  if (state.theme) filters.push({ label: `theme: ${state.theme}`, clear: () => { state.theme = ''; document.getElementById('themeInput').value = ''; }});
+
+  el.innerHTML = filters.map((f, i) =>
+    `<span class="active-filter" data-idx="${i}">${f.label} &times;</span>`
+  ).join('');
+
+  el.querySelectorAll('.active-filter').forEach((tag, i) => {
+    tag.addEventListener('click', () => {
+      filters[i].clear();
+      state.page = 1;
+      fetchArticles();
+    });
+  });
+}
+
+function renderArticle(a) {
+  const persons = a.persons.slice(0, 5).map(p =>
+    `<span class="entity-tag person" onclick="applyFilter('person','${p.replace(/'/g, "\\'")}')">${p}</span>`
+  ).join('');
+
+  const orgs = a.organizations.slice(0, 4).map(o =>
+    `<span class="entity-tag org" onclick="applyFilter('organization','${o.replace(/'/g, "\\'")}')">${o}</span>`
+  ).join('');
+
+  const locs = a.locations.slice(0, 3).map(l =>
+    `<span class="entity-tag location" onclick="applyFilter('location','${l.name.replace(/'/g, "\\'")}')">${l.name}</span>`
+  ).join('');
+
+  const themes = a.themes.slice(0, 3).map(t =>
+    `<span class="entity-tag theme" onclick="applyFilter('theme','${t.replace(/'/g, "\\'")}')">${t}</span>`
+  ).join('');
+
+  const title = a.title || a.url.replace(/https?:\/\//, '').substring(0, 80) + '...';
+
+  return `<li class="article">
+    <div class="article-header">
+      <span class="article-source">${a.source}</span>
+      <span class="article-time">${a.time_ago}</span>
+      <span class="article-tone ${toneClass(a.tone)}">${toneLabel(a.tone)}</span>
+    </div>
+    <div class="article-title"><a href="${a.url}" target="_blank" rel="noopener">${title}</a></div>
+    <div class="article-entities">${persons}${orgs}${locs}${themes}</div>
+  </li>`;
+}
+
+function renderPagination(data) {
+  const el = document.getElementById('pagination');
+  if (data.pages <= 1) { el.innerHTML = ''; return; }
+
+  el.innerHTML = `
+    <button ${data.page <= 1 ? 'disabled' : ''} onclick="goPage(${data.page - 1})">&larr; prev</button>
+    <span class="page-info">${data.page} of ${data.pages}</span>
+    <button ${data.page >= data.pages ? 'disabled' : ''} onclick="goPage(${data.page + 1})">next &rarr;</button>
+  `;
+}
+
+function goPage(p) {
+  state.page = p;
+  fetchArticles();
+  window.scrollTo(0, 0);
+}
+
+async function fetchArticles() {
+  renderActiveFilters();
+
+  const params = new URLSearchParams();
+  if (state.hours) params.set('hours', state.hours);
+  if (state.q) params.set('q', state.q);
+  if (state.person) params.set('person', state.person);
+  if (state.org) params.set('org', state.org);
+  if (state.location) params.set('location', state.location);
+  if (state.source) params.set('source', state.source);
+  if (state.theme) params.set('theme', state.theme);
+  if (state.date_from) params.set('date_from', state.date_from);
+  if (state.date_to) params.set('date_to', state.date_to);
+  params.set('page', state.page);
+  params.set('per_page', 50);
+
+  const list = document.getElementById('articleList');
+  list.innerHTML = '<li class="loading">Loading...</li>';
+
+  try {
+    const resp = await fetch(`/api/articles?${params}`);
+    const data = await resp.json();
+
+    const meta = document.getElementById('resultsMeta');
+    meta.textContent = `${data.total.toLocaleString()} articles`;
+
+    if (data.articles.length === 0) {
+      list.innerHTML = '<li class="loading">No articles match these filters.</li>';
+    } else {
+      list.innerHTML = data.articles.map(renderArticle).join('');
+    }
+
+    renderPagination(data);
+  } catch (err) {
+    list.innerHTML = `<li class="loading">Error loading articles: ${err.message}</li>`;
+  }
+}
+
+async function fetchStats() {
+  try {
+    const resp = await fetch('/api/stats');
+    const data = await resp.json();
+    document.getElementById('stats').innerHTML =
+      `<span>${data.total_articles.toLocaleString()} articles</span>` +
+      `<span>${data.sources.toLocaleString()} sources</span>` +
+      `<span>latest: ${data.latest_ago}</span>`;
+  } catch (err) {
+    document.getElementById('stats').textContent = 'stats unavailable';
+  }
+}
+
+// Init
+fetchStats();
+fetchArticles();
+
+// Auto-refresh every 5 minutes
+setInterval(() => { fetchStats(); if (state.page === 1) fetchArticles(); }, 300000);
+</script>
+
+</body>
+</html>

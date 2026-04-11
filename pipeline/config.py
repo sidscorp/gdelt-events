@@ -6,10 +6,15 @@ from pathlib import Path
 MASTER_FILE_URL = "http://data.gdeltproject.org/gdeltv2/masterfilelist.txt"
 LAST_UPDATE_URL = "http://data.gdeltproject.org/gdeltv2/lastupdate.txt"
 
+# GAL (Global Article List, v3) — broader coverage than GKG, no NER
+GAL_FEED_URL = "http://data.gdeltproject.org/gdeltv3/gal/feed.rss"
+GAL_FILE_URL_TEMPLATE = "http://data.gdeltproject.org/gdeltv3/gal/{timestamp}.gal.json.gz"
+
 # ── Paths ────────────────────────────────────────────────────────────────────
 REPO_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_DIR / "data"
 RAW_DIR = DATA_DIR / "raw"
+GAL_RAW_DIR = DATA_DIR / "raw_gal"
 DB_PATH = DATA_DIR / "gdelt.duckdb"
 LOG_DIR = DATA_DIR / "logs"
 LOCK_FILE = DATA_DIR / ".ingest.lock"

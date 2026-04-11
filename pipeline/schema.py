@@ -162,6 +162,44 @@ def create_tables(con: duckdb.DuckDBPyConnection) -> None:
         )
     """)
 
+    create_gal_tables(con)
+
+
+def create_gal_tables(con: duckdb.DuckDBPyConnection) -> None:
+    """Create the GAL article table and its ingest log.
+
+    GAL is the GDELT Global Article List — broader article coverage than GKG
+    but without entity extraction. One row per article, keyed by URL.
+    """
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS gal (
+            url VARCHAR PRIMARY KEY,
+            crawled_at BIGINT,       -- YYYYMMDDHHMMSS from the GAL filename (when GDELT saw it)
+            published_at BIGINT,     -- YYYYMMDDHHMMSS from the article's metadata (may be wrong)
+            domain VARCHAR,
+            outlet_name VARCHAR,
+            outlet_logo VARCHAR,
+            outlet_twitter VARCHAR,
+            title VARCHAR,
+            image VARCHAR,
+            description VARCHAR,
+            language VARCHAR,
+            author VARCHAR,
+            loaded_at TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
+    con.execute("CREATE INDEX IF NOT EXISTS idx_gal_crawled ON gal(crawled_at)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_gal_domain ON gal(domain)")
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS _gal_ingest_log (
+            filename VARCHAR PRIMARY KEY,
+            batch_timestamp BIGINT,
+            loaded_at TIMESTAMP DEFAULT current_timestamp,
+            row_count INTEGER
+        )
+    """)
+
 
 def read_csv_sql(csv_path: str, file_type: str) -> str:
     """Build the read_csv SQL fragment for a given file type and extracted CSV path."""

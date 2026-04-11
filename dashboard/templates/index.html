@@ -206,6 +206,18 @@
   .tone-positive { color: var(--tone-pos); }
   .tone-neutral { color: var(--tone-neutral); }
 
+  .src-badge {
+    font-size: 0.62rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 0 0.3rem;
+    border: 1px solid var(--border);
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+  }
+  .src-gal { border-color: #c0b070; color: #8a7030; }
+
   .article-title {
     font-size: 0.95rem;
     line-height: 1.35;
@@ -346,6 +358,9 @@
   <span class="filter-label">Search</span>
   <input type="text" id="searchInput" placeholder="keyword..." autocomplete="off">
 
+  <span class="filter-label">Title</span>
+  <input type="text" id="titleInput" placeholder="in article title..." autocomplete="off">
+
   <span class="filter-label">Person</span>
   <input type="text" id="personInput" placeholder="name..." autocomplete="off">
 
@@ -388,9 +403,12 @@
 const state = {
   page: 1,
   hours: 1,
-  q: '', person: '', org: '', location: '', source: '', theme: '',
+  q: '', title: '', person: '', org: '', location: '', source: '', theme: '',
   date_from: '', date_to: '',
 };
+
+// The actual data window (populated from /api/stats)
+const dataWindow = { earliest: null, latest: null };
 
 let debounceTimer = null;
 
@@ -401,11 +419,16 @@ document.getElementById('timePills').addEventListener('click', (e) => {
   e.target.classList.add('active');
   state.hours = e.target.dataset.hours;
   state.page = 1;
+  // Clear date range so it doesn't conflict with the time pill
+  state.date_from = '';
+  state.date_to = '';
+  document.getElementById('dateFrom').value = '';
+  document.getElementById('dateTo').value = '';
   fetchArticles();
 });
 
 // Filter inputs
-['searchInput', 'personInput', 'orgInput', 'locationInput', 'sourceInput', 'themeInput'].forEach(id => {
+['searchInput', 'titleInput', 'personInput', 'orgInput', 'locationInput', 'sourceInput', 'themeInput'].forEach(id => {
   const field = id.replace('Input', '').replace('search', 'q');
   document.getElementById(id).addEventListener('input', (e) => {
     state[field] = e.target.value;
@@ -420,16 +443,22 @@ document.getElementById('timePills').addEventListener('click', (e) => {
   document.getElementById(id).addEventListener('change', (e) => {
     state[field] = e.target.value;
     state.page = 1;
+    // When picking a specific date range, clear the time pill so they don't conflict
+    if (state.date_from || state.date_to) {
+      state.hours = '';
+      document.querySelectorAll('.time-pill').forEach(p => p.classList.remove('active'));
+    }
     fetchArticles();
   });
 });
 
 function clearFilters() {
-  state.q = ''; state.person = ''; state.org = '';
+  state.q = ''; state.title = ''; state.person = ''; state.org = '';
   state.location = ''; state.source = ''; state.theme = '';
   state.date_from = ''; state.date_to = '';
   state.page = 1;
   document.getElementById('searchInput').value = '';
+  document.getElementById('titleInput').value = '';
   document.getElementById('personInput').value = '';
   document.getElementById('orgInput').value = '';
   document.getElementById('locationInput').value = '';
@@ -472,6 +501,7 @@ function renderActiveFilters() {
   const el = document.getElementById('activeFilters');
   const filters = [];
   if (state.q) filters.push({ label: `search: ${state.q}`, clear: () => { state.q = ''; document.getElementById('searchInput').value = ''; }});
+  if (state.title) filters.push({ label: `title: ${state.title}`, clear: () => { state.title = ''; document.getElementById('titleInput').value = ''; }});
   if (state.person) filters.push({ label: `person: ${state.person}`, clear: () => { state.person = ''; document.getElementById('personInput').value = ''; }});
   if (state.org) filters.push({ label: `org: ${state.org}`, clear: () => { state.org = ''; document.getElementById('orgInput').value = ''; }});
   if (state.location) filters.push({ label: `place: ${state.location}`, clear: () => { state.location = ''; document.getElementById('locationInput').value = ''; }});
@@ -510,9 +540,14 @@ function renderArticle(a) {
 
   const title = a.title || a.url.replace(/https?:\/\//, '').substring(0, 80) + '...';
 
+  const srcBadge = a.source_type === 'gal'
+    ? `<span class="src-badge src-gal" title="Global Article List — broader coverage, no entity extraction">gal</span>`
+    : '';
+
   return `<li class="article">
     <div class="article-header">
       <span class="article-source">${a.source}</span>
+      ${srcBadge}
       <span class="article-time">${a.time_ago}</span>
       <span class="article-tone ${toneClass(a.tone)}">${toneLabel(a.tone)}</span>
     </div>
@@ -544,6 +579,7 @@ async function fetchArticles() {
   const params = new URLSearchParams();
   if (state.hours) params.set('hours', state.hours);
   if (state.q) params.set('q', state.q);
+  if (state.title) params.set('title', state.title);
   if (state.person) params.set('person', state.person);
   if (state.org) params.set('org', state.org);
   if (state.location) params.set('location', state.location);
@@ -573,7 +609,16 @@ async function fetchArticles() {
     meta.textContent = `${data.total.toLocaleString()} articles`;
 
     if (data.articles.length === 0) {
-      list.innerHTML = '<li class="loading">No articles match these filters.</li>';
+      // Check if the date range is (partly) outside the data window
+      let hint = '';
+      if (dataWindow.earliest && dataWindow.latest) {
+        const outsideBefore = state.date_from && state.date_from < dataWindow.earliest;
+        const outsideAfter = state.date_to && state.date_to > dataWindow.latest;
+        if (outsideBefore || outsideAfter) {
+          hint = `<br><small>Your date range is outside the available data window (${dataWindow.earliest} to ${dataWindow.latest}). The pipeline keeps a rolling 60 days.</small>`;
+        }
+      }
+      list.innerHTML = `<li class="loading">No articles match these filters.${hint}</li>`;
     } else {
       list.innerHTML = data.articles.map(renderArticle).join('');
     }
@@ -595,7 +640,20 @@ async function fetchStats() {
     document.getElementById('stats').innerHTML =
       `<span>${data.total_articles.toLocaleString()} articles</span>` +
       `<span>${data.sources.toLocaleString()} sources</span>` +
+      `<span>window: ${data.earliest_display} → ${data.latest_display}</span>` +
       `<span>latest: ${data.latest_ago}</span>`;
+
+    // Constrain date pickers to the actual data window
+    if (data.earliest_date && data.latest_date) {
+      const df = document.getElementById('dateFrom');
+      const dt = document.getElementById('dateTo');
+      df.min = data.earliest_date;
+      df.max = data.latest_date;
+      dt.min = data.earliest_date;
+      dt.max = data.latest_date;
+      dataWindow.earliest = data.earliest_date;
+      dataWindow.latest = data.latest_date;
+    }
   } catch (err) {
     document.getElementById('stats').textContent = 'stats unavailable';
   }

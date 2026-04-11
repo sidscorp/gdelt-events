@@ -171,6 +171,22 @@ def run_ingest(force_prune: bool = False, prune_days: int | None = None) -> None
                 summary["events"], summary["mentions"], summary["gkg"], summary["errors"],
             )
 
+        # GAL (Global Article List) — broader coverage, no NER. Non-fatal.
+        try:
+            from pipeline.gal_downloader import fetch_recent_gal
+            from pipeline.gal_loader import load_gal_batch
+
+            gal_files = fetch_recent_gal(minutes_back=20)
+            if gal_files:
+                gal_summary = load_gal_batch(gal_files)
+                log.info(
+                    "GAL loaded: %d articles from %d files (skipped %d, errors %d)",
+                    gal_summary["gal"], gal_summary["files"],
+                    gal_summary["skipped"], gal_summary["errors"],
+                )
+        except Exception:
+            log.exception("GAL ingest failed (non-fatal)")
+
         # Prune: daily or forced
         now = datetime.now(tz=None)
         should_prune = force_prune or now.hour == 0 and now.minute < 15

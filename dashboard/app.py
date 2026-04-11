@@ -130,69 +130,75 @@ def index():
     return render_template("index.html")
 
 
-@app.route("/api/articles")
-def api_articles():
-    """Main API endpoint for article list with filtering."""
-    con = get_db()
-    if con is None:
-        return jsonify({"error": "Database is busy (backfill in progress). Try again shortly.", "articles": [], "total": 0, "page": 1, "per_page": 50, "pages": 0}), 503
-
-    # Pagination
-    page = max(1, request.args.get("page", 1, type=int))
-    per_page = min(100, request.args.get("per_page", 50, type=int))
-    offset = (page - 1) * per_page
-
-    # Build WHERE clauses
-    conditions = []
-    params = []
-
-    # Time filter
+def _parse_date_filters(request):
+    """Parse common time/date args. Returns (hours, date_from_int, date_to_int)."""
     hours = request.args.get("hours", type=int)
-    if hours:
-        cutoff = datetime.utcnow() - timedelta(hours=hours)
-        cutoff_ts = int(cutoff.strftime("%Y%m%d%H%M%S"))
-        conditions.append('"V1DATE" >= ?')
-        params.append(cutoff_ts)
-
+    date_from_int = None
+    date_to_int = None
     date_from = request.args.get("date_from")
     if date_from:
         try:
-            dt = datetime.strptime(date_from, "%Y-%m-%d")
-            conditions.append('"V1DATE" >= ?')
-            params.append(int(dt.strftime("%Y%m%d000000")))
+            date_from_int = int(datetime.strptime(date_from, "%Y-%m-%d").strftime("%Y%m%d000000"))
         except ValueError:
             pass
-
     date_to = request.args.get("date_to")
     if date_to:
         try:
-            dt = datetime.strptime(date_to, "%Y-%m-%d")
-            conditions.append('"V1DATE" <= ?')
-            params.append(int(dt.strftime("%Y%m%d235959")))
+            date_to_int = int(datetime.strptime(date_to, "%Y-%m-%d").strftime("%Y%m%d235959"))
         except ValueError:
             pass
+    return hours, date_from_int, date_to_int
 
-    # Text search across persons, orgs, themes, source
+
+def _hours_cutoff(hours):
+    if not hours:
+        return None
+    return int((datetime.utcnow() - timedelta(hours=hours)).strftime("%Y%m%d%H%M%S"))
+
+
+def _build_gkg_where(request):
+    """Build GKG WHERE clause from request args."""
+    conditions = []
+    params = []
+
+    hours, df, dt = _parse_date_filters(request)
+    if hours:
+        conditions.append('"V1DATE" >= ?')
+        params.append(_hours_cutoff(hours))
+    if df is not None:
+        conditions.append('"V1DATE" >= ?')
+        params.append(df)
+    if dt is not None:
+        conditions.append('"V1DATE" <= ?')
+        params.append(dt)
+
     q = request.args.get("q", "").strip()
     if q:
         conditions.append(
-            '("V2ENHANCEDPERSONS" ILIKE ? OR "V2ENHANCEDORGANIZATIONS" ILIKE ? '
-            'OR "V2ENHANCEDTHEMES" ILIKE ? OR "V2SOURCECOMMONNAME" ILIKE ? '
-            'OR "V2EXTRASXML" ILIKE ? OR "V2DOCUMENTIDENTIFIER" ILIKE ?)'
+            '(regexp_extract("V2EXTRASXML", \'<PAGE_TITLE>(.*?)</PAGE_TITLE>\', 1) ILIKE ? '
+            'OR "V2ENHANCEDPERSONS" ILIKE ? '
+            'OR "V2ENHANCEDORGANIZATIONS" ILIKE ? '
+            'OR "V2ALLNAMES" ILIKE ? '
+            'OR "V2SOURCECOMMONNAME" ILIKE ?)'
         )
-        like = f"%{q}%"
-        params.extend([like] * 6)
+        params.extend([f"%{q}%"] * 5)
 
-    # Specific filters
+    title = request.args.get("title", "").strip()
+    if title:
+        conditions.append(
+            'regexp_extract("V2EXTRASXML", \'<PAGE_TITLE>(.*?)</PAGE_TITLE>\', 1) ILIKE ?'
+        )
+        params.append(f"%{title}%")
+
     person = request.args.get("person", "").strip()
     if person:
-        conditions.append('"V2ENHANCEDPERSONS" ILIKE ?')
-        params.append(f"%{person}%")
+        conditions.append('("V2ENHANCEDPERSONS" ILIKE ? OR "V2ALLNAMES" ILIKE ?)')
+        params.extend([f"%{person}%", f"%{person}%"])
 
     org = request.args.get("org", "").strip()
     if org:
-        conditions.append('"V2ENHANCEDORGANIZATIONS" ILIKE ?')
-        params.append(f"%{org}%")
+        conditions.append('("V2ENHANCEDORGANIZATIONS" ILIKE ? OR "V2ALLNAMES" ILIKE ?)')
+        params.extend([f"%{org}%", f"%{org}%"])
 
     theme = request.args.get("theme", "").strip()
     if theme:
@@ -209,11 +215,9 @@ def api_articles():
         conditions.append('"V2ENHANCEDLOCATIONS" ILIKE ?')
         params.append(f"%{location}%")
 
-    # Tone filter
     tone_min = request.args.get("tone_min", type=float)
     tone_max = request.args.get("tone_max", type=float)
     if tone_min is not None or tone_max is not None:
-        # V15TONE starts with the tone value followed by comma
         conditions.append('"V15TONE" IS NOT NULL')
         if tone_min is not None:
             conditions.append('CAST(split_part("V15TONE", \',\', 1) AS DOUBLE) >= ?')
@@ -223,46 +227,189 @@ def api_articles():
             params.append(tone_max)
 
     where = " AND ".join(conditions) if conditions else "1=1"
+    return where, params
 
-    # Count total
-    count_sql = f'SELECT count(*) FROM gkg WHERE {where}'
-    total = con.execute(count_sql, params).fetchone()[0]
 
-    # Fetch articles
-    sql = f"""
-        SELECT "GKGRECORDID", "V1DATE", "V2SOURCECOMMONNAME", "V2DOCUMENTIDENTIFIER",
-               "V2ENHANCEDTHEMES", "V2ENHANCEDLOCATIONS", "V2ENHANCEDPERSONS",
-               "V2ENHANCEDORGANIZATIONS", "V15TONE", "V2EXTRASXML", "V2SHARINGIMAGE"
-        FROM gkg
-        WHERE {where}
-        ORDER BY "V1DATE" DESC
-        LIMIT ? OFFSET ?
+def _build_gal_where(request):
+    """Build GAL WHERE clause. GAL has no entities so person/org/theme/location
+    filters are not applicable (caller should skip GAL in those cases).
     """
-    rows = con.execute(sql, params + [per_page, offset]).fetchall()
+    conditions = []
+    params = []
 
-    articles = []
-    for row in rows:
-        (gkg_id, v1date, source_name, url, themes, locations, persons,
-         orgs, tone_str, extras_xml, sharing_image) = row
+    hours, df, dt = _parse_date_filters(request)
+    if hours:
+        conditions.append("crawled_at >= ?")
+        params.append(_hours_cutoff(hours))
+    if df is not None:
+        conditions.append("crawled_at >= ?")
+        params.append(df)
+    if dt is not None:
+        conditions.append("crawled_at <= ?")
+        params.append(dt)
 
-        dt = format_timestamp(v1date)
-        tone = parse_tone(tone_str)
-        title = extract_title(extras_xml) or ""
+    q = request.args.get("q", "").strip()
+    if q:
+        conditions.append("(title ILIKE ? OR description ILIKE ? OR domain ILIKE ? OR outlet_name ILIKE ?)")
+        params.extend([f"%{q}%"] * 4)
 
-        articles.append({
-            "id": gkg_id,
-            "timestamp": dt.isoformat() if dt else None,
-            "time_ago": time_ago(dt),
-            "source": source_name or "",
-            "url": url or "",
-            "title": title,
-            "persons": parse_enhanced_list(persons),
-            "organizations": parse_enhanced_list(orgs),
-            "themes": parse_enhanced_list(themes),
-            "locations": parse_locations(locations),
-            "tone": tone,
-            "image": sharing_image or None,
-        })
+    title = request.args.get("title", "").strip()
+    if title:
+        conditions.append("title ILIKE ?")
+        params.append(f"%{title}%")
+
+    source = request.args.get("source", "").strip()
+    if source:
+        conditions.append("domain ILIKE ?")
+        params.append(f"%{source}%")
+
+    where = " AND ".join(conditions) if conditions else "1=1"
+    return where, params
+
+
+def _gkg_entity_filters_set(request):
+    """True if any filter is set that requires GKG entity fields."""
+    return any(request.args.get(k, "").strip()
+               for k in ("person", "org", "theme", "location", "tone_min", "tone_max"))
+
+
+def _gkg_row_to_article(row):
+    (gkg_id, v1date, source_name, url, themes, locations, persons,
+     orgs, tone_str, extras_xml, sharing_image) = row
+    dt = format_timestamp(v1date)
+    return {
+        "source_type": "gkg",
+        "id": gkg_id,
+        "timestamp": dt.isoformat() if dt else None,
+        "time_ago": time_ago(dt),
+        "sort_key": int(v1date) if v1date else 0,
+        "source": source_name or "",
+        "url": url or "",
+        "title": extract_title(extras_xml) or "",
+        "description": None,
+        "outlet_name": None,
+        "persons": parse_enhanced_list(persons),
+        "organizations": parse_enhanced_list(orgs),
+        "themes": parse_enhanced_list(themes),
+        "locations": parse_locations(locations),
+        "tone": parse_tone(tone_str),
+        "image": sharing_image or None,
+    }
+
+
+def _gal_row_to_article(row):
+    (url, crawled_at, domain, outlet_name, title, image, description) = row
+    dt = format_timestamp(crawled_at)
+    return {
+        "source_type": "gal",
+        "id": url,
+        "timestamp": dt.isoformat() if dt else None,
+        "time_ago": time_ago(dt),
+        "sort_key": int(crawled_at) if crawled_at else 0,
+        "source": domain or outlet_name or "",
+        "url": url or "",
+        "title": title or "",
+        "description": description,
+        "outlet_name": outlet_name,
+        "persons": [],
+        "organizations": [],
+        "themes": [],
+        "locations": [],
+        "tone": None,
+        "image": image or None,
+    }
+
+
+@app.route("/api/articles")
+def api_articles():
+    """Main API endpoint for article list with filtering.
+
+    Query strategy:
+    - If any entity-only filter is set (person/org/theme/location/tone) → GKG only.
+    - Otherwise → UNION GKG + GAL, dedup by URL (prefer GKG), sort by date desc.
+    """
+    con = get_db()
+    if con is None:
+        return jsonify({
+            "error": "Database is busy (backfill in progress). Try again shortly.",
+            "articles": [], "total": 0, "page": 1, "per_page": 50, "pages": 0,
+        }), 503
+
+    page = max(1, request.args.get("page", 1, type=int))
+    per_page = min(100, request.args.get("per_page", 50, type=int))
+    offset = (page - 1) * per_page
+
+    gkg_only = _gkg_entity_filters_set(request)
+    gkg_where, gkg_params = _build_gkg_where(request)
+
+    gkg_cols = (
+        '"GKGRECORDID", "V1DATE", "V2SOURCECOMMONNAME", "V2DOCUMENTIDENTIFIER", '
+        '"V2ENHANCEDTHEMES", "V2ENHANCEDLOCATIONS", "V2ENHANCEDPERSONS", '
+        '"V2ENHANCEDORGANIZATIONS", "V15TONE", "V2EXTRASXML", "V2SHARINGIMAGE"'
+    )
+
+    if gkg_only:
+        # Entity-filtered query: GKG only
+        total = con.execute(f"SELECT count(*) FROM gkg WHERE {gkg_where}", gkg_params).fetchone()[0]
+        rows = con.execute(
+            f'SELECT {gkg_cols} FROM gkg WHERE {gkg_where} '
+            f'ORDER BY "V1DATE" DESC LIMIT ? OFFSET ?',
+            gkg_params + [per_page, offset],
+        ).fetchall()
+        articles = [_gkg_row_to_article(r) for r in rows]
+    else:
+        # Merged GKG + GAL query. Over-fetch from each source so post-dedup
+        # we still have enough for the requested page.
+        fetch_n = (page * per_page) + per_page  # generous cushion
+
+        gkg_rows = con.execute(
+            f'SELECT {gkg_cols} FROM gkg WHERE {gkg_where} '
+            f'ORDER BY "V1DATE" DESC LIMIT ?',
+            gkg_params + [fetch_n],
+        ).fetchall()
+
+        gal_where, gal_params = _build_gal_where(request)
+        try:
+            gal_rows = con.execute(
+                'SELECT url, crawled_at, domain, outlet_name, title, image, description '
+                f'FROM gal WHERE {gal_where} '
+                'ORDER BY crawled_at DESC LIMIT ?',
+                gal_params + [fetch_n],
+            ).fetchall()
+        except Exception:
+            gal_rows = []  # GAL table may not exist yet
+
+        gkg_total = con.execute(f"SELECT count(*) FROM gkg WHERE {gkg_where}", gkg_params).fetchone()[0]
+        try:
+            gal_total = con.execute(f"SELECT count(*) FROM gal WHERE {gal_where}", gal_params).fetchone()[0]
+        except Exception:
+            gal_total = 0
+
+        # Merge + dedup by URL, prefer GKG
+        seen_urls = set()
+        merged = []
+        for r in gkg_rows:
+            art = _gkg_row_to_article(r)
+            if art["url"] and art["url"] not in seen_urls:
+                seen_urls.add(art["url"])
+                merged.append(art)
+        for r in gal_rows:
+            art = _gal_row_to_article(r)
+            if art["url"] and art["url"] not in seen_urls:
+                seen_urls.add(art["url"])
+                merged.append(art)
+
+        merged.sort(key=lambda a: a["sort_key"], reverse=True)
+
+        # Approximate total: sum of the two filtered counts minus estimated
+        # overlap. We can't know exact overlap without a JOIN, so we report
+        # the sum — close enough for the UI's "N articles" stat.
+        total = gkg_total + gal_total
+
+        articles = merged[offset:offset + per_page]
+
+    for a in articles:
+        a.pop("sort_key", None)
 
     con.close()
 
@@ -291,11 +438,16 @@ def api_stats():
     con.close()
 
     latest_dt = format_timestamp(row[2])
+    earliest_dt = format_timestamp(row[1])
 
     return jsonify({
         "total_articles": row[0],
         "earliest": str(row[1]),
         "latest": str(row[2]),
+        "earliest_date": earliest_dt.strftime("%Y-%m-%d") if earliest_dt else None,
+        "latest_date": latest_dt.strftime("%Y-%m-%d") if latest_dt else None,
+        "earliest_display": earliest_dt.strftime("%b %d, %Y") if earliest_dt else None,
+        "latest_display": latest_dt.strftime("%b %d, %Y %H:%M UTC") if latest_dt else None,
         "latest_ago": time_ago(latest_dt),
         "sources": row[3],
     })

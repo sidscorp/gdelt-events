@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>My Pills — GDELT Monitor</title>
+<style>
+  :root { --text: #1a1a1a; --text-secondary: #555; --text-tertiary: #888; --border: #ccc; --bg: #fafaf8; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Georgia', 'Times New Roman', serif; color: var(--text); background: var(--bg); max-width: 700px; margin: 60px auto; padding: 0 1.5rem; }
+  h1 { font-size: 1.4rem; margin-bottom: 0.3rem; }
+  .subtitle { font-size: 0.82rem; color: var(--text-tertiary); margin-bottom: 2rem; }
+  .pill-card { border: 1px solid var(--border); padding: 1rem; margin-bottom: 0.8rem; background: #fff; }
+  .pill-header { display: flex; justify-content: space-between; align-items: baseline; }
+  .pill-name { font-size: 1rem; font-weight: 600; }
+  .pill-status { font-size: 0.72rem; padding: 0.1rem 0.4rem; border-radius: 2px; }
+  .pill-status.completed { background: #edf5ef; color: #2d7a3a; }
+  .pill-status.queued, .pill-status.running { background: #fdf5e6; color: #b87300; }
+  .pill-status.failed { background: #fde8e8; color: #a33; }
+  .pill-meta { font-size: 0.75rem; color: var(--text-tertiary); margin-top: 0.4rem; }
+  .pill-keywords { font-size: 0.72rem; color: var(--text-secondary); margin-top: 0.3rem; }
+  .pill-keywords span { background: #f0f0ee; padding: 0.05rem 0.3rem; margin-right: 0.2rem; }
+  .pill-actions { margin-top: 0.5rem; }
+  .pill-actions form { display: inline; }
+  .btn-delete { font-family: inherit; font-size: 0.72rem; padding: 0.15rem 0.4rem; border: 1px solid #c33; background: none; color: #c33; cursor: pointer; }
+  .btn-delete:hover { background: #c33; color: #fff; }
+  .empty { font-size: 0.88rem; color: var(--text-tertiary); padding: 2rem 0; text-align: center; }
+  .links { margin-top: 2rem; font-size: 0.78rem; }
+  .links a { color: var(--text-secondary); }
+  .progress-bar { height: 4px; background: #eee; margin-top: 0.4rem; }
+  .progress-fill { height: 100%; background: #b87300; transition: width 0.3s; }
+</style>
+</head>
+<body>
+<h1>My Monitoring Pills</h1>
+<p class="subtitle">Custom keyword filters you've created</p>
+
+{% if pills %}
+  {% for p in pills %}
+  <div class="pill-card">
+    <div class="pill-header">
+      <span class="pill-name">{{ p.name }}</span>
+      <span class="pill-status {{ p.job_status or 'queued' }}">{{ p.job_status or 'queued' }}</span>
+    </div>
+    <div class="pill-meta">
+      {{ p.article_count or 0 }} articles
+      {% if p.elapsed_seconds %} · built in {{ "%.0f"|format(p.elapsed_seconds) }}s{% endif %}
+      {% if p.last_built_at %} · last built {{ p.last_built_at[:16] }}{% endif %}
+    </div>
+    {% if p.job_status == 'running' and p.progress_pct is not none %}
+    <div class="progress-bar"><div class="progress-fill" style="width:{{ p.progress_pct }}%"></div></div>
+    {% endif %}
+    <div class="pill-keywords">
+      {% for kw in (p.keywords_json | from_json)[:15] %}
+      <span>{{ kw }}</span>
+      {% endfor %}
+      {% if (p.keywords_json | from_json) | length > 15 %}
+      <span>+{{ (p.keywords_json | from_json) | length - 15 }} more</span>
+      {% endif %}
+    </div>
+    <div class="pill-actions">
+      <form method="post" action="/api/pills/{{ p.id }}" onsubmit="
+        fetch('/api/pills/{{ p.id }}', {method:'DELETE'}).then(()=>location.reload()); return false;">
+        <button type="submit" class="btn-delete">delete</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+{% else %}
+  <div class="empty">
+    No custom pills yet. Create one from the <a href="/">dashboard</a> using the [+ New] button.
+  </div>
+{% endif %}
+
+<div class="links">
+  <a href="/">Dashboard</a>
+  {% if is_admin %} · <a href="/admin/users">Admin</a>{% endif %}
+  · <a href="/logout">Logout</a>
+</div>
+</body>
+</html>

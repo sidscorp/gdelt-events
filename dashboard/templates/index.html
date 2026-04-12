@@ -142,6 +142,84 @@
     cursor: pointer;
     letter-spacing: 0.02em;
   }
+  /* New pill modal */
+  .new-pill-btn {
+    font-family: inherit;
+    font-size: 0.78rem;
+    padding: 0.3rem 0.6rem;
+    border: 1px dashed var(--text-tertiary);
+    background: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    letter-spacing: 0.02em;
+  }
+  .new-pill-btn:hover { border-style: solid; color: var(--text); }
+  .pill-modal {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.3);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 200;
+  }
+  .pill-modal-content {
+    background: #fff; border: 1px solid var(--border);
+    padding: 1.5rem; max-width: 500px; width: 90%;
+    font-size: 0.85rem;
+  }
+  .pill-modal-content h3 { margin: 0 0 1rem; font-size: 1rem; }
+  .pill-modal-content label { display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-bottom: 0.2rem; margin-top: 0.8rem; }
+  .pill-modal-content input, .pill-modal-content textarea {
+    width: 100%; font-family: inherit; font-size: 0.85rem;
+    padding: 0.4rem; border: 1px solid var(--border); background: #fff;
+  }
+  .pill-modal-content textarea { height: 80px; resize: vertical; }
+  .pill-modal-content .hint { font-size: 0.72rem; color: var(--text-tertiary); margin-top: 0.2rem; }
+  .pill-modal-actions { margin-top: 1rem; display: flex; gap: 0.5rem; justify-content: flex-end; }
+  .pill-modal-actions button { font-family: inherit; font-size: 0.82rem; padding: 0.4rem 1rem; border: none; cursor: pointer; }
+  .pill-modal-actions .btn-create { background: var(--text); color: var(--bg); }
+  .pill-modal-actions .btn-cancel { background: none; color: var(--text-tertiary); border: 1px solid var(--border); }
+  .pill-badge-custom { font-size: 0.6rem; background: #e8e0f0; color: #6b4d8a; padding: 0.05rem 0.3rem; margin-left: 0.3rem; vertical-align: middle; }
+  .pill-delete-btn { font-size: 0.6rem; color: var(--text-tertiary); cursor: pointer; margin-left: 0.1rem; border: none; background: none; }
+  .pill-delete-btn:hover { color: #c33; }
+
+  .pill-info-btn {
+    font-family: inherit;
+    font-size: 0.68rem;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    border: 1px solid var(--text-tertiary);
+    background: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    margin-left: -0.2rem;
+    margin-right: 0.3rem;
+    line-height: 1;
+    padding: 0;
+  }
+  .pill-info-btn:hover { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .pill-info-modal {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.3);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 200;
+  }
+  .pill-info-content {
+    background: #fff; border: 1px solid var(--border);
+    padding: 1.5rem; max-width: 600px; width: 90%;
+    max-height: 80vh; overflow-y: auto;
+    font-size: 0.82rem; line-height: 1.5;
+  }
+  .pill-info-content h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+  .pill-info-content .kw-list {
+    display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.5rem 0;
+  }
+  .pill-info-content .kw-tag {
+    font-size: 0.72rem; padding: 0.1rem 0.4rem;
+    background: var(--tag-bg); border: 1px solid var(--tag-border);
+  }
+  .pill-info-close {
+    float: right; background: none; border: none;
+    font-size: 1.2rem; cursor: pointer; color: var(--text-tertiary);
+  }
   .view-pill:hover {
     background: var(--text);
     color: var(--bg);
@@ -557,6 +635,10 @@
       </select>
     </div>
   </div>
+  <div id="navBar" style="font-size:0.75rem; margin-top:0.3rem; display:flex; gap:1rem; color:var(--text-tertiary);">
+    <a href="/about" style="color:var(--text-secondary); text-decoration:none;">About</a>
+    <span id="navAuth"></span>
+  </div>
   <div class="header-stats" id="stats">loading...</div>
 </header>
 
@@ -656,7 +738,16 @@
 
 <div class="active-filters" id="activeFilters"></div>
 
-<div class="results-meta" id="resultsMeta"></div>
+<div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; margin-bottom:0.3rem;">
+  <div class="results-meta" id="resultsMeta"></div>
+  <div style="display:flex; align-items:baseline; gap:0.3rem; font-size:0.75rem;">
+    <span style="color:var(--text-tertiary); text-transform:uppercase; letter-spacing:0.05em; font-size:0.66rem;">Sort</span>
+    <select id="sortSelect" style="font-size:0.74rem; border:1px solid var(--border); background:#fff; padding:0.15rem 0.3rem; cursor:pointer;">
+      <option value="newest">Newest first</option>
+      <option value="oldest">Oldest first</option>
+    </select>
+  </div>
+</div>
 
 <ul class="article-list" id="articleList">
   <li class="loading">Loading articles...</li>
@@ -679,6 +770,7 @@ const state = {
   view: '',
   source: 'gal', // 'gal' | 'gkg' | 'all'
   match_types: ['legal'], // ['legal'] = Strict, ['legal','stripped'] = Broad
+  sort: 'newest', // 'newest' | 'oldest'
 };
 
 // Resolve initial source from URL, then localStorage, then default 'gal'.
@@ -762,6 +854,11 @@ Object.entries(FILTER_INPUT_MAP).forEach(([id, field]) => {
 });
 document.getElementById('languageSelect').addEventListener('change', (e) => {
   state.language = e.target.value;
+  state.page = 1;
+  fetchArticles();
+});
+document.getElementById('sortSelect').addEventListener('change', (e) => {
+  state.sort = e.target.value;
   state.page = 1;
   fetchArticles();
 });
@@ -1033,6 +1130,7 @@ async function fetchArticles() {
   if (state.language) params.set('language', state.language);
   if (state.date_from) params.set('date_from', state.date_from);
   if (state.date_to) params.set('date_to', state.date_to);
+  if (state.sort && state.sort !== 'newest') params.set('sort', state.sort);
   params.set('page', state.page);
   params.set('per_page', 50);
 
@@ -1203,6 +1301,15 @@ async function fetchViews() {
       btn.textContent = v.name;
       btn.title = v.description || '';
       btn.dataset.viewId = v.id;
+
+      const infoBtn = document.createElement('button');
+      infoBtn.className = 'pill-info-btn';
+      infoBtn.textContent = '?';
+      infoBtn.title = 'Show filter criteria';
+      infoBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        showPillInfo(v.id);
+      });
       btn.addEventListener('click', () => {
         if (state.view === v.id) {
           state.view = '';
@@ -1243,13 +1350,141 @@ async function fetchViews() {
         updateUrl();
         fetchArticles();
       });
+      if (v.custom) {
+        const badge = document.createElement('span');
+        badge.className = 'pill-badge-custom';
+        badge.textContent = v.job_status === 'completed' ? 'custom' : v.job_status || 'building...';
+        btn.appendChild(badge);
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'pill-delete-btn';
+        delBtn.textContent = '\u00d7';
+        delBtn.title = 'Delete this pill';
+        delBtn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          if (!confirm(`Delete "${v.name}"? This removes all matched articles.`)) return;
+          await fetch(`/api/pills/${v.pill_id}`, {method: 'DELETE'});
+          fetchViews();
+          if (state.view === v.id) { state.view = ''; fetchArticles(); }
+        });
+        btn.appendChild(delBtn);
+      }
       bar.appendChild(btn);
+      bar.appendChild(infoBtn);
     });
+
+    // Add [+ New] button if authenticated
+    if (data.authenticated) {
+      const newBtn = document.createElement('button');
+      newBtn.className = 'new-pill-btn';
+      newBtn.textContent = '+ New';
+      newBtn.title = 'Create a custom monitoring pill';
+      newBtn.addEventListener('click', showNewPillModal);
+      bar.appendChild(newBtn);
+    }
+
     // After the pills are in the DOM, render the profile toggle for
     // whichever view is currently active (from URL/localStorage restore).
     renderMatchProfile();
+
+    // Render auth nav links based on login state from /api/views response
+    const navAuth = document.getElementById('navAuth');
+    if (data.authenticated && data.user) {
+      navAuth.innerHTML =
+        `<a href="/portal" style="color:var(--text-secondary);text-decoration:none;">My Pills</a>` +
+        (data.user.is_admin ? ` <a href="/admin/users" style="color:var(--text-secondary);text-decoration:none;">Admin</a>` : '') +
+        ` <a href="/logout" style="color:var(--text-tertiary);text-decoration:none;">Logout (${data.user.display_name})</a>`;
+    } else {
+      navAuth.innerHTML =
+        `<a href="/login" style="color:var(--text-secondary);text-decoration:none;">Login</a>`;
+    }
   } catch (err) {
     document.getElementById('viewsBar').innerHTML = '';
+  }
+}
+
+// --- Pill info modal ---
+async function showPillInfo(viewId) {
+  try {
+    const resp = await fetch(`/api/pill_info/${viewId}`);
+    const info = await resp.json();
+    let html = `<button class="pill-info-close" onclick="this.closest('.pill-info-modal').remove()">&times;</button>`;
+    html += `<h3>${info.name || viewId}</h3>`;
+    html += `<p style="color:var(--text-secondary);font-size:0.78rem;">${info.description || ''}</p>`;
+    if (info.keywords && info.keywords.length) {
+      html += `<strong>Keywords (${info.keywords.length}):</strong><div class="kw-list">`;
+      html += info.keywords.map(k => `<span class="kw-tag">${k}</span>`).join('');
+      html += `</div>`;
+    }
+    if (info.gkg_theme_prefixes && info.gkg_theme_prefixes.length) {
+      html += `<strong>GKG Theme Prefixes:</strong><div class="kw-list">`;
+      html += info.gkg_theme_prefixes.map(t => `<span class="kw-tag">${t}</span>`).join('');
+      html += `</div>`;
+    }
+    if (info.sample_companies) {
+      html += `<strong>Top Companies (${info.total_companies} total):</strong><div class="kw-list">`;
+      html += info.sample_companies.map(c => `<span class="kw-tag">${c}</span>`).join('');
+      html += `</div>`;
+    }
+    if (info.scan_description) {
+      html += `<p style="font-size:0.72rem;color:var(--text-tertiary);margin-top:0.5rem;">Scans article title + description</p>`;
+    }
+    const modal = document.createElement('div');
+    modal.className = 'pill-info-modal';
+    modal.innerHTML = `<div class="pill-info-content">${html}</div>`;
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+    document.body.appendChild(modal);
+  } catch (err) {
+    console.error('pill info error:', err);
+  }
+}
+
+// --- New pill modal ---
+function showNewPillModal() {
+  const modal = document.createElement('div');
+  modal.className = 'pill-modal';
+  modal.innerHTML = `
+    <div class="pill-modal-content">
+      <h3>Create Custom Pill</h3>
+      <label>Pill name</label>
+      <input type="text" id="newPillName" placeholder="e.g. Semiconductor Supply" maxlength="100">
+      <label>Keywords</label>
+      <textarea id="newPillKeywords" placeholder="chip, semiconductor, TSMC, fab, wafer, silicon"></textarea>
+      <div class="hint">Comma-separated. Min 2, max 200. Articles matching any keyword will be shown.</div>
+      <label style="display:flex;align-items:center;gap:0.4rem;margin-top:0.6rem;text-transform:none;letter-spacing:0;">
+        <input type="checkbox" id="newPillScanDesc" checked> Also scan article descriptions (recommended)
+      </label>
+      <div class="pill-modal-actions">
+        <button class="btn-cancel" onclick="this.closest('.pill-modal').remove()">Cancel</button>
+        <button class="btn-create" onclick="createPill()">Create</button>
+      </div>
+      <div id="newPillError" style="color:#a33;font-size:0.78rem;margin-top:0.5rem;"></div>
+    </div>
+  `;
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+}
+
+async function createPill() {
+  const name = document.getElementById('newPillName').value.trim();
+  const keywords = document.getElementById('newPillKeywords').value.trim();
+  const scanDesc = document.getElementById('newPillScanDesc').checked;
+  const errEl = document.getElementById('newPillError');
+  if (!name) { errEl.textContent = 'Name required.'; return; }
+  if (!keywords) { errEl.textContent = 'Keywords required.'; return; }
+
+  try {
+    const resp = await fetch('/api/pills', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ name, keywords, scan_description: scanDesc }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { errEl.textContent = data.error || 'Failed'; return; }
+    document.querySelector('.pill-modal').remove();
+    fetchViews();
+  } catch (err) {
+    errEl.textContent = 'Network error: ' + err.message;
   }
 }
 

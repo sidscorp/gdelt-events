@@ -1,5 +1,6 @@
 """GDELT News Dashboard — Tufte-inspired breaking news viewer."""
 
+import json
 import logging
 import logging.handlers
 import re
@@ -9,15 +10,28 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import duckdb
-from flask import Flask, render_template, request, jsonify, g
+from flask import (
+    Flask, render_template, request, jsonify, g,
+    redirect, url_for, flash,
+)
+from flask_login import login_user, logout_user, login_required, current_user
 
 from views import VIEWS, find_view
+from models import (
+    init_user_db, create_user, authenticate, email_exists,
+    get_user_pills, create_pill, get_pill, get_pill_job_status,
+    delete_pill, list_users, approve_user, reject_user,
+)
+from auth import init_auth, User
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "gdelt.duckdb"
 LOG_DIR = Path(__file__).resolve().parent.parent / "data" / "logs"
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 app = Flask(__name__)
+app.jinja_env.filters["from_json"] = json.loads
+init_user_db()
+init_auth(app)
 
 # Dedicated request logger — captures per-request timing so backend slowness
 # is visible without guessing. Rotating file handler caps disk usage.
@@ -196,7 +210,7 @@ def format_timestamp(ts):
 
 
 def time_ago(dt):
-    """Human-readable relative time. GDELT timestamps are UTC."""
+    """Human-readable relative time with minute precision."""
     if not dt:
         return ""
     delta = datetime.utcnow() - dt
@@ -207,10 +221,16 @@ def time_ago(dt):
     if minutes < 60:
         return f"{minutes}m ago"
     hours = minutes // 60
+    mins_remaining = minutes % 60
     if hours < 24:
-        return f"{hours}h ago"
+        if mins_remaining == 0:
+            return f"{hours}h ago"
+        return f"{hours}h {mins_remaining}m ago"
     days = hours // 24
-    return f"{days}d ago"
+    hrs_remaining = hours % 24
+    if hrs_remaining == 0:
+        return f"{days}d ago"
+    return f"{days}d {hrs_remaining}h ago"
 
 
 @app.route("/")
@@ -220,8 +240,75 @@ def index():
 
 @app.route("/api/views")
 def api_views():
-    """Return the preset view registry."""
-    return jsonify({"views": VIEWS})
+    """Return shared views + logged-in user's custom pills."""
+    views = list(VIEWS)
+    if current_user.is_authenticated:
+        for pill in get_user_pills(current_user.id):
+            job_status = pill.get("job_status", "queued")
+            views.append({
+                "id": f"custom-{pill['id']}",
+                "name": pill["name"],
+                "description": f"Custom pill: {pill['name']}",
+                "kind": "tag_match",
+                "tag_category": f"custom_{pill['id']}",
+                "default_hours": 24,
+                "custom": True,
+                "pill_id": pill["id"],
+                "job_status": job_status,
+                "article_count": pill.get("article_count", 0),
+            })
+    return jsonify({
+        "views": views,
+        "authenticated": current_user.is_authenticated,
+        "user": {
+            "display_name": current_user.display_name,
+            "is_admin": current_user.is_admin,
+        } if current_user.is_authenticated else None,
+    })
+
+
+@app.route("/api/pill_info/<view_id>")
+def api_pill_info(view_id):
+    """Return what a pill is filtering on — keywords, themes, company
+    patterns. Transparency endpoint so users can see the criteria."""
+    view = find_view(view_id)
+    if not view:
+        return jsonify({"error": "Unknown view"}), 404
+
+    info = {"id": view_id, "name": view["name"], "kind": view["kind"]}
+
+    if view["kind"] == "fda_match":
+        info["description"] = "Matches articles mentioning FDA-registered medical device companies by name."
+        info["source"] = "fda_companies table (from FDA device registration database)"
+        con = get_db()
+        if con:
+            try:
+                sample = con.execute(
+                    "SELECT firm_name FROM fda_companies ORDER BY product_count DESC LIMIT 20"
+                ).fetchall()
+                info["sample_companies"] = [r[0] for r in sample]
+                info["total_companies"] = con.execute(
+                    "SELECT count(*) FROM fda_companies"
+                ).fetchone()[0]
+            finally:
+                con.close()
+
+    elif view["kind"] == "tag_match":
+        cat = view.get("tag_category", "")
+        try:
+            import importlib, sys
+            parent = str(Path(__file__).resolve().parent.parent)
+            if parent not in sys.path:
+                sys.path.insert(0, parent)
+            tagger = importlib.import_module("pipeline.tagger")
+            cat_conf = tagger.CATEGORIES.get(cat, {})
+            info["keywords"] = sorted(cat_conf.get("keywords", []))
+            info["gkg_theme_prefixes"] = cat_conf.get("gkg_theme_prefixes", [])
+            info["scan_description"] = cat_conf.get("scan_description", False)
+        except Exception:
+            info["keywords"] = []
+
+    return jsonify(info)
 
 
 def _parse_date_filters(request):
@@ -251,11 +338,28 @@ def _hours_cutoff(hours):
 
 
 def _resolve_view(request) -> dict | None:
-    """Look up the requested view by id, or None."""
+    """Look up the requested view by id — checks static VIEWS first,
+    then custom pills for the logged-in user."""
     view_id = request.args.get("view", "").strip()
     if not view_id:
         return None
-    return find_view(view_id)
+    static = find_view(view_id)
+    if static:
+        return static
+    # Check custom pills: view_id is "custom-<pill_id>"
+    if view_id.startswith("custom-") and current_user.is_authenticated:
+        pill_id = view_id[len("custom-"):]
+        pill = get_pill(pill_id)
+        if pill and pill["user_id"] == current_user.id:
+            return {
+                "id": view_id,
+                "name": pill["name"],
+                "kind": "tag_match",
+                "tag_category": f"custom_{pill_id}",
+                "default_hours": 24,
+                "custom": True,
+            }
+    return None
 
 
 def _build_gkg_where(request):
@@ -513,6 +617,12 @@ def _resolve_source(request) -> str:
 _VALID_MATCH_TYPES = frozenset({"legal", "stripped", "contextual"})
 
 
+def _sort_dir(request) -> str:
+    """'DESC' or 'ASC' based on the sort query param."""
+    s = (request.args.get("sort") or "").strip().lower()
+    return "ASC" if s == "oldest" else "DESC"
+
+
 def _resolve_match_types(request) -> list[str]:
     """Parse match_types param. Default ['legal']. Accepts 'all'."""
     raw = (request.args.get("match_types") or "").strip().lower()
@@ -608,6 +718,7 @@ def _fetch_gkg_view(con, view, request, per_page, page) -> tuple[int, list, dict
     if dt is not None:
         cache_conds.append("crawled_at <= ?"); cache_params.append(dt)
     cache_where = " AND ".join(["source_type = 'gkg'"] + cache_conds)
+    sd = _sort_dir(request)
 
     total = _phase("gkg_count", lambda: con.execute(
         f"SELECT count(*) FROM fda_match_cache WHERE {cache_where}",
@@ -625,14 +736,14 @@ def _fetch_gkg_view(con, view, request, per_page, page) -> tuple[int, list, dict
             SELECT article_id, crawled_at, matched_name, medical_specialties
             FROM fda_match_cache
             WHERE {cache_where}
-            ORDER BY crawled_at DESC
+            ORDER BY crawled_at {sd}
             LIMIT ?
         )
         SELECT {GKG_COLS}, top_ids.matched_name, top_ids.medical_specialties
         FROM top_ids
         INNER JOIN gkg ON gkg."GKGRECORDID" = top_ids.article_id
         WHERE 1=1{join_where_suffix}
-        ORDER BY top_ids.crawled_at DESC
+        ORDER BY top_ids.crawled_at {sd}
         LIMIT ?
         """,
         cache_params + [cache_limit] + extra_params + [fetch_n],
@@ -650,6 +761,7 @@ def _fetch_gkg_view(con, view, request, per_page, page) -> tuple[int, list, dict
 
 def _fetch_gal_view(con, view, request, per_page, page) -> tuple[int, list, dict]:
     """FDA view → GAL cache-as-driver path with idx_gal_url point-lookup."""
+    sd = _sort_dir(request)
     hours, df, dt = _parse_date_filters(request)
     match_types = _resolve_match_types(request)
     mt_placeholders = ",".join(["?"] * len(match_types))
@@ -679,7 +791,7 @@ def _fetch_gal_view(con, view, request, per_page, page) -> tuple[int, list, dict
         SELECT article_id, crawled_at, matched_name, medical_specialties
         FROM fda_match_cache
         WHERE {cache_where}
-        ORDER BY crawled_at DESC
+        ORDER BY crawled_at {sd}
         LIMIT ?
         """,
         cache_params + [cache_limit],
@@ -750,7 +862,7 @@ def _fetch_gkg_plain(con, request, per_page, page) -> tuple[int, list]:
     fetch_n = (page * per_page) + per_page
     rows = _phase("gkg_query", lambda: con.execute(
         f'SELECT {GKG_COLS} FROM gkg WHERE {gkg_where} '
-        f'ORDER BY "V1DATE" DESC LIMIT ?',
+        f'ORDER BY "V1DATE" {_sort_dir(request)} LIMIT ?',
         gkg_params + [fetch_n],
     ).fetchall())
     total = _phase("gkg_total", lambda: con.execute(
@@ -762,15 +874,148 @@ def _fetch_gkg_plain(con, request, per_page, page) -> tuple[int, list]:
 def _fetch_gal_plain(con, request, per_page, page) -> tuple[int, list]:
     """Non-view GAL path with filter support."""
     gal_where, gal_params = _build_gal_where(request)
+    sd = _sort_dir(request)
     fetch_n = (page * per_page) + per_page
     rows = _phase("gal_query", lambda: con.execute(
         f"SELECT {GAL_COLS} FROM gal WHERE {gal_where} "
-        f"ORDER BY crawled_at DESC LIMIT ?",
+        f"ORDER BY crawled_at {sd} LIMIT ?",
         gal_params + [fetch_n],
     ).fetchall())
     total = _phase("gal_total", lambda: con.execute(
         f"SELECT count(*) FROM gal WHERE {gal_where}", gal_params,
     ).fetchone()[0])
+    return total, rows
+
+
+def _fetch_gkg_tag_view(con, view, request, per_page, page) -> tuple[int, list]:
+    """Tag-based view → GKG path. Cache-as-driver from article_tags."""
+    sd = _sort_dir(request)
+    category = view["tag_category"]
+    hours, df, dt = _parse_date_filters(request)
+    cache_conds: list[str] = [
+        "category = ?", "source_type = 'gkg'"
+    ]
+    cache_params: list = [category]
+    if hours:
+        cache_conds.append("crawled_at >= ?"); cache_params.append(_hours_cutoff(hours))
+    if df is not None:
+        cache_conds.append("crawled_at >= ?"); cache_params.append(df)
+    if dt is not None:
+        cache_conds.append("crawled_at <= ?"); cache_params.append(dt)
+    cache_where = " AND ".join(cache_conds)
+
+    total = _phase("gkg_count", lambda: con.execute(
+        f"SELECT count(*) FROM article_tags WHERE {cache_where}",
+        cache_params,
+    ).fetchone()[0])
+
+    fetch_n = (page * per_page) + per_page
+    raw = _phase("gkg_join", lambda: con.execute(
+        f"""
+        WITH top_ids AS (
+            SELECT article_id, crawled_at
+            FROM article_tags
+            WHERE {cache_where}
+            ORDER BY crawled_at {sd}
+            LIMIT ?
+        )
+        SELECT {GKG_COLS}
+        FROM top_ids
+        INNER JOIN gkg ON gkg."GKGRECORDID" = top_ids.article_id
+        ORDER BY top_ids.crawled_at {sd}
+        """,
+        cache_params + [fetch_n],
+    ).fetchall())
+    return total, raw
+
+
+def _fetch_gal_tag_view(con, view, request, per_page, page) -> tuple[int, list]:
+    """Tag-based view → GAL path. Two-step point-lookup."""
+    sd = _sort_dir(request)
+    category = view["tag_category"]
+    hours, df, dt = _parse_date_filters(request)
+    cache_conds: list[str] = [
+        "category = ?", "source_type = 'gal'"
+    ]
+    cache_params: list = [category]
+    if hours:
+        cache_conds.append("crawled_at >= ?"); cache_params.append(_hours_cutoff(hours))
+    if df is not None:
+        cache_conds.append("crawled_at >= ?"); cache_params.append(df)
+    if dt is not None:
+        cache_conds.append("crawled_at <= ?"); cache_params.append(dt)
+    cache_where = " AND ".join(cache_conds)
+
+    total = _phase("gal_count", lambda: con.execute(
+        f"SELECT count(*) FROM article_tags WHERE {cache_where}",
+        cache_params,
+    ).fetchone()[0])
+
+    extra_where, _ = _extra_gal_filters(request)
+    fetch_n = (page * per_page) + per_page
+    cache_limit = min(fetch_n * 5, 500) if extra_where else fetch_n
+
+    top_gal = _phase("gal_cache", lambda: con.execute(
+        f"""
+        SELECT article_id, crawled_at
+        FROM article_tags
+        WHERE {cache_where}
+        ORDER BY crawled_at {sd}
+        LIMIT ?
+        """,
+        cache_params + [cache_limit],
+    ).fetchall())
+
+    if not top_gal:
+        return total, []
+
+    urls = [r[0] for r in top_gal]
+    placeholders = ",".join(["?"] * len(urls))
+    lookup = _phase("gal_join", lambda: con.execute(
+        f"SELECT {GAL_COLS} FROM gal WHERE url IN ({placeholders})",
+        urls,
+    ).fetchall())
+
+    # Preserve cache ordering
+    by_url = {row[0]: row for row in lookup}
+
+    def _matches(row):
+        if not extra_where:
+            return True
+        _url, _ts, domain, outlet, title, _img, description, language = row
+        args = request.args
+        q = (args.get("q") or "").strip().lower()
+        if q and q not in " ".join(str(x or "") for x in (title, description, domain, outlet)).lower():
+            return False
+        t = (args.get("title") or "").strip().lower()
+        if t and t not in (title or "").lower():
+            return False
+        d = (args.get("description") or "").strip().lower()
+        if d and d not in (description or "").lower():
+            return False
+        dom = (args.get("domain") or "").strip().lower()
+        if dom and dom not in (domain or "").lower():
+            return False
+        out = (args.get("outlet") or "").strip().lower()
+        if out and out not in (outlet or "").lower():
+            return False
+        lang = (args.get("language") or "").strip()
+        if lang and lang != language:
+            return False
+        return True
+
+    rows = []
+    for url in urls:
+        row = by_url.get(url)
+        if row is None:
+            continue
+        if not _matches(row):
+            continue
+        rows.append(tuple(row))
+        if len(rows) >= fetch_n:
+            break
+    if extra_where:
+        total = len(rows)
     return total, rows
 
 
@@ -781,7 +1026,9 @@ def _api_articles_inner(con):
     offset = (page - 1) * per_page
 
     view = _resolve_view(request)
-    is_fda = view and view.get("kind") == "fda_match"
+    view_kind = (view or {}).get("kind")
+    is_fda = view_kind == "fda_match"
+    is_tag = view_kind == "tag_match"
     view_match_info: dict[str, tuple[str, str]] = {}
 
     gkg_rows: list = []
@@ -793,6 +1040,8 @@ def _api_articles_inner(con):
         if is_fda:
             gkg_total, gkg_rows, mi = _fetch_gkg_view(con, view, request, per_page, page)
             view_match_info.update(mi)
+        elif is_tag:
+            gkg_total, gkg_rows = _fetch_gkg_tag_view(con, view, request, per_page, page)
         else:
             gkg_total, gkg_rows = _fetch_gkg_plain(con, request, per_page, page)
 
@@ -801,6 +1050,8 @@ def _api_articles_inner(con):
             if is_fda:
                 gal_total, gal_rows, mi = _fetch_gal_view(con, view, request, per_page, page)
                 view_match_info.update(mi)
+            elif is_tag:
+                gal_total, gal_rows = _fetch_gal_tag_view(con, view, request, per_page, page)
             else:
                 gal_total, gal_rows = _fetch_gal_plain(con, request, per_page, page)
         except Exception:
@@ -826,7 +1077,7 @@ def _api_articles_inner(con):
                 if mi:
                     art["matched_name"], art["matched_specialty"] = mi
                 merged.append(art)
-        merged.sort(key=lambda a: a["sort_key"], reverse=True)
+        merged.sort(key=lambda a: a["sort_key"], reverse=(_sort_dir(request) == "DESC"))
         total = gkg_total + gal_total
         articles = merged[offset:offset + per_page]
     elif source == "gkg":
@@ -1031,6 +1282,181 @@ def api_top_entities():
         "locations": top_n(locations),
         "sources": top_n(sources),
     })
+
+
+# ---------------------------------------------------------------------------
+# Auth routes
+# ---------------------------------------------------------------------------
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        email = request.form.get("email", "")
+        password = request.form.get("password", "")
+        user_data = authenticate(email, password)
+        if not user_data:
+            flash("Invalid email or password.", "error")
+            return render_template("login.html")
+        if not user_data["is_approved"]:
+            return redirect(url_for("pending"))
+        login_user(User(user_data), remember=True)
+        return redirect(url_for("index"))
+    return render_template("login.html")
+
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        email = request.form.get("email", "").strip()
+        display_name = request.form.get("display_name", "").strip()
+        password = request.form.get("password", "")
+        if not email or not display_name or len(password) < 8:
+            flash("All fields required. Password must be at least 8 characters.", "error")
+            return render_template("register.html")
+        if email_exists(email):
+            flash("An account with this email already exists.", "error")
+            return render_template("register.html")
+        uid = create_user(email, display_name, password)
+        user_data = authenticate(email, password)
+        if user_data and user_data["is_approved"]:
+            login_user(User(user_data), remember=True)
+            return redirect(url_for("index"))
+        return redirect(url_for("pending"))
+    return render_template("register.html")
+
+
+@app.route("/pending")
+def pending():
+    return render_template("pending.html")
+
+
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for("index"))
+
+
+@app.route("/about")
+def about():
+    return render_template("about.html")
+
+
+@app.route("/portal")
+@login_required
+def portal():
+    pills = get_user_pills(current_user.id)
+    return render_template("portal.html", pills=pills, is_admin=current_user.is_admin)
+
+
+# ---------------------------------------------------------------------------
+# Admin routes
+# ---------------------------------------------------------------------------
+
+@app.route("/admin/users")
+@login_required
+def admin_users():
+    if not current_user.is_admin:
+        return redirect(url_for("index"))
+    users = list_users()
+    return render_template("admin.html", users=users)
+
+
+@app.route("/admin/users/<int:user_id>/approve", methods=["POST"])
+@login_required
+def admin_approve(user_id):
+    if not current_user.is_admin:
+        return jsonify({"error": "forbidden"}), 403
+    approve_user(user_id)
+    return redirect(url_for("admin_users"))
+
+
+@app.route("/admin/users/<int:user_id>/reject", methods=["POST"])
+@login_required
+def admin_reject(user_id):
+    if not current_user.is_admin:
+        return jsonify({"error": "forbidden"}), 403
+    reject_user(user_id)
+    return redirect(url_for("admin_users"))
+
+
+# ---------------------------------------------------------------------------
+# Custom pill API
+# ---------------------------------------------------------------------------
+
+@app.route("/api/pills", methods=["GET"])
+@login_required
+def api_pills_list():
+    pills = get_user_pills(current_user.id)
+    return jsonify({"pills": pills})
+
+
+@app.route("/api/pills", methods=["POST"])
+@login_required
+def api_pills_create():
+    data = request.get_json(silent=True) or {}
+    name = (data.get("name") or "").strip()
+    keywords_raw = data.get("keywords", "")
+    scan_desc = data.get("scan_description", True)
+
+    if isinstance(keywords_raw, str):
+        keywords = [k.strip().lower() for k in keywords_raw.split(",") if k.strip()]
+    elif isinstance(keywords_raw, list):
+        keywords = [str(k).strip().lower() for k in keywords_raw if str(k).strip()]
+    else:
+        keywords = []
+
+    if not name or len(name) > 100:
+        return jsonify({"error": "Name required (max 100 chars)"}), 400
+    if len(keywords) < 2:
+        return jsonify({"error": "At least 2 keywords required"}), 400
+    if len(keywords) > 200:
+        return jsonify({"error": "Max 200 keywords"}), 400
+
+    pill_id = create_pill(current_user.id, name, keywords, scan_desc)
+    return jsonify({"pill_id": pill_id, "status": "queued"}), 201
+
+
+@app.route("/api/pills/<pill_id>/status")
+@login_required
+def api_pill_status(pill_id):
+    pill = get_pill(pill_id)
+    if not pill or pill["user_id"] != current_user.id:
+        return jsonify({"error": "not found"}), 404
+    job = get_pill_job_status(pill_id)
+    return jsonify({
+        "id": pill_id,
+        "name": pill["name"],
+        "status": job["status"] if job else "unknown",
+        "progress_pct": job["progress_pct"] if job else 0,
+        "rows_scanned": job["rows_scanned"] if job else 0,
+        "rows_matched": job["rows_matched"] if job else 0,
+        "elapsed_seconds": job["elapsed_seconds"] if job else 0,
+        "article_count": pill["article_count"],
+    })
+
+
+@app.route("/api/pills/<pill_id>", methods=["DELETE"])
+@login_required
+def api_pills_delete(pill_id):
+    pill = get_pill(pill_id)
+    if not pill:
+        return jsonify({"error": "not found"}), 404
+    if pill["user_id"] != current_user.id and not current_user.is_admin:
+        return jsonify({"error": "forbidden"}), 403
+    # Delete article_tags for this custom pill from DuckDB
+    try:
+        con = get_db()
+        if con:
+            con.execute(
+                "DELETE FROM article_tags WHERE category = ?",
+                [f"custom_{pill_id}"],
+            )
+            con.close()
+    except Exception:
+        pass
+    delete_pill(pill_id)
+    return jsonify({"deleted": pill_id})
 
 
 if __name__ == "__main__":

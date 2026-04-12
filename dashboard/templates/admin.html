@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Admin — GDELT Monitor</title>
+<style>
+  :root { --text: #1a1a1a; --text-secondary: #555; --text-tertiary: #888; --border: #ccc; --bg: #fafaf8; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Georgia', 'Times New Roman', serif; color: var(--text); background: var(--bg); max-width: 700px; margin: 60px auto; padding: 0 1.5rem; }
+  h1 { font-size: 1.4rem; margin-bottom: 1.5rem; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  th { text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); padding: 0.4rem 0.5rem; border-bottom: 2px solid var(--text); }
+  td { padding: 0.5rem; border-bottom: 1px solid #eee; }
+  .status-pending { color: #b87300; }
+  .status-approved { color: #2d7a3a; }
+  form { display: inline; }
+  button { font-family: inherit; font-size: 0.75rem; padding: 0.2rem 0.5rem; border: 1px solid var(--border); background: #fff; cursor: pointer; }
+  button:hover { background: var(--text); color: var(--bg); }
+  .btn-reject { color: #a33; border-color: #a33; }
+  .links { margin-top: 2rem; font-size: 0.78rem; }
+  .links a { color: var(--text-secondary); }
+</style>
+</head>
+<body>
+<h1>User Management</h1>
+
+<table>
+  <thead>
+    <tr>
+      <th>Email</th>
+      <th>Name</th>
+      <th>Status</th>
+      <th>Pills</th>
+      <th>Registered</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for u in users %}
+    <tr>
+      <td>{{ u.email }}</td>
+      <td>{{ u.display_name }}</td>
+      <td class="{{ 'status-approved' if u.is_approved else 'status-pending' }}">
+        {{ 'Approved' if u.is_approved else 'Pending' }}
+        {{ '(admin)' if u.is_admin else '' }}
+      </td>
+      <td>{{ u.pill_count }}</td>
+      <td>{{ u.created_at[:10] if u.created_at else '' }}</td>
+      <td>
+        {% if not u.is_approved %}
+        <form method="post" action="/admin/users/{{ u.id }}/approve">
+          <button type="submit">Approve</button>
+        </form>
+        {% endif %}
+        {% if not u.is_admin %}
+        <form method="post" action="/admin/users/{{ u.id }}/reject"
+              onsubmit="return confirm('Delete this user?')">
+          <button type="submit" class="btn-reject">Remove</button>
+        </form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<div class="links">
+  <a href="/">Dashboard</a> · <a href="/portal">Portal</a>
+</div>
+</body>
+</html>

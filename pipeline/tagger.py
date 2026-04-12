@@ -349,10 +349,12 @@ def tag_new_rows(db_path=None) -> dict:
         # from the watermark min — otherwise their zero watermark forces
         # a full 6.6M row re-scan on every tick.
         gkg_cats = [c for c, conf in all_cats.items() if conf.get("gkg_theme_prefixes")]
-        gkg_since = min(
-            (_get_last_ts(con, cat, "gkg") for cat in gkg_cats),
-            default=0,
-        ) if gkg_cats else -1  # -1 skips GKG scan entirely
+        gkg_watermarks = [
+            _get_last_ts(con, cat, "gkg")
+            for cat in gkg_cats
+            if _get_last_ts(con, cat, "gkg") > 0
+        ]
+        gkg_since = min(gkg_watermarks) if gkg_watermarks else -1
         if gkg_since >= 0:
             t0 = time.time()
             scanned, matched, max_ts = _tag_gkg_stream(con, prefix_map, since_ts=gkg_since)
@@ -367,12 +369,18 @@ def tag_new_rows(db_path=None) -> dict:
             summary["gkg_matched"] = 0
             summary["gkg_elapsed_s"] = 0.0
 
-        # GAL: all categories have keywords, so use all watermarks.
+        # GAL: use the oldest watermark, but ONLY from categories that
+        # already have a watermark. Custom pills with no tag_state entry
+        # (backfill pending/in-progress) are handled by the pill_worker,
+        # not the incremental tagger — including them would force a full
+        # 7.6M row re-scan every 15-min tick.
         gal_cats = [c for c, conf in all_cats.items() if conf.get("keywords")]
-        gal_since = min(
-            (_get_last_ts(con, cat, "gal") for cat in gal_cats),
-            default=0,
-        ) if gal_cats else -1
+        gal_watermarks = [
+            _get_last_ts(con, cat, "gal")
+            for cat in gal_cats
+            if _get_last_ts(con, cat, "gal") > 0
+        ]
+        gal_since = min(gal_watermarks) if gal_watermarks else -1
         t0 = time.time()
         scanned, matched, max_ts = _tag_gal_stream(con, automaton, since_ts=gal_since)
         summary["gal_scanned"] = scanned

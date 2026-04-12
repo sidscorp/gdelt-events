@@ -1342,6 +1342,43 @@ def about():
     return render_template("about.html")
 
 
+@app.route("/account", methods=["GET", "POST"])
+@login_required
+def account():
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "change_password":
+            current = request.form.get("current_password", "")
+            new_pw = request.form.get("new_password", "")
+            if len(new_pw) < 8:
+                flash("New password must be at least 8 characters.", "error")
+            else:
+                from models import get_user_db
+                from werkzeug.security import check_password_hash, generate_password_hash
+                db = get_user_db()
+                row = db.execute("SELECT password_hash FROM users WHERE id=?",
+                                 (current_user.id,)).fetchone()
+                if not row or not check_password_hash(row["password_hash"], current):
+                    flash("Current password is incorrect.", "error")
+                else:
+                    db.execute("UPDATE users SET password_hash=? WHERE id=?",
+                               (generate_password_hash(new_pw), current_user.id))
+                    db.commit()
+                    flash("Password updated.", "success")
+                db.close()
+        elif action == "change_name":
+            new_name = request.form.get("display_name", "").strip()
+            if new_name:
+                from models import get_user_db
+                db = get_user_db()
+                db.execute("UPDATE users SET display_name=? WHERE id=?",
+                           (new_name, current_user.id))
+                db.commit()
+                db.close()
+                flash("Display name updated.", "success")
+    return render_template("account.html")
+
+
 @app.route("/portal")
 @login_required
 def portal():

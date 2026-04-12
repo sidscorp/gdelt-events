@@ -637,7 +637,7 @@
   </div>
   <div id="navBar" style="font-size:0.75rem; margin-top:0.3rem; display:flex; gap:1rem; color:var(--text-tertiary);">
     <a href="/about" style="color:var(--text-secondary); text-decoration:none;">About</a>
-    <span id="navAuth"></span>
+    <span id="navAuth"><a href="/login" style="color:var(--text-secondary);text-decoration:none;">Login</a></span>
   </div>
   <div class="header-stats" id="stats">loading...</div>
 </header>
@@ -1392,11 +1392,13 @@ async function fetchViews() {
     if (data.authenticated && data.user) {
       navAuth.innerHTML =
         `<a href="/portal" style="color:var(--text-secondary);text-decoration:none;">My Pills</a>` +
+        ` <a href="/account" style="color:var(--text-secondary);text-decoration:none;">Account</a>` +
         (data.user.is_admin ? ` <a href="/admin/users" style="color:var(--text-secondary);text-decoration:none;">Admin</a>` : '') +
         ` <a href="/logout" style="color:var(--text-tertiary);text-decoration:none;">Logout (${data.user.display_name})</a>`;
     } else {
       navAuth.innerHTML =
-        `<a href="/login" style="color:var(--text-secondary);text-decoration:none;">Login</a>`;
+        `<a href="/login" style="color:var(--text-secondary);text-decoration:none;">Login</a>` +
+        ` <a href="/register" style="color:var(--text-secondary);text-decoration:none;">Register</a>`;
     }
   } catch (err) {
     document.getElementById('viewsBar').innerHTML = '';

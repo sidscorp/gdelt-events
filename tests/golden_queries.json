@@ -1,0 +1,145 @@
+{
+  "description": "Curated query corpus for dashboard regression testing. Each entry is a set of query params sent to /api/articles, plus assertions. Add a new case by appending to the queries array — no code change required.",
+  "queries": [
+    {
+      "id": "gal_1h_baseline",
+      "params": {"source": "gal", "hours": 1},
+      "min_results": 100,
+      "max_latency_s": 2.5,
+      "description": "GAL 1h baseline — must have hundreds of recent articles."
+    },
+    {
+      "id": "gal_search_apple",
+      "params": {"source": "gal", "hours": 24, "q": "apple"},
+      "min_results": 1,
+      "max_latency_s": 2.5
+    },
+    {
+      "id": "gal_title_recall",
+      "params": {"source": "gal", "hours": 168, "title": "recall"},
+      "min_results": 10,
+      "max_latency_s": 8.0,
+      "description": "Recall keyword in titles — key signal for FDA supply chain use case. Slow because ILIKE full-scans GAL (no text index yet)."
+    },
+    {
+      "id": "gal_language_english",
+      "params": {"source": "gal", "hours": 1, "language": "en"},
+      "min_results": 50,
+      "max_latency_s": 2.5
+    },
+    {
+      "id": "gal_language_spanish",
+      "params": {"source": "gal", "hours": 6, "language": "es"},
+      "min_results": 10,
+      "max_latency_s": 2.5
+    },
+    {
+      "id": "gal_domain_reuters",
+      "params": {"source": "gal", "hours": 24, "domain": "reuters"},
+      "min_results": 1,
+      "max_latency_s": 2.5
+    },
+    {
+      "id": "gal_supply_chain_3d",
+      "params": {"source": "gal", "hours": 72, "q": "supply chain"},
+      "min_results": 1,
+      "max_latency_s": 15.0,
+      "description": "Supply chain sanity floor. ILIKE on 4 GAL text columns is a full scan; larger time windows hit the per-connection memory limit and 503. Needs an FTS index or a materialized candidate table to scale."
+    },
+    {
+      "id": "gal_factory_fire_week",
+      "params": {"source": "gal", "hours": 168, "q": "factory fire"},
+      "min_results": 1,
+      "max_latency_s": 20.0,
+      "description": "Narrower text-search regression. Tracks real current performance — failures here mean text-search has gotten worse since the split."
+    },
+    {
+      "id": "gkg_1h_baseline",
+      "params": {"source": "gkg", "hours": 1},
+      "min_results": 100,
+      "max_latency_s": 2.5
+    },
+    {
+      "id": "gkg_person_biden",
+      "params": {"source": "gkg", "hours": 24, "person": "Biden"},
+      "min_results": 1,
+      "max_latency_s": 2.5
+    },
+    {
+      "id": "gkg_org_microsoft",
+      "params": {"source": "gkg", "hours": 24, "org": "Microsoft"},
+      "min_results": 1,
+      "max_latency_s": 2.5
+    },
+    {
+      "id": "all_1h_baseline",
+      "params": {"source": "all", "hours": 1},
+      "min_results": 200,
+      "max_latency_s": 3.0,
+      "description": "All sources merged — should exceed GAL alone because GKG contributes."
+    },
+    {
+      "id": "fda_view_gal",
+      "params": {"source": "gal", "view": "fda-medical-devices", "hours": 72},
+      "min_results": 5,
+      "max_latency_s": 2.5,
+      "description": "FDA Medical Device Companies view — GAL portion."
+    },
+    {
+      "id": "fda_view_gal_stacked_language",
+      "params": {"source": "gal", "view": "fda-medical-devices", "hours": 168, "language": "en"},
+      "min_results": 1,
+      "max_latency_s": 10.0,
+      "description": "Regression: FDA view must stack with language filter. Before the fix, the view path ignored every filter except time."
+    },
+    {
+      "id": "fda_view_gal_stacked_domain",
+      "params": {"source": "gal", "view": "fda-medical-devices", "hours": 168, "domain": "benzinga"},
+      "min_results": 1,
+      "max_latency_s": 10.0,
+      "description": "Regression: FDA view must stack with domain filter."
+    },
+    {
+      "id": "fda_view_gkg",
+      "params": {"source": "gkg", "view": "fda-medical-devices", "hours": 72},
+      "min_results": 1,
+      "max_latency_s": 2.5
+    },
+    {
+      "id": "fda_view_all",
+      "params": {"source": "all", "view": "fda-medical-devices", "hours": 72},
+      "min_results": 5,
+      "max_latency_s": 2.5
+    },
+    {
+      "id": "fda_gal_strict_7d",
+      "params": {"source": "gal", "view": "fda-medical-devices", "match_types": "legal", "hours": 168},
+      "min_results": 20,
+      "max_latency_s": 3.0,
+      "description": "Strict mode: only full legal name matches."
+    },
+    {
+      "id": "fda_gal_broad_7d",
+      "params": {"source": "gal", "view": "fda-medical-devices", "match_types": "legal,stripped", "hours": 168},
+      "min_results": 200,
+      "max_latency_s": 4.0,
+      "description": "Broad mode: legal + stripped base names. Must exceed strict."
+    },
+    {
+      "id": "nonsense_empty",
+      "params": {"source": "gal", "hours": 24, "q": "xyzzy12345neverreal"},
+      "min_results": 0,
+      "max_results": 0,
+      "max_latency_s": 3.0,
+      "description": "Regression: impossible query must return empty, not crash."
+    },
+    {
+      "id": "gal_has_source_field",
+      "params": {"source": "gal", "hours": 1},
+      "min_results": 1,
+      "max_latency_s": 2.5,
+      "response_shape": {"source": "gal"},
+      "description": "Contract: API response must echo the source field."
+    }
+  ]
+}

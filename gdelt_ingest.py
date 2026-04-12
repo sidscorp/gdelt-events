@@ -187,6 +187,15 @@ def run_ingest(force_prune: bool = False, prune_days: int | None = None) -> None
         except Exception:
             log.exception("GAL ingest failed (non-fatal)")
 
+        # FDA company match — incremental, only scans rows newer than last run.
+        # Non-fatal: the dashboard view will just miss new matches if this fails.
+        try:
+            from pipeline.fda_matcher import match_new_rows
+            fda_summary = match_new_rows()
+            log.info("FDA match: %s", fda_summary)
+        except Exception:
+            log.exception("FDA matcher failed (non-fatal)")
+
         # Prune: daily or forced
         now = datetime.now(tz=None)
         should_prune = force_prune or now.hour == 0 and now.minute < 15

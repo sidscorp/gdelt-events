@@ -8,7 +8,7 @@
 # Each check prints PASS/FAIL + timing. Exits non-zero on any failure.
 
 set -u
-BASE="${BASE:-https://gdelt.snambiar.com}"
+BASE="${BASE:-https://gdeltmonitor.com}"
 FAILS=0
 TOTAL=0
 

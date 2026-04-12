@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-BASE = os.environ.get("BASE", "https://gdelt.snambiar.com")
+BASE = os.environ.get("BASE", "https://gdeltmonitor.com")
 CASES_FILE = Path(__file__).parent / "golden_queries.json"
 CASES = json.loads(CASES_FILE.read_text())["queries"]
 
@@ -101,3 +101,134 @@ def test_views_endpoint():
     assert fda is not None, "fda-medical-devices view missing"
     assert fda.get("default_hours") == 24
     assert fda.get("kind") == "fda_match"
+
+
+# -----------------------------------------------------------------------
+# Data-level acceptance tests — validate actual article content, not just
+# HTTP status codes.
+# -----------------------------------------------------------------------
+
+def _fetch_articles(params, n=20):
+    params["per_page"] = n
+    qs = urllib.parse.urlencode(params)
+    return _get_json(f"{BASE}/api/articles?{qs}", timeout=15)
+
+
+class TestArticleRelevance:
+    """Verify that returned articles contain the expected keywords."""
+
+    def test_supply_chain_titles_contain_keywords(self):
+        data = _fetch_articles({"source": "gal", "view": "supply-chain-alerts", "hours": 168})
+        assert data["total"] > 0
+        keywords = {
+            "recall", "shortage", "disruption", "supply chain", "tariff",
+            "sanction", "bankruptcy", "flood", "earthquake", "explosion",
+            "hurricane", "layoff", "cyberattack", "embargo", "blockade",
+        }
+        hits = 0
+        for a in data["articles"]:
+            text = ((a.get("title") or "") + " " + (a.get("description") or "")).lower()
+            if any(kw in text for kw in keywords):
+                hits += 1
+        precision = hits / len(data["articles"]) if data["articles"] else 0
+        assert precision >= 0.7, (
+            f"supply chain precision {precision:.0%} < 70% "
+            f"({hits}/{len(data['articles'])} articles contain expected keywords)"
+        )
+
+    def test_medical_devices_titles_contain_device_terms(self):
+        data = _fetch_articles({"source": "gal", "view": "medical-devices", "hours": 168})
+        if data["total"] == 0:
+            pytest.skip("no medical device articles in window")
+        terms = {
+            "mri", "ct scan", "ultrasound", "pacemaker", "catheter",
+            "implant", "ventilator", "dialysis", "prosthetic", "endoscope",
+            "surgical robot", "x-ray", "defibrillator", "stent",
+        }
+        hits = 0
+        for a in data["articles"]:
+            text = ((a.get("title") or "") + " " + (a.get("description") or "")).lower()
+            if any(t in text for t in terms):
+                hits += 1
+        precision = hits / len(data["articles"]) if data["articles"] else 0
+        assert precision >= 0.6, (
+            f"medical devices precision {precision:.0%} < 60%"
+        )
+
+    def test_fda_strict_returns_company_names(self):
+        data = _fetch_articles({
+            "source": "gal", "view": "fda-medical-devices",
+            "match_types": "legal", "hours": 168,
+        })
+        if data["total"] == 0:
+            pytest.skip("no FDA matches in window")
+        with_name = sum(1 for a in data["articles"] if a.get("matched_name"))
+        assert with_name == len(data["articles"]), (
+            f"{len(data['articles']) - with_name} articles missing matched_name"
+        )
+
+
+class TestSortOrder:
+    """Verify sort parameter actually changes article ordering."""
+
+    def test_newest_first_is_default(self):
+        data = _fetch_articles({"source": "gal", "hours": 6})
+        if len(data["articles"]) < 2:
+            pytest.skip("not enough articles")
+        times = [a.get("time_ago", "") for a in data["articles"][:5]]
+        assert times == sorted(times), f"not sorted newest-first: {times}"
+
+    def test_oldest_reverses_order(self):
+        newest = _fetch_articles({"source": "gal", "view": "supply-chain-alerts", "hours": 72})
+        oldest = _fetch_articles({"source": "gal", "view": "supply-chain-alerts", "hours": 72, "sort": "oldest"})
+        if len(newest["articles"]) < 2 or len(oldest["articles"]) < 2:
+            pytest.skip("not enough articles")
+        assert newest["articles"][0]["time_ago"] != oldest["articles"][0]["time_ago"], (
+            "newest and oldest should show different first articles"
+        )
+
+
+class TestFilterStacking:
+    """Verify filters apply correctly on top of view pills."""
+
+    def test_language_filter_on_fda_view(self):
+        data = _fetch_articles({
+            "source": "gal", "view": "fda-medical-devices",
+            "hours": 168, "language": "en",
+        })
+        for a in data["articles"]:
+            assert a.get("language") == "en", (
+                f"article {a.get('id', '?')[:30]} has language={a.get('language')}"
+            )
+
+    def test_domain_filter_returns_matching_domains(self):
+        data = _fetch_articles({
+            "source": "gal", "hours": 24, "domain": "yahoo",
+        })
+        if data["total"] == 0:
+            pytest.skip("no yahoo articles in 24h")
+        for a in data["articles"]:
+            assert "yahoo" in (a.get("source") or "").lower(), (
+                f"article source {a.get('source')} doesn't contain 'yahoo'"
+            )
+
+
+class TestAuthEndpoints:
+    """Verify auth routes respond correctly."""
+
+    def test_login_page_accessible(self):
+        data = _get_json(f"{BASE}/api/views", timeout=10)
+        assert data.get("authenticated") is False
+
+    def test_about_page_returns_200(self):
+        req = urllib.request.Request(f"{BASE}/about", headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            assert r.status == 200
+            body = r.read().decode()
+            assert "Siddhartha Nambiar" in body
+            assert "GDELT" in body
+
+    def test_pill_info_returns_keywords(self):
+        data = _get_json(f"{BASE}/api/pill_info/supply-chain-alerts", timeout=10)
+        assert len(data.get("keywords", [])) >= 30
+        assert "tariff" in data["keywords"]

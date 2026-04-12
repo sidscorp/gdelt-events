@@ -126,6 +126,19 @@
       "description": "Broad mode: legal + stripped base names. Must exceed strict."
     },
     {
+      "id": "supply_chain_gal_24h",
+      "params": {"source": "gal", "view": "supply-chain-alerts", "hours": 24},
+      "min_results": 50,
+      "max_latency_s": 2.5,
+      "description": "Supply Chain Alerts on GAL — should have hundreds of keyword-matched articles per day."
+    },
+    {
+      "id": "supply_chain_gal_7d",
+      "params": {"source": "gal", "view": "supply-chain-alerts", "hours": 168},
+      "min_results": 1000,
+      "max_latency_s": 2.5
+    },
+    {
       "id": "nonsense_empty",
       "params": {"source": "gal", "hours": 24, "q": "xyzzy12345neverreal"},
       "min_results": 0,

@@ -196,6 +196,15 @@ def run_ingest(force_prune: bool = False, prune_days: int | None = None) -> None
         except Exception:
             log.exception("FDA matcher failed (non-fatal)")
 
+        # Supply chain + topic tagging - incremental keyword scan on new articles.
+        try:
+            from pipeline.tagger import tag_new_rows as tag_articles
+            tag_summary = tag_articles()
+            log.info("Tagger: %s", tag_summary)
+        except Exception:
+            log.exception("Tagger failed (non-fatal)")
+
+
         # Prune: daily or forced
         now = datetime.now(tz=None)
         should_prune = force_prune or now.hour == 0 and now.minute < 15

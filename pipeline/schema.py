@@ -164,6 +164,7 @@ def create_tables(con: duckdb.DuckDBPyConnection) -> None:
 
     create_gal_tables(con)
     create_fda_tables(con)
+    create_tag_tables(con)
 
 
 def create_fda_tables(con: duckdb.DuckDBPyConnection) -> None:
@@ -303,6 +304,38 @@ def create_gal_tables(con: duckdb.DuckDBPyConnection) -> None:
             batch_timestamp BIGINT,
             loaded_at TIMESTAMP DEFAULT current_timestamp,
             row_count INTEGER
+        )
+    """)
+
+
+def create_tag_tables(con: duckdb.DuckDBPyConnection) -> None:
+    """Article tagging tables for supply chain alerts and future categories."""
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS article_tags (
+            article_id VARCHAR,
+            source_type VARCHAR,
+            category VARCHAR,
+            matched_via VARCHAR,
+            matched_detail VARCHAR,
+            crawled_at BIGINT
+        )
+    """)
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tags_cat_time "
+        "ON article_tags(category, source_type, crawled_at)"
+    )
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tags_source_id "
+        "ON article_tags(source_type, article_id)"
+    )
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS tag_state (
+            category VARCHAR,
+            source_type VARCHAR,
+            last_crawled_at BIGINT,
+            updated_at TIMESTAMP DEFAULT current_timestamp,
+            PRIMARY KEY (category, source_type)
         )
     """)
 

@@ -35,6 +35,25 @@ VIEWS = [
             },
         ],
     },
+    {
+        "id": "medical-devices",
+        "name": "Medical Devices",
+        "description": "Articles mentioning specific medical device types — implants, scanners, surgical tools, diagnostics.",
+        "kind": "tag_match",
+        "tag_category": "medical_devices",
+        "default_hours": 24,
+    },
+    {
+        "id": "supply-chain-alerts",
+        "name": "Supply Chain Alerts",
+        "description": (
+            "Geopolitical events, natural disasters, trade disruptions, "
+            "and other signals that could impact supply chains."
+        ),
+        "kind": "tag_match",
+        "tag_category": "supply_chain",
+        "default_hours": 24,
+    },
 ]
 
 

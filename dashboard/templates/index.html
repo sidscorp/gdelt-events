@@ -93,6 +93,24 @@
 
   .filter-label:first-child { margin-left: 0; }
 
+  /* Source-aware filter visibility. Each filter wraps its label+input in
+     a .filter-group and is tagged with .f-gal, .f-gkg, or .f-shared. */
+  .filter-group { display: flex; align-items: center; }
+  body[data-source="gal"] .f-gkg { display: none; }
+  body[data-source="gkg"] .f-gal { display: none; }
+  /* On the "all" tab, both are visible but annotated so users know which
+     source each filter applies to. */
+  body[data-source="all"] .f-gkg .filter-label::after {
+    content: " (gkg only)";
+    opacity: 0.55;
+    font-size: 0.65rem;
+  }
+  body[data-source="all"] .f-gal .filter-label::after {
+    content: " (gal only)";
+    opacity: 0.55;
+    font-size: 0.65rem;
+  }
+
   .btn-clear {
     font-family: inherit;
     font-size: 0.78rem;
@@ -105,6 +123,107 @@
   }
 
   .btn-clear:hover { color: var(--text); }
+
+  /* Views bar — saved-filter presets above the time pills */
+  .views-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.8rem;
+    min-height: 0;
+  }
+  .view-pill {
+    font-family: inherit;
+    font-size: 0.82rem;
+    padding: 0.3rem 0.7rem;
+    border: 1px solid var(--text);
+    background: var(--bg);
+    color: var(--text);
+    cursor: pointer;
+    letter-spacing: 0.02em;
+  }
+  .view-pill:hover {
+    background: var(--text);
+    color: var(--bg);
+  }
+  .view-pill.active {
+    background: var(--text);
+    color: var(--bg);
+  }
+
+  /* Match-type profile toggle — shown next to the view pill when a
+     kind: fda_match view is active. Lets the user pick precision vs recall
+     without having to re-run the matcher. */
+  .match-profile {
+    display: none;
+    align-items: center;
+    gap: 0.3rem;
+    margin-left: 0.6rem;
+    padding-left: 0.6rem;
+    border-left: 1px solid var(--border);
+    font-size: 0.75rem;
+  }
+  .match-profile.visible { display: inline-flex; }
+  .match-profile-label {
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.66rem;
+    margin-right: 0.2rem;
+  }
+  .profile-seg {
+    font-family: inherit;
+    font-size: 0.76rem;
+    padding: 0.22rem 0.55rem;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  .profile-seg + .profile-seg { border-left: none; }
+  .profile-seg:hover { color: var(--text); }
+  .profile-seg.active {
+    background: var(--text);
+    color: var(--bg);
+    border-color: var(--text);
+  }
+
+  /* Source tabs — GAL / GKG / All */
+  .source-tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 0.6rem;
+    border-bottom: 2px solid var(--text);
+  }
+  .source-tab {
+    font-family: inherit;
+    font-size: 0.85rem;
+    padding: 0.45rem 1.1rem;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-weight: 500;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.1rem;
+  }
+  .source-tab:hover { color: var(--text); }
+  .source-tab.active {
+    color: var(--text);
+    border-bottom-color: var(--text);
+    font-weight: 600;
+  }
+  .source-tab-count {
+    font-size: 0.68rem;
+    color: var(--text-tertiary);
+    font-weight: 400;
+    letter-spacing: 0.02em;
+  }
+  .source-tab.active .source-tab-count { color: var(--text-secondary); }
 
   /* Time pills */
   .time-pills {
@@ -218,6 +337,31 @@
   }
   .src-gal { border-color: #c0b070; color: #8a7030; }
 
+  .match-line {
+    margin: 0.2rem 0 0.1rem;
+  }
+  .match-badge {
+    font-size: 0.7rem;
+    padding: 0.08rem 0.4rem;
+    border: 1px solid #4a7c59;
+    background: #edf5ef;
+    color: #2d5a3d;
+    font-weight: 600;
+  }
+  .match-label {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #6b8e7a;
+    font-weight: 500;
+    margin-right: 0.2rem;
+  }
+  .match-spec {
+    font-weight: 400;
+    font-style: italic;
+    color: #5c7866;
+  }
+
   .article-title {
     font-size: 0.95rem;
     line-height: 1.35;
@@ -300,6 +444,59 @@
     color: var(--text-tertiary);
     font-style: italic;
   }
+  .loading .spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: #4a7c59;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: -2px;
+    margin-right: 0.5rem;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-elapsed {
+    display: block;
+    font-size: 0.72rem;
+    margin-top: 0.4rem;
+    font-style: normal;
+    color: var(--text-tertiary);
+  }
+  /* Top progress bar — indeterminate, shown while fetching */
+  #topProgress {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: transparent;
+    z-index: 100;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  #topProgress.active { opacity: 1; }
+  #topProgress::before {
+    content: '';
+    position: absolute;
+    height: 100%;
+    width: 30%;
+    background: #4a7c59;
+    animation: topbar 1.1s ease-in-out infinite;
+  }
+  @keyframes topbar {
+    0%   { left: -30%; width: 30%; }
+    50%  { left: 40%;  width: 40%; }
+    100% { left: 100%; width: 30%; }
+  }
+  /* Dim controls while fetching so it's obvious they're locked */
+  body.fetching .time-pill,
+  body.fetching .views-bar button,
+  body.fetching #filters input,
+  body.fetching #filters select {
+    opacity: 0.55;
+    cursor: wait;
+  }
+  body.fetching { cursor: progress; }
 
   /* Sidebar suggestions (entity lists) */
   .suggestions {
@@ -339,10 +536,49 @@
 </head>
 <body>
 
+<div id="topProgress"></div>
+
 <header>
-  <h1>GDELT News Monitor</h1>
+  <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap;">
+    <h1 style="margin:0;">GDELT News Monitor</h1>
+    <div id="clockWidget" style="font-size:0.78rem; color:var(--text-secondary); display:flex; align-items:baseline; gap:0.4rem;">
+      <span id="clockTime" style="font-variant-numeric:tabular-nums;"></span>
+      <select id="clockTz" style="font-size:0.72rem; border:1px solid var(--border); background:#fff; padding:0.1rem 0.3rem; cursor:pointer;">
+        <option value="UTC">UTC</option>
+        <option value="America/New_York">US Eastern</option>
+        <option value="America/Chicago">US Central</option>
+        <option value="America/Denver">US Mountain</option>
+        <option value="America/Los_Angeles">US Pacific</option>
+        <option value="Europe/London">London</option>
+        <option value="Europe/Berlin">Berlin</option>
+        <option value="Asia/Tokyo">Tokyo</option>
+        <option value="Asia/Shanghai">Shanghai</option>
+        <option value="Asia/Kolkata">India</option>
+      </select>
+    </div>
+  </div>
   <div class="header-stats" id="stats">loading...</div>
 </header>
+
+<div class="source-tabs" id="sourceTabs">
+  <button class="source-tab active" data-source="gal">
+    <span>GAL</span><span class="source-tab-count" id="galCount">…</span>
+  </button>
+  <button class="source-tab" data-source="gkg">
+    <span>GKG</span><span class="source-tab-count" id="gkgCount">…</span>
+  </button>
+  <button class="source-tab" data-source="all">
+    <span>All</span><span class="source-tab-count" id="allCount">…</span>
+  </button>
+</div>
+
+<div style="display:flex; align-items:center; flex-wrap:wrap; gap:0.3rem;">
+  <div class="views-bar" id="viewsBar" style="margin:0;"></div>
+  <div class="match-profile" id="matchProfile">
+    <span class="match-profile-label">Mode</span>
+    <!-- Populated from the view's available_match_types -->
+  </div>
+</div>
 
 <div class="time-pills" id="timePills">
   <button class="time-pill active" data-hours="1">1h</button>
@@ -355,32 +591,65 @@
 </div>
 
 <div class="filters">
-  <span class="filter-label">Search</span>
-  <input type="text" id="searchInput" placeholder="keyword..." autocomplete="off">
+  <div class="filter-group f-shared">
+    <span class="filter-label">Search</span>
+    <input type="text" id="searchInput" placeholder="title, description…" autocomplete="off">
+  </div>
 
-  <span class="filter-label">Title</span>
-  <input type="text" id="titleInput" placeholder="in article title..." autocomplete="off">
+  <div class="filter-group f-shared">
+    <span class="filter-label">Title</span>
+    <input type="text" id="titleInput" placeholder="in article title…" autocomplete="off">
+  </div>
 
-  <span class="filter-label">Person</span>
-  <input type="text" id="personInput" placeholder="name..." autocomplete="off">
+  <div class="filter-group f-gal">
+    <span class="filter-label">Description</span>
+    <input type="text" id="descriptionInput" placeholder="in description…" autocomplete="off">
+  </div>
 
-  <span class="filter-label">Org</span>
-  <input type="text" id="orgInput" placeholder="organization..." autocomplete="off">
+  <div class="filter-group f-gkg">
+    <span class="filter-label">Person</span>
+    <input type="text" id="personInput" placeholder="name…" autocomplete="off">
+  </div>
 
-  <span class="filter-label">Place</span>
-  <input type="text" id="locationInput" placeholder="location..." autocomplete="off">
+  <div class="filter-group f-gkg">
+    <span class="filter-label">Org</span>
+    <input type="text" id="orgInput" placeholder="organization…" autocomplete="off">
+  </div>
 
-  <span class="filter-label">Source</span>
-  <input type="text" id="sourceInput" placeholder="domain..." autocomplete="off">
+  <div class="filter-group f-gkg">
+    <span class="filter-label">Place</span>
+    <input type="text" id="locationInput" placeholder="location…" autocomplete="off">
+  </div>
 
-  <span class="filter-label">Theme</span>
-  <input type="text" id="themeInput" placeholder="theme..." autocomplete="off">
+  <div class="filter-group f-gkg">
+    <span class="filter-label">Theme</span>
+    <input type="text" id="themeInput" placeholder="theme…" autocomplete="off">
+  </div>
 
-  <span class="filter-label">From</span>
-  <input type="date" id="dateFrom">
+  <div class="filter-group f-shared">
+    <span class="filter-label">Domain</span>
+    <input type="text" id="domainInput" placeholder="nytimes.com…" autocomplete="off">
+  </div>
 
-  <span class="filter-label">To</span>
-  <input type="date" id="dateTo">
+  <div class="filter-group f-gal">
+    <span class="filter-label">Outlet</span>
+    <input type="text" id="outletInput" placeholder="outlet name…" autocomplete="off">
+  </div>
+
+  <div class="filter-group f-gal">
+    <span class="filter-label">Language</span>
+    <select id="languageSelect"><option value="">any</option></select>
+  </div>
+
+  <div class="filter-group f-shared">
+    <span class="filter-label">From</span>
+    <input type="date" id="dateFrom">
+  </div>
+
+  <div class="filter-group f-shared">
+    <span class="filter-label">To</span>
+    <input type="date" id="dateTo">
+  </div>
 
   <button class="btn-clear" onclick="clearFilters()">clear all</button>
 </div>
@@ -403,14 +672,57 @@
 const state = {
   page: 1,
   hours: 1,
-  q: '', title: '', person: '', org: '', location: '', source: '', theme: '',
+  q: '', title: '', description: '',
+  person: '', org: '', location: '', theme: '',
+  domain: '', outlet: '', language: '',
   date_from: '', date_to: '',
+  view: '',
+  source: 'gal', // 'gal' | 'gkg' | 'all'
+  match_types: ['legal'], // ['legal'] = Strict, ['legal','stripped'] = Broad
 };
+
+// Resolve initial source from URL, then localStorage, then default 'gal'.
+(function initSource() {
+  const p = new URLSearchParams(location.search);
+  const urlS = (p.get('source') || '').toLowerCase();
+  const lsS = (localStorage.getItem('dashSource') || '').toLowerCase();
+  const pick = (['gal','gkg','all'].includes(urlS)) ? urlS :
+               (['gal','gkg','all'].includes(lsS)) ? lsS : 'gal';
+  state.source = pick;
+  document.body.setAttribute('data-source', pick);
+})();
+
+// Resolve initial match_types from URL, then localStorage, then default.
+(function initMatchTypes() {
+  const p = new URLSearchParams(location.search);
+  const urlMT = (p.get('match_types') || '').toLowerCase();
+  const lsMT = (localStorage.getItem('dashMatchTypes') || '').toLowerCase();
+  const raw = urlMT || lsMT || 'legal';
+  const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
+  const valid = parts.filter(t => ['legal','stripped','contextual'].includes(t));
+  state.match_types = valid.length ? valid : ['legal'];
+})();
 
 // The actual data window (populated from /api/stats)
 const dataWindow = { earliest: null, latest: null };
 
+// Loaded preset views, keyed by id
+const viewsById = {};
+
 let debounceTimer = null;
+
+// Fetch coordinator: ensures only one /api/articles request is "visible" at a
+// time, aborts superseded ones, and caps each request at 45s so a slow backend
+// shows a real error instead of a phantom-restart spinner.
+let currentFetchController = null;
+let currentFetchGen = 0;
+let currentFetchTimer = null; // elapsed counter setInterval id
+
+// Initialize state.view from URL param if present
+const _urlParams = new URLSearchParams(window.location.search);
+if (_urlParams.get('view')) {
+  state.view = _urlParams.get('view');
+}
 
 // Time pills
 document.getElementById('timePills').addEventListener('click', (e) => {
@@ -419,7 +731,6 @@ document.getElementById('timePills').addEventListener('click', (e) => {
   e.target.classList.add('active');
   state.hours = e.target.dataset.hours;
   state.page = 1;
-  // Clear date range so it doesn't conflict with the time pill
   state.date_from = '';
   state.date_to = '';
   document.getElementById('dateFrom').value = '';
@@ -427,16 +738,115 @@ document.getElementById('timePills').addEventListener('click', (e) => {
   fetchArticles();
 });
 
-// Filter inputs
-['searchInput', 'titleInput', 'personInput', 'orgInput', 'locationInput', 'sourceInput', 'themeInput'].forEach(id => {
-  const field = id.replace('Input', '').replace('search', 'q');
-  document.getElementById(id).addEventListener('input', (e) => {
+// Filter inputs. Map DOM id -> state field name.
+const FILTER_INPUT_MAP = {
+  searchInput: 'q',
+  titleInput: 'title',
+  descriptionInput: 'description',
+  personInput: 'person',
+  orgInput: 'org',
+  locationInput: 'location',
+  themeInput: 'theme',
+  domainInput: 'domain',
+  outletInput: 'outlet',
+};
+Object.entries(FILTER_INPUT_MAP).forEach(([id, field]) => {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener('input', (e) => {
     state[field] = e.target.value;
     state.page = 1;
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(fetchArticles, 300);
   });
 });
+document.getElementById('languageSelect').addEventListener('change', (e) => {
+  state.language = e.target.value;
+  state.page = 1;
+  fetchArticles();
+});
+
+// Source tab clicks
+document.getElementById('sourceTabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('.source-tab');
+  if (!btn) return;
+  const newSource = btn.dataset.source;
+  if (newSource === state.source) return;
+  switchSource(newSource);
+});
+
+function switchSource(newSource) {
+  state.source = newSource;
+  localStorage.setItem('dashSource', newSource);
+  document.body.setAttribute('data-source', newSource);
+  document.querySelectorAll('.source-tab').forEach(t => {
+    t.classList.toggle('active', t.dataset.source === newSource);
+  });
+  if (newSource === 'gal') {
+    clearFields(['person','org','location','theme'], ['personInput','orgInput','locationInput','themeInput']);
+  } else if (newSource === 'gkg') {
+    clearFields(['description','outlet','language'], ['descriptionInput','outletInput']);
+    document.getElementById('languageSelect').value = '';
+  }
+  state.page = 1;
+  updateUrl();
+  fetchArticles();
+}
+
+function clearFields(stateKeys, domIds) {
+  stateKeys.forEach(k => { state[k] = ''; });
+  domIds.forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+}
+
+function updateUrl() {
+  const p = new URLSearchParams(location.search);
+  p.set('source', state.source);
+  if (state.view) p.set('view', state.view); else p.delete('view');
+  if (state.match_types && state.match_types.length && state.view) {
+    p.set('match_types', state.match_types.join(','));
+  } else {
+    p.delete('match_types');
+  }
+  history.replaceState(null, '', location.pathname + '?' + p.toString());
+}
+
+// Render the match-profile segmented control for the currently active
+// view. Called from the view pill click handler and from init (via
+// fetchViews). Data-driven: reads `available_match_types` off the view.
+function renderMatchProfile() {
+  const el = document.getElementById('matchProfile');
+  const v = state.view && viewsById[state.view];
+  if (!v || !Array.isArray(v.available_match_types) || v.available_match_types.length === 0) {
+    el.classList.remove('visible');
+    el.querySelectorAll('.profile-seg').forEach(b => b.remove());
+    return;
+  }
+  el.querySelectorAll('.profile-seg').forEach(b => b.remove());
+  const currentSet = new Set(state.match_types);
+  const isActive = (profMt) => {
+    if (profMt.length !== currentSet.size) return false;
+    return profMt.every(t => currentSet.has(t));
+  };
+  v.available_match_types.forEach(prof => {
+    const btn = document.createElement('button');
+    btn.className = 'profile-seg' + (isActive(prof.match_types) ? ' active' : '');
+    btn.textContent = prof.label;
+    btn.title = prof.description || '';
+    btn.dataset.profileId = prof.id;
+    btn.addEventListener('click', () => {
+      state.match_types = [...prof.match_types];
+      localStorage.setItem('dashMatchTypes', state.match_types.join(','));
+      state.page = 1;
+      el.querySelectorAll('.profile-seg').forEach(b => {
+        b.classList.toggle('active', b.dataset.profileId === prof.id);
+      });
+      updateUrl();
+      fetchArticles();
+    });
+    el.appendChild(btn);
+  });
+  el.classList.add('visible');
+}
 
 ['dateFrom', 'dateTo'].forEach(id => {
   const field = id === 'dateFrom' ? 'date_from' : 'date_to';
@@ -453,19 +863,19 @@ document.getElementById('timePills').addEventListener('click', (e) => {
 });
 
 function clearFilters() {
-  state.q = ''; state.title = ''; state.person = ''; state.org = '';
-  state.location = ''; state.source = ''; state.theme = '';
+  state.q = ''; state.title = ''; state.description = '';
+  state.person = ''; state.org = ''; state.location = ''; state.theme = '';
+  state.domain = ''; state.outlet = ''; state.language = '';
   state.date_from = ''; state.date_to = '';
+  state.view = '';
   state.page = 1;
-  document.getElementById('searchInput').value = '';
-  document.getElementById('titleInput').value = '';
-  document.getElementById('personInput').value = '';
-  document.getElementById('orgInput').value = '';
-  document.getElementById('locationInput').value = '';
-  document.getElementById('sourceInput').value = '';
-  document.getElementById('themeInput').value = '';
-  document.getElementById('dateFrom').value = '';
-  document.getElementById('dateTo').value = '';
+  ['searchInput','titleInput','descriptionInput','personInput','orgInput',
+   'locationInput','themeInput','domainInput','outletInput','dateFrom','dateTo'
+  ].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  const ls = document.getElementById('languageSelect');
+  if (ls) ls.value = '';
+  document.querySelectorAll('.view-pill').forEach(p => p.classList.remove('active'));
+  updateUrl();
   fetchArticles();
 }
 
@@ -500,13 +910,33 @@ function toneLabel(tone) {
 function renderActiveFilters() {
   const el = document.getElementById('activeFilters');
   const filters = [];
-  if (state.q) filters.push({ label: `search: ${state.q}`, clear: () => { state.q = ''; document.getElementById('searchInput').value = ''; }});
-  if (state.title) filters.push({ label: `title: ${state.title}`, clear: () => { state.title = ''; document.getElementById('titleInput').value = ''; }});
-  if (state.person) filters.push({ label: `person: ${state.person}`, clear: () => { state.person = ''; document.getElementById('personInput').value = ''; }});
-  if (state.org) filters.push({ label: `org: ${state.org}`, clear: () => { state.org = ''; document.getElementById('orgInput').value = ''; }});
-  if (state.location) filters.push({ label: `place: ${state.location}`, clear: () => { state.location = ''; document.getElementById('locationInput').value = ''; }});
-  if (state.source) filters.push({ label: `source: ${state.source}`, clear: () => { state.source = ''; document.getElementById('sourceInput').value = ''; }});
-  if (state.theme) filters.push({ label: `theme: ${state.theme}`, clear: () => { state.theme = ''; document.getElementById('themeInput').value = ''; }});
+  const push = (label, field, inputId) => {
+    filters.push({
+      label,
+      clear: () => {
+        state[field] = '';
+        const inp = inputId && document.getElementById(inputId);
+        if (inp) inp.value = '';
+      },
+    });
+  };
+  if (state.q)           push(`search: ${state.q}`,           'q',           'searchInput');
+  if (state.title)       push(`title: ${state.title}`,        'title',       'titleInput');
+  if (state.description) push(`desc: ${state.description}`,   'description', 'descriptionInput');
+  if (state.person)      push(`person: ${state.person}`,      'person',      'personInput');
+  if (state.org)         push(`org: ${state.org}`,            'org',         'orgInput');
+  if (state.location)    push(`place: ${state.location}`,     'location',    'locationInput');
+  if (state.theme)       push(`theme: ${state.theme}`,        'theme',       'themeInput');
+  if (state.domain)      push(`domain: ${state.domain}`,      'domain',      'domainInput');
+  if (state.outlet)      push(`outlet: ${state.outlet}`,      'outlet',      'outletInput');
+  if (state.language)    filters.push({
+    label: `lang: ${state.language}`,
+    clear: () => {
+      state.language = '';
+      const sel = document.getElementById('languageSelect');
+      if (sel) sel.value = '';
+    },
+  });
 
   el.innerHTML = filters.map((f, i) =>
     `<span class="active-filter" data-idx="${i}">${f.label} &times;</span>`
@@ -544,6 +974,13 @@ function renderArticle(a) {
     ? `<span class="src-badge src-gal" title="Global Article List — broader coverage, no entity extraction">gal</span>`
     : '';
 
+  let matchBadge = '';
+  if (a.matched_name) {
+    const firstSpec = (a.matched_specialty || '').split('|')[0].trim();
+    const specSuffix = firstSpec ? ` <span class="match-spec">(${firstSpec})</span>` : '';
+    matchBadge = `<span class="match-badge" title="Matched FDA-registered company: ${a.matched_name}${a.matched_specialty ? ' — medical specialty: ' + a.matched_specialty : ''}"><span class="match-label">FDA co.</span> ${a.matched_name}${specSuffix}</span>`;
+  }
+
   return `<li class="article">
     <div class="article-header">
       <span class="article-source">${a.source}</span>
@@ -552,6 +989,7 @@ function renderArticle(a) {
       <span class="article-tone ${toneClass(a.tone)}">${toneLabel(a.tone)}</span>
     </div>
     <div class="article-title"><a href="${a.url}" target="_blank" rel="noopener">${title}</a></div>
+    ${matchBadge ? `<div class="match-line">${matchBadge}</div>` : ''}
     <div class="article-entities">${persons}${orgs}${locs}${themes}</div>
   </li>`;
 }
@@ -577,25 +1015,72 @@ async function fetchArticles() {
   renderActiveFilters();
 
   const params = new URLSearchParams();
+  params.set('source', state.source);
   if (state.hours) params.set('hours', state.hours);
+  if (state.view) params.set('view', state.view);
+  if (state.match_types && state.match_types.length) {
+    params.set('match_types', state.match_types.join(','));
+  }
   if (state.q) params.set('q', state.q);
   if (state.title) params.set('title', state.title);
+  if (state.description) params.set('description', state.description);
   if (state.person) params.set('person', state.person);
   if (state.org) params.set('org', state.org);
   if (state.location) params.set('location', state.location);
-  if (state.source) params.set('source', state.source);
   if (state.theme) params.set('theme', state.theme);
+  if (state.domain) params.set('domain', state.domain);
+  if (state.outlet) params.set('outlet', state.outlet);
+  if (state.language) params.set('language', state.language);
   if (state.date_from) params.set('date_from', state.date_from);
   if (state.date_to) params.set('date_to', state.date_to);
   params.set('page', state.page);
   params.set('per_page', 50);
 
+  if (currentFetchController) {
+    try { currentFetchController.abort(); } catch (_) {}
+  }
+  if (currentFetchTimer) {
+    clearInterval(currentFetchTimer);
+    currentFetchTimer = null;
+  }
+
+  const myGen = ++currentFetchGen;
+  const controller = new AbortController();
+  currentFetchController = controller;
+  const hardTimeout = setTimeout(() => {
+    try { controller.abort('client-timeout'); } catch (_) {}
+  }, 45000);
+
   const list = document.getElementById('articleList');
-  list.innerHTML = '<li class="loading">Loading...</li>';
+  const fetchStart = performance.now();
+  list.innerHTML = '<li class="loading"><span class="spinner"></span>Loading articles…<span class="loading-elapsed" id="loadElapsed">0.0s elapsed</span></li>';
+  document.body.classList.add('fetching');
+  document.getElementById('topProgress').classList.add('active');
+  const elapsedEl = document.getElementById('loadElapsed');
+  currentFetchTimer = setInterval(() => {
+    if (myGen !== currentFetchGen) { clearInterval(currentFetchTimer); return; }
+    if (!elapsedEl.isConnected) { clearInterval(currentFetchTimer); return; }
+    const s = ((performance.now() - fetchStart) / 1000).toFixed(1);
+    elapsedEl.textContent = `${s}s elapsed${s > 5 ? ' — still working' : ''}`;
+  }, 100);
+  const finishLoading = () => {
+    if (myGen !== currentFetchGen) return; // superseded, leave UI alone
+    if (currentFetchTimer) { clearInterval(currentFetchTimer); currentFetchTimer = null; }
+    clearTimeout(hardTimeout);
+    document.body.classList.remove('fetching');
+    document.getElementById('topProgress').classList.remove('active');
+    if (currentFetchController === controller) currentFetchController = null;
+  };
 
   try {
-    const resp = await fetch(`/api/articles?${params}`);
+    const resp = await fetch(`/api/articles?${params}`, { signal: controller.signal });
+    if (myGen !== currentFetchGen) return; // a newer fetch has started; drop
+    if (!resp.ok) {
+      const body = await resp.text();
+      throw new Error(`server returned ${resp.status} (${body.slice(0, 80)})`);
+    }
     const data = await resp.json();
+    if (myGen !== currentFetchGen) return;
 
     const meta = document.getElementById('resultsMeta');
 
@@ -603,6 +1088,7 @@ async function fetchArticles() {
       meta.textContent = '';
       list.innerHTML = `<li class="loading">${data.error}<br><small>The dashboard will populate once the backfill finishes. Refresh in a minute.</small></li>`;
       document.getElementById('pagination').innerHTML = '';
+      finishLoading();
       return;
     }
 
@@ -625,8 +1111,28 @@ async function fetchArticles() {
 
     renderPagination(data);
   } catch (err) {
-    list.innerHTML = `<li class="loading">Error loading articles: ${err.message}</li>`;
+    if (myGen !== currentFetchGen) return; // a newer fetch superseded us
+    if (err.name === 'AbortError') {
+      // Either client-timeout or user action. If it was us hitting 45s, show
+      // an actionable message; if user triggered another fetch, they'll see
+      // the new spinner so we don't need to render anything here.
+      if (currentFetchController === controller) {
+        list.innerHTML = `<li class="loading">Request timed out after 45s — the backend is overloaded or the query is hung.<br><small>Try a narrower time window (1h or 6h), or wait a minute and retry.</small></li>`;
+      }
+    } else {
+      list.innerHTML = `<li class="loading">Error loading articles: ${err.message}<br><small>The backend may be restarting. Try again in a few seconds.</small></li>`;
+    }
+  } finally {
+    finishLoading();
   }
+}
+
+function compact(n) {
+  if (n == null) return '…';
+  if (n >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return n.toString();
 }
 
 async function fetchStats() {
@@ -642,6 +1148,14 @@ async function fetchStats() {
       `<span>${data.sources.toLocaleString()} sources</span>` +
       `<span>window: ${data.earliest_display} → ${data.latest_display}</span>` +
       `<span>latest: ${data.latest_ago}</span>`;
+
+    // Per-source tab counts
+    const galEl = document.getElementById('galCount');
+    const gkgEl = document.getElementById('gkgCount');
+    const allEl = document.getElementById('allCount');
+    if (galEl) galEl.textContent = compact(data.gal_articles);
+    if (gkgEl) gkgEl.textContent = compact(data.gkg_articles);
+    if (allEl) allEl.textContent = compact(data.total_articles);
 
     // Constrain date pickers to the actual data window
     if (data.earliest_date && data.latest_date) {
@@ -659,12 +1173,133 @@ async function fetchStats() {
   }
 }
 
+async function fetchGalFacets() {
+  try {
+    const resp = await fetch('/api/gal_facets');
+    const data = await resp.json();
+    if (data.error) return;
+    const sel = document.getElementById('languageSelect');
+    if (!sel) return;
+    const current = state.language;
+    sel.innerHTML = '<option value="">any</option>' +
+      (data.languages || []).map(l =>
+        `<option value="${l.code}">${l.name} (${compact(l.count)})</option>`
+      ).join('');
+    if (current) sel.value = current;
+  } catch (_) { /* non-fatal */ }
+}
+
+async function fetchViews() {
+  try {
+    const resp = await fetch('/api/views');
+    const data = await resp.json();
+    const bar = document.getElementById('viewsBar');
+    bar.innerHTML = '';
+    (data.views || []).forEach(v => {
+      viewsById[v.id] = v;
+      const btn = document.createElement('button');
+      btn.className = 'view-pill' + (state.view === v.id ? ' active' : '');
+      // no-op; segmented control is rendered after the loop
+      btn.textContent = v.name;
+      btn.title = v.description || '';
+      btn.dataset.viewId = v.id;
+      btn.addEventListener('click', () => {
+        if (state.view === v.id) {
+          state.view = '';
+          // When deselecting a view, reset match_types to default.
+          state.match_types = ['legal'];
+        } else {
+          state.view = v.id;
+          // Snap to the view's default time window (e.g. 24h for sparse
+          // medical device news) so the first click isn't worst-case.
+          if (v.default_hours) {
+            state.hours = String(v.default_hours);
+            state.date_from = '';
+            state.date_to = '';
+            document.getElementById('dateFrom').value = '';
+            document.getElementById('dateTo').value = '';
+            document.querySelectorAll('.time-pill').forEach(p => {
+              p.classList.toggle('active', p.dataset.hours === state.hours);
+            });
+          }
+          // Apply the view's default match_types if the current state
+          // doesn't match any of its available profiles.
+          if (Array.isArray(v.available_match_types) && v.available_match_types.length) {
+            const currentSet = new Set(state.match_types);
+            const matchesAny = v.available_match_types.some(p =>
+              p.match_types.length === currentSet.size &&
+              p.match_types.every(t => currentSet.has(t))
+            );
+            if (!matchesAny && Array.isArray(v.default_match_types)) {
+              state.match_types = [...v.default_match_types];
+            }
+          }
+        }
+        state.page = 1;
+        document.querySelectorAll('.view-pill').forEach(p => {
+          p.classList.toggle('active', p.dataset.viewId === state.view);
+        });
+        renderMatchProfile();
+        updateUrl();
+        fetchArticles();
+      });
+      bar.appendChild(btn);
+    });
+    // After the pills are in the DOM, render the profile toggle for
+    // whichever view is currently active (from URL/localStorage restore).
+    renderMatchProfile();
+  } catch (err) {
+    document.getElementById('viewsBar').innerHTML = '';
+  }
+}
+
+// --- Clock widget ---
+(function initClock() {
+  const tzSel = document.getElementById('clockTz');
+  const clockEl = document.getElementById('clockTime');
+  const saved = localStorage.getItem('dashClockTz');
+  if (saved) tzSel.value = saved;
+  function tick() {
+    const tz = tzSel.value;
+    const now = new Date();
+    clockEl.textContent = now.toLocaleString('en-US', {
+      timeZone: tz,
+      weekday: 'short',
+      month: 'short', day: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false,
+    });
+  }
+  tick();
+  setInterval(tick, 1000);
+  tzSel.addEventListener('change', () => {
+    localStorage.setItem('dashClockTz', tzSel.value);
+    tick();
+  });
+})();
+
+// Reflect restored source on the tab row before first fetch.
+document.querySelectorAll('.source-tab').forEach(t => {
+  t.classList.toggle('active', t.dataset.source === state.source);
+});
+
 // Init
+fetchViews();
 fetchStats();
+fetchGalFacets();
 fetchArticles();
 
-// Auto-refresh every 60 seconds while backfill is running, then every 5 min normally
-setInterval(() => { fetchStats(); if (state.page === 1) fetchArticles(); }, 60000);
+// Auto-refresh. Only refresh stats unconditionally; only auto-refresh
+// articles when (a) tab is visible, (b) no fetch is in flight, (c) we're on
+// page 1, and (d) no view pill is active — active views are a deliberate
+// user choice and yanking them mid-read produces the "loading forever" feel.
+setInterval(() => {
+  if (document.hidden) return;
+  fetchStats();
+  if (!currentFetchController && state.page === 1 && !state.view) {
+    fetchArticles();
+  }
+}, 60000);
 </script>
 
 </body>

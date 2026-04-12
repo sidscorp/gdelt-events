@@ -43,6 +43,12 @@ def _configure(con: duckdb.DuckDBPyConnection) -> None:
     """Apply memory limits and other pragmas."""
     con.execute(f"SET memory_limit = '{DUCKDB_MEMORY_LIMIT}'")
     con.execute("SET threads = 2")  # Keep CPU usage modest on the shared box
+    # Give CTAS / GROUP BY / QUALIFY a writable scratch dir (Windows default
+    # is blank and fails on operations that need to spill).
+    from .config import DATA_DIR
+    tmp = DATA_DIR / "duckdb_tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    con.execute(f"PRAGMA temp_directory='{tmp.as_posix()}'")
 
 
 def _open_connection(db_path: Path, max_retries: int = 20) -> duckdb.DuckDBPyConnection:

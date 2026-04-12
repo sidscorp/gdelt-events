@@ -163,6 +163,107 @@ def create_tables(con: duckdb.DuckDBPyConnection) -> None:
     """)
 
     create_gal_tables(con)
+    create_fda_tables(con)
+
+
+def create_fda_tables(con: duckdb.DuckDBPyConnection) -> None:
+    """Create the FDA companies, match cache, and match state tables.
+
+    See pipeline/fda_matcher.py for the matching pipeline that populates them.
+    """
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS fda_companies (
+            owner_operator_number BIGINT,
+            firm_name VARCHAR,
+            site_count INTEGER,
+            product_count INTEGER,
+            device_classes VARCHAR,
+            medical_specialties VARCHAR
+        )
+    """)
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS fda_match_cache (
+            article_id VARCHAR,
+            source_type VARCHAR,
+            matched_in VARCHAR,
+            matched_name VARCHAR,
+            medical_specialties VARCHAR,
+            crawled_at BIGINT,
+            match_type VARCHAR DEFAULT 'legal',
+            matched_pattern VARCHAR
+        )
+    """)
+    # (source_type, crawled_at) is the composite needed for the view's time
+    # filter path — WHERE source_type=? AND crawled_at >= ? ORDER BY crawled_at.
+    con.execute("CREATE INDEX IF NOT EXISTS idx_fda_cache_source_time "
+                "ON fda_match_cache(source_type, crawled_at)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_fda_cache_source_id "
+                "ON fda_match_cache(source_type, article_id)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_fda_cache_name "
+                "ON fda_match_cache(matched_name)")
+
+    # Add match_type/matched_pattern columns on existing DBs (no-op on
+    # fresh ones) and create the (source_type, match_type, crawled_at)
+    # composite index. Must run AFTER the CREATE TABLE IF NOT EXISTS so
+    # the ALTER TABLE has a table to alter.
+    migrate_fda_match_cache(con)
+
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS fda_match_state (
+            source_type VARCHAR PRIMARY KEY,
+            last_crawled_at BIGINT,
+            updated_at TIMESTAMP DEFAULT current_timestamp
+        )
+    """)
+
+
+def migrate_fda_match_cache(con: duckdb.DuckDBPyConnection) -> None:
+    """Add match_type + matched_pattern columns if missing. Idempotent.
+
+    Uses CTAS + rename instead of ALTER TABLE ADD COLUMN because DuckDB
+    1.5.1 on Windows crashes (STATUS_STACK_BUFFER_OVERRUN) when DELETE
+    runs on an ALTERed table.
+    """
+    cols = {r[1] for r in con.execute(
+        "PRAGMA table_info('fda_match_cache')"
+    ).fetchall()}
+    needs_migrate = "match_type" not in cols or "matched_pattern" not in cols
+    if needs_migrate:
+        # Drop any leftover _new table from a previous interrupted run.
+        con.execute("DROP TABLE IF EXISTS fda_match_cache_new")
+        con.execute("""
+            CREATE TABLE fda_match_cache_new (
+                article_id VARCHAR,
+                source_type VARCHAR,
+                matched_in VARCHAR,
+                matched_name VARCHAR,
+                medical_specialties VARCHAR,
+                crawled_at BIGINT,
+                match_type VARCHAR DEFAULT 'legal',
+                matched_pattern VARCHAR
+            )
+        """)
+        con.execute("""
+            INSERT INTO fda_match_cache_new
+                (article_id, source_type, matched_in, matched_name,
+                 medical_specialties, crawled_at, match_type, matched_pattern)
+            SELECT article_id, source_type, matched_in, matched_name,
+                   medical_specialties, crawled_at, 'legal', NULL
+            FROM fda_match_cache
+        """)
+        con.execute("DROP TABLE fda_match_cache")
+        con.execute("ALTER TABLE fda_match_cache_new RENAME TO fda_match_cache")
+        # Recreate the old indexes — the CTAS loses them.
+        con.execute("CREATE INDEX IF NOT EXISTS idx_fda_cache_source_time "
+                    "ON fda_match_cache(source_type, crawled_at)")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_fda_cache_source_id "
+                    "ON fda_match_cache(source_type, article_id)")
+        con.execute("CREATE INDEX IF NOT EXISTS idx_fda_cache_name "
+                    "ON fda_match_cache(matched_name)")
+    # Always ensure the new composite index exists (cheap if already there).
+    con.execute("CREATE INDEX IF NOT EXISTS idx_fda_cache_source_type_time "
+                "ON fda_match_cache(source_type, match_type, crawled_at)")
 
 
 def create_gal_tables(con: duckdb.DuckDBPyConnection) -> None:
@@ -171,9 +272,13 @@ def create_gal_tables(con: duckdb.DuckDBPyConnection) -> None:
     GAL is the GDELT Global Article List — broader article coverage than GKG
     but without entity extraction. One row per article, keyed by URL.
     """
+    # NOTE: No PRIMARY KEY on url — DuckDB's PK enforcement causes per-row
+    # index lookups on INSERT, which is catastrophically slow for bulk loads
+    # (~200 KB/min in testing). Dedup is handled via post-load DELETE and
+    # an optional UNIQUE index at the end of a backfill.
     con.execute("""
         CREATE TABLE IF NOT EXISTS gal (
-            url VARCHAR PRIMARY KEY,
+            url VARCHAR,
             crawled_at BIGINT,       -- YYYYMMDDHHMMSS from the GAL filename (when GDELT saw it)
             published_at BIGINT,     -- YYYYMMDDHHMMSS from the article's metadata (may be wrong)
             domain VARCHAR,
@@ -188,8 +293,9 @@ def create_gal_tables(con: duckdb.DuckDBPyConnection) -> None:
             loaded_at TIMESTAMP DEFAULT current_timestamp
         )
     """)
-    con.execute("CREATE INDEX IF NOT EXISTS idx_gal_crawled ON gal(crawled_at)")
-    con.execute("CREATE INDEX IF NOT EXISTS idx_gal_domain ON gal(domain)")
+    # Indexes are added via pipeline.gal_loader.ensure_gal_indexes() AFTER bulk
+    # loads finish. Maintaining indexes per-INSERT slows bulk loads by ~10x.
+    pass
 
     con.execute("""
         CREATE TABLE IF NOT EXISTS _gal_ingest_log (

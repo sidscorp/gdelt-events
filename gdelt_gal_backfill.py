@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 
 from pipeline.config import GAL_RAW_DIR
 from pipeline.gal_downloader import backfill_gal
-from pipeline.gal_loader import load_gal_batch
+from pipeline.gal_loader import ensure_gal_indexes, load_gal_batch
 
 logging.basicConfig(
     level=logging.INFO,
@@ -64,6 +64,9 @@ def main():
             "Load complete — %d articles loaded, %d files processed, %d skipped, %d errors",
             summary["gal"], summary["files"], summary["skipped"], summary["errors"],
         )
+        log.info("Creating GAL indexes...")
+        ensure_gal_indexes()
+        log.info("Indexes created.")
 
     log.info("GAL backfill done.")
 

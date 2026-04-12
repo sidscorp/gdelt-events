@@ -3,3 +3,26 @@ data/
 __pycache__/
 *.pyc
 data-exploration-march-2026/
+
+# One-off debug / investigation scripts
+bench_*.py
+debug_*.py
+diag_*.py
+investigate_*.py
+simulate_*.py
+test_view_query*.py
+test_speed.py
+test_downloader.py
+test_gal.py
+check_*.py
+drop_*.py
+dedupe_*.py
+dig_*.py
+exact_domains.py
+paywall_test.py
+premium_newspapers.py
+wsj_deep.py
+/fda_matcher.py
+characterize.py
+dedup_gal.py
+test_driver_query.py

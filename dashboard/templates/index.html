@@ -22,6 +22,45 @@
     --tag-border: #d4d0c8;
   }
 
+  /* Dark mode */
+  body.dark {
+    --text: #e8e4df;
+    --text-secondary: #a8a29e;
+    --text-tertiary: #78716c;
+    --border: #3d3730;
+    --bg: #1a1714;
+    --bg-hover: #24201c;
+    --accent: #d4d0c8;
+    --tone-neg: #ef9a9a;
+    --tone-pos: #a5d6a7;
+    --tone-neutral: #78716c;
+    --tag-bg: #2a2520;
+    --tag-border: #3d3730;
+  }
+  body.dark input, body.dark select, body.dark textarea {
+    background: var(--bg-hover);
+    color: var(--text);
+    border-color: var(--border);
+  }
+  body.dark .source-tab { background: var(--bg); }
+  body.dark .source-tab.active { background: var(--text); color: var(--bg); }
+  body.dark .view-pill { background: var(--bg); border-color: var(--border); color: var(--text); }
+  body.dark .view-pill.active { background: var(--text); color: var(--bg); }
+  body.dark .time-pill { border-color: var(--border); color: var(--text-secondary); }
+  body.dark .time-pill.active { background: var(--text); color: var(--bg); }
+
+  .theme-toggle {
+    cursor: pointer;
+    font-size: 0.78rem;
+    color: var(--text-tertiary);
+    background: none;
+    border: 1px solid var(--border);
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    font-family: inherit;
+  }
+  .theme-toggle:hover { color: var(--text); border-color: var(--text-secondary); }
+
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   body {
@@ -653,6 +692,7 @@
   <div id="navBar" style="font-size:0.75rem; margin-top:0.4rem; display:flex; gap:1rem; color:var(--text-tertiary);">
     <a href="/about" style="color:var(--text-secondary); text-decoration:none;">About</a>
     <span id="navAuth"></span>
+    <button class="theme-toggle" onclick="toggleDarkMode()" id="themeBtn" title="Toggle dark mode">light</button>
   </div>
   <div class="header-stats" id="stats">loading...</div>
 </header>
@@ -1555,5 +1595,19 @@ setInterval(() => {
 }, 60000);
 </script>
 
+<script>
+function toggleDarkMode() {
+  const dark = document.body.classList.toggle('dark');
+  localStorage.setItem('gdelt-dark', dark ? '1' : '0');
+  document.getElementById('themeBtn').textContent = dark ? 'dark' : 'light';
+}
+// Restore preference on load
+(function() {
+  if (localStorage.getItem('gdelt-dark') === '1') {
+    document.body.classList.add('dark');
+    document.getElementById('themeBtn').textContent = 'dark';
+  }
+})();
+</script>
 </body>
 </html>

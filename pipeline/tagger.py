@@ -112,7 +112,11 @@ CATEGORIES: dict[str, dict] = {
             "reinforcement learning", "ai benchmark",
             "ai safety", "ai alignment", "ai ethics",
         ],
-        "gkg_theme_prefixes": [],
+        "gkg_theme_prefixes": [
+            "SOC_EMERGINGTECH", "SOC_TECHNOLOGYSECTOR",
+            "TECH_AUTOMATION", "TECH_BIGDATA", "TECH_SUPERCOMPUTING",
+            "TECH_VIRTUALREALITY",
+        ],
         "scan_description": True,
     },
     "ai_defense": {
@@ -125,7 +129,9 @@ CATEGORIES: dict[str, dict] = {
             "ai cybersecurity", "cyber warfare ai",
             "national security ai", "pentagon ai", "darpa ai", "aukus",
         ],
-        "gkg_theme_prefixes": [],
+        "gkg_theme_prefixes": [
+            "DRONES", "CYBER_ATTACK",
+        ],
         "scan_description": True,
     },
     "ai_regulation": {
@@ -157,7 +163,11 @@ CATEGORIES: dict[str, dict] = {
             "ai art", "ai music", "ai video generation",
             "ai content creation", "sora", "midjourney", "stable diffusion",
         ],
-        "gkg_theme_prefixes": [],
+        "gkg_theme_prefixes": [
+            "WB_676_CLOUD_COMPUTING", "WB_661_BIG_DATA",
+            "WB_665_SOFTWARE_AS_A_SERVICE",
+            "WB_1084_TECHNOLOGY_TRANSFER_AND_DIFFUSION",
+        ],
         "scan_description": True,
     },
 }

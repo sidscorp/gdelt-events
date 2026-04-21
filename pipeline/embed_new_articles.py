@@ -33,13 +33,21 @@ MAX_PER_RUN = 50_000  # cap per run to keep cycle short
 DUCKDB_CHUNK = 5_000  # rows per DuckDB query
 
 
-def find_missing_urls(con, max_count: int) -> list[tuple[str, str, str]]:
+def find_missing_urls(con, max_count: int, hours_back: int = 0) -> list[tuple[str, str, str]]:
     """Find GAL URLs (English, non-empty) not yet in the manifest.
     Returns up to max_count rows of (url, title, description).
+
+    hours_back: if > 0, only scan articles from the last N hours.
+                If 0, scan the entire GAL table (for backfill).
     """
-    # Stream through GAL in crawled_at order, batch-check against manifest
+    from datetime import datetime, timedelta
+
     found = []
-    cursor_ts = 0
+    if hours_back > 0:
+        cutoff = datetime.utcnow() - timedelta(hours=hours_back)
+        cursor_ts = int(cutoff.strftime("%Y%m%d%H%M%S"))
+    else:
+        cursor_ts = 0
 
     while len(found) < max_count:
         chunk = con.execute(
@@ -120,14 +128,17 @@ def main():
         return
 
     embedding_store.init()
-    max_per_run = MAX_PER_RUN if "--all" not in args else 10_000_000
-    log.info("Looking for missing URLs (max %d)...", max_per_run)
+    is_full = "--all" in args
+    max_per_run = 10_000_000 if is_full else MAX_PER_RUN
+    hours_back = 0 if is_full else 2  # incremental: only last 2 hours
+    log.info("Looking for missing URLs (max %d, hours_back=%d)...",
+             max_per_run, hours_back)
 
     con = duckdb.connect(str(DB_PATH), read_only=True)
     con.execute("SET threads = 2")
 
     t0 = time.time()
-    missing = find_missing_urls(con, max_per_run)
+    missing = find_missing_urls(con, max_per_run, hours_back=hours_back)
     con.close()  # release DuckDB immediately so dashboard isn't blocked
     log.info("Found %d missing URLs in %.1fs", len(missing), time.time() - t0)
 

@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <title>My Pills — GDELT Monitor</title>
 <style>
   :root { --text: #1a1a1a; --text-secondary: #555; --text-tertiary: #888; --border: #ccc; --bg: #fafaf8; }
@@ -19,7 +20,11 @@
   .pill-status.completed { background: #edf5ef; color: #2d7a3a; }
   .pill-status.queued, .pill-status.running { background: #fdf5e6; color: #b87300; }
   .pill-status.failed { background: #fde8e8; color: #a33; }
+  .pill-type-badge { font-size: 0.65rem; padding: 0.08rem 0.35rem; border-radius: 2px; margin-left: 0.4rem; font-weight: normal; }
+  .pill-type-badge.keyword { background: #f0f0ee; color: var(--text-secondary); }
+  .pill-type-badge.semantic { background: #e8edf5; color: #3a5a8a; }
   .pill-meta { font-size: 0.75rem; color: var(--text-tertiary); margin-top: 0.4rem; }
+  .pill-description { font-size: 0.78rem; color: var(--text-secondary); margin-top: 0.3rem; font-style: italic; line-height: 1.4; }
   .pill-keywords { font-size: 0.72rem; color: var(--text-secondary); margin-top: 0.3rem; display: flex; flex-wrap: wrap; gap: 0.2rem; }
   .pill-keywords span { background: #f0f0ee; padding: 0.05rem 0.3rem; }
   .pill-actions { margin-top: 0.5rem; }
@@ -41,6 +46,16 @@
   #createError { color: #a33; font-size: 0.78rem; margin-top: 0.4rem; }
   #createSuccess { color: #2d7a3a; font-size: 0.78rem; margin-top: 0.4rem; }
 
+  .type-toggle { display: flex; gap: 0; margin-top: 0.3rem; margin-bottom: 0.5rem; }
+  .type-toggle button { font-family: inherit; font-size: 0.78rem; padding: 0.35rem 0.9rem; border: 1px solid var(--border); background: #fff; cursor: pointer; color: var(--text-secondary); }
+  .type-toggle button:first-child { border-radius: 3px 0 0 3px; }
+  .type-toggle button:last-child { border-radius: 0 3px 3px 0; border-left: none; }
+  .type-toggle button.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+
+  .threshold-row { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.5rem; }
+  .threshold-row input[type=range] { flex: 1; }
+  .threshold-row .threshold-val { font-size: 0.78rem; font-variant-numeric: tabular-nums; min-width: 2.5em; }
+
   .empty { font-size: 0.88rem; color: var(--text-tertiary); padding: 1.5rem 0; text-align: center; }
   .links { margin-top: 2rem; font-size: 0.78rem; }
   .links a { color: var(--text-secondary); text-decoration: none; }
@@ -48,18 +63,49 @@
 </head>
 <body>
 <h1>My Monitoring Pills</h1>
-<p class="subtitle">Create custom keyword filters to track any topic across 25M+ global news articles</p>
+<p class="subtitle">Create custom filters to track any topic across 25M+ global news articles</p>
 
 <h2>Create New Pill</h2>
 <div class="create-form">
+  <label>Type</label>
+  <div class="type-toggle">
+    <button class="active" onclick="setType('keyword')">Keyword</button>
+    <button onclick="setType('semantic')">Semantic</button>
+  </div>
+
   <label>Pill Name</label>
   <input type="text" id="pillName" placeholder="e.g. Semiconductor Supply, Pharma M&A, Energy Markets" maxlength="100">
-  <label>Keywords</label>
-  <textarea id="pillKeywords" placeholder="chip, semiconductor, TSMC, fab, wafer, silicon, foundry, chipmaker"></textarea>
-  <div class="hint">Comma-separated. Articles matching any keyword in their title or description will be captured. Min 2, max 200.</div>
-  <label style="display:flex;align-items:center;gap:0.4rem;text-transform:none;letter-spacing:0;margin-top:0.5rem;">
-    <input type="checkbox" id="pillScanDesc" checked> Also scan article descriptions (recommended)
-  </label>
+
+  <div id="keywordFields">
+    <label>Keywords</label>
+    <textarea id="pillKeywords" placeholder="chip, semiconductor, TSMC, fab, wafer, silicon, foundry, chipmaker"></textarea>
+    <div class="hint">Comma-separated. Articles matching any keyword in their title or description will be captured. Min 2, max 200.</div>
+    <label style="display:flex;align-items:center;gap:0.4rem;text-transform:none;letter-spacing:0;margin-top:0.5rem;">
+      <input type="checkbox" id="pillScanDesc" checked> Also scan article descriptions (recommended)
+    </label>
+  </div>
+
+  <div id="semanticFields" style="display:none;">
+    <label>Description</label>
+    <textarea id="pillDescription" placeholder="Articles about geopolitical tensions affecting international trade routes, particularly in the South China Sea and Strait of Hormuz, including naval exercises, shipping disruptions, and diplomatic responses" style="height:90px;"></textarea>
+    <div class="hint">Describe what you want to monitor in natural language. Articles are matched by meaning, not exact keywords. Be specific about the topic, context, and what makes an article relevant.</div>
+    <div class="threshold-row">
+      <label style="margin:0;min-width:fit-content;">Sensitivity</label>
+      <input type="range" id="pillThreshold" min="40" max="70" value="55" oninput="updateThreshold()">
+      <span class="threshold-val" id="thresholdDisplay">0.55</span>
+    </div>
+    <div class="hint">Lower = more articles (broader match), higher = fewer articles (stricter match). 0.55 is a good default. 0.50 for broad monitoring, 0.60+ for high precision.</div>
+    <label>Time Range</label>
+    <select id="pillScanDays" style="font-family:inherit;font-size:0.85rem;padding:0.35rem;border:1px solid var(--border);background:#fff;width:auto;">
+      <option value="3">Last 3 days (~15 min)</option>
+      <option value="7" selected>Last 7 days (~2 hours)</option>
+      <option value="14">Last 14 days (~4 hours)</option>
+      <option value="30">Last 30 days (~8 hours)</option>
+      <option value="60">Full corpus / 60 days (~20 hours)</option>
+    </select>
+    <div class="hint">How far back to scan. Longer ranges find more articles but take longer to build. New articles are tagged automatically going forward.</div>
+  </div>
+
   <button onclick="createPillFromPortal()">Create Pill</button>
   <div id="createError"></div>
   <div id="createSuccess"></div>
@@ -71,18 +117,25 @@
   {% for p in pills %}
   <div class="pill-card" id="pill-{{ p.id }}">
     <div class="pill-header">
-      <span class="pill-name">{{ p.name }}</span>
+      <span>
+        <span class="pill-name">{{ p.name }}</span>
+        <span class="pill-type-badge {{ p.pill_type or 'keyword' }}">{{ p.pill_type or 'keyword' }}</span>
+      </span>
       <span class="pill-status {{ p.job_status or 'queued' }}">{{ p.job_status or 'queued' }}</span>
     </div>
     <div class="pill-meta">
       {{ p.article_count or 0 }} articles matched
       {% if p.elapsed_seconds %} · built in {{ "%.0f"|format(p.elapsed_seconds) }}s{% endif %}
       {% if p.last_built_at %} · last built {{ p.last_built_at[:16] }}{% endif %}
+      {% if (p.pill_type or 'keyword') == 'semantic' and p.similarity_threshold %} · threshold {{ "%.2f"|format(p.similarity_threshold) }} · {{ p.scan_days or 7 }}d range{% endif %}
     </div>
     {% if p.job_status == 'running' and p.progress_pct is not none %}
     <div class="progress-bar"><div class="progress-fill" style="width:{{ p.progress_pct }}%"></div></div>
     <div class="pill-meta">Building... {{ p.progress_pct }}%</div>
     {% endif %}
+    {% if (p.pill_type or 'keyword') == 'semantic' and p.description_text %}
+    <div class="pill-description">"{{ p.description_text[:200] }}{% if p.description_text|length > 200 %}...{% endif %}"</div>
+    {% else %}
     <div class="pill-keywords">
       {% for kw in (p.keywords_json | from_json)[:20] %}
       <span>{{ kw }}</span>
@@ -91,6 +144,7 @@
       <span style="color:var(--text-tertiary);">+{{ (p.keywords_json | from_json) | length - 20 }} more</span>
       {% endif %}
     </div>
+    {% endif %}
     <div class="pill-actions">
       <a href="/?view=custom-{{ p.id }}" class="btn-sm">View on dashboard</a>
       <button class="btn-sm btn-danger" onclick="deletePill('{{ p.id }}', '{{ p.name }}')">Delete</button>
@@ -109,28 +163,76 @@
 </div>
 
 <script>
+let pillType = 'keyword';
+
+function setType(type) {
+  pillType = type;
+  document.querySelectorAll('.type-toggle button').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('keywordFields').style.display = type === 'keyword' ? '' : 'none';
+  document.getElementById('semanticFields').style.display = type === 'semantic' ? '' : 'none';
+}
+
+function updateThreshold() {
+  const val = document.getElementById('pillThreshold').value / 100;
+  document.getElementById('thresholdDisplay').textContent = val.toFixed(2);
+}
+
 async function createPillFromPortal() {
   const name = document.getElementById('pillName').value.trim();
-  const keywords = document.getElementById('pillKeywords').value.trim();
-  const scanDesc = document.getElementById('pillScanDesc').checked;
   const errEl = document.getElementById('createError');
   const successEl = document.getElementById('createSuccess');
   errEl.textContent = ''; successEl.textContent = '';
   if (!name) { errEl.textContent = 'Name required.'; return; }
-  if (!keywords) { errEl.textContent = 'Keywords required.'; return; }
+
+  let body;
+  if (pillType === 'semantic') {
+    const description = document.getElementById('pillDescription').value.trim();
+    if (!description || description.length < 10) {
+      errEl.textContent = 'Description must be at least 10 characters.';
+      return;
+    }
+    const threshold = document.getElementById('pillThreshold').value / 100;
+    const scanDays = parseInt(document.getElementById('pillScanDays').value);
+    body = { name, pill_type: 'semantic', description, similarity_threshold: threshold, scan_days: scanDays };
+  } else {
+    const keywords = document.getElementById('pillKeywords').value.trim();
+    const scanDesc = document.getElementById('pillScanDesc').checked;
+    if (!keywords) { errEl.textContent = 'Keywords required.'; return; }
+    body = { name, pill_type: 'keyword', keywords, scan_description: scanDesc };
+  }
+
   try {
+    const btn = document.querySelector('.create-form button');
+    btn.disabled = true;
+    btn.textContent = pillType === 'semantic' ? 'Embedding description...' : 'Creating...';
+
     const resp = await fetch('/api/pills', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ name, keywords, scan_description: scanDesc }),
+      body: JSON.stringify(body),
     });
     const data = await resp.json();
+    btn.disabled = false;
+    btn.textContent = 'Create Pill';
+
     if (!resp.ok) { errEl.textContent = data.error || 'Failed'; return; }
-    successEl.textContent = `Pill "${name}" created! Building in background (~10 min). Refresh to see progress.`;
+
+    const typeLabel = pillType === 'semantic' ? 'Semantic pill' : 'Pill';
+    let timeEstimate = '~10 min';
+    if (pillType === 'semantic') {
+      const days = parseInt(document.getElementById('pillScanDays').value);
+      const estimates = {3: '~15 min', 7: '~2 hours', 14: '~4 hours', 30: '~8 hours', 60: '~20 hours'};
+      timeEstimate = estimates[days] || '~2 hours';
+    }
+    successEl.textContent = `${typeLabel} "${name}" created! Building in background (${timeEstimate}). Refresh to see progress.`;
     document.getElementById('pillName').value = '';
     document.getElementById('pillKeywords').value = '';
+    document.getElementById('pillDescription').value = '';
     setTimeout(() => location.reload(), 3000);
   } catch (err) {
+    document.querySelector('.create-form button').disabled = false;
+    document.querySelector('.create-form button').textContent = 'Create Pill';
     errEl.textContent = 'Network error: ' + err.message;
   }
 }

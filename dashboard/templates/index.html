@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <title>GDELT News</title>
 <style>
   /* Tufte-inspired: high data-ink ratio, no decoration */
@@ -602,6 +603,16 @@
   .suggestion-item:hover { background: var(--bg-hover); }
   .suggestion-count { color: var(--text-tertiary); font-size: 0.72rem; }
 
+  /* Section label — tiny uppercase hint for what each row does */
+  .section-label {
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-tertiary);
+    margin: 0.6rem 0 0.2rem 0;
+  }
+  .section-label:first-of-type { margin-top: 0.4rem; }
+
   /* Footer */
   footer {
     margin-top: 2rem;
@@ -635,13 +646,18 @@
       </select>
     </div>
   </div>
-  <div id="navBar" style="font-size:0.75rem; margin-top:0.3rem; display:flex; gap:1rem; color:var(--text-tertiary);">
+  <div style="font-size:0.82rem; color:var(--text-secondary); margin-top:0.2rem;">
+    Real-time monitoring of 44K global news sources, updated every 15 minutes.
+    Filter by curated topic, time range, or text.
+  </div>
+  <div id="navBar" style="font-size:0.75rem; margin-top:0.4rem; display:flex; gap:1rem; color:var(--text-tertiary);">
     <a href="/about" style="color:var(--text-secondary); text-decoration:none;">About</a>
-    <span id="navAuth"><a href="/login" style="color:var(--text-secondary);text-decoration:none;">Login</a></span>
+    <span id="navAuth"></span>
   </div>
   <div class="header-stats" id="stats">loading...</div>
 </header>
 
+<div class="section-label" title="GAL = Global Article List (titles + sources). GKG = Global Knowledge Graph (themes, persons, organizations, locations).">Source database</div>
 <div class="source-tabs" id="sourceTabs">
   <button class="source-tab active" data-source="gal">
     <span>GAL</span><span class="source-tab-count" id="galCount">…</span>
@@ -654,6 +670,7 @@
   </button>
 </div>
 
+<div class="section-label">Curated topics <span style="text-transform:none; letter-spacing:0; color:var(--text-tertiary); font-size:0.7rem;">— click for pre-built filters, or click the ? to see what each one matches</span></div>
 <div style="display:flex; align-items:center; flex-wrap:wrap; gap:0.3rem;">
   <div class="views-bar" id="viewsBar" style="margin:0;"></div>
   <div class="match-profile" id="matchProfile">
@@ -662,6 +679,7 @@
   </div>
 </div>
 
+<div class="section-label">Time range</div>
 <div class="time-pills" id="timePills">
   <button class="time-pill active" data-hours="1">1h</button>
   <button class="time-pill" data-hours="6">6h</button>
@@ -669,9 +687,9 @@
   <button class="time-pill" data-hours="72">3d</button>
   <button class="time-pill" data-hours="168">7d</button>
   <button class="time-pill" data-hours="720">30d</button>
-  <button class="time-pill" data-hours="">all</button>
 </div>
 
+<div class="section-label">Refine results <span style="text-transform:none; letter-spacing:0; color:var(--text-tertiary); font-size:0.7rem;">— stack multiple filters; they combine with AND</span></div>
 <div class="filters">
   <div class="filter-group f-shared">
     <span class="filter-label">Search</span>
@@ -1396,9 +1414,7 @@ async function fetchViews() {
         (data.user.is_admin ? ` <a href="/admin/users" style="color:var(--text-secondary);text-decoration:none;">Admin</a>` : '') +
         ` <a href="/logout" style="color:var(--text-tertiary);text-decoration:none;">Logout (${data.user.display_name})</a>`;
     } else {
-      navAuth.innerHTML =
-        `<a href="/login" style="color:var(--text-secondary);text-decoration:none;">Login</a>` +
-        ` <a href="/register" style="color:var(--text-secondary);text-decoration:none;">Register</a>`;
+      navAuth.innerHTML = '';  // login/register hidden temporarily
     }
   } catch (err) {
     document.getElementById('viewsBar').innerHTML = '';

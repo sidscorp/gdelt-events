@@ -54,6 +54,61 @@ VIEWS = [
         "tag_category": "supply_chain",
         "default_hours": 24,
     },
+    {
+        "id": "semiconductors",
+        "name": "Semiconductor & Chip Geopolitics",
+        "description": (
+            "Chipmakers, fab capacity, export controls, trade restrictions, "
+            "and the geopolitics of the global semiconductor supply chain."
+        ),
+        "kind": "tag_match",
+        "tag_category": "semiconductors",
+        "default_hours": 24,
+    },
+    {
+        "id": "ai-general",
+        "name": "AI & Machine Learning",
+        "description": (
+            "Artificial intelligence breakthroughs, model releases, company news, "
+            "investments, and the broader AI/ML landscape."
+        ),
+        "kind": "tag_match",
+        "tag_category": "ai_general",
+        "default_hours": 24,
+    },
+    {
+        "id": "ai-defense",
+        "name": "AI in Defense & Intelligence",
+        "description": (
+            "Military AI applications, autonomous weapons, defense contracts, "
+            "AI surveillance, and national security implications."
+        ),
+        "kind": "tag_match",
+        "tag_category": "ai_defense",
+        "default_hours": 24,
+    },
+    {
+        "id": "ai-regulation",
+        "name": "AI Regulation & Policy",
+        "description": (
+            "AI governance, legislation, safety frameworks, executive orders, "
+            "bias audits, and the evolving regulatory landscape."
+        ),
+        "kind": "tag_match",
+        "tag_category": "ai_regulation",
+        "default_hours": 24,
+    },
+    {
+        "id": "ai-sector-impact",
+        "name": "AI Sector Impact",
+        "description": (
+            "AI transforming industries — healthcare, finance, education, "
+            "manufacturing, creative tools, and workforce displacement."
+        ),
+        "kind": "tag_match",
+        "tag_category": "ai_sector_impact",
+        "default_hours": 24,
+    },
 ]
 
 

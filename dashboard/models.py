@@ -41,8 +41,13 @@ def init_user_db():
             id TEXT PRIMARY KEY,
             user_id INTEGER REFERENCES users(id),
             name TEXT NOT NULL,
-            keywords_json TEXT NOT NULL,
+            keywords_json TEXT NOT NULL DEFAULT '[]',
             scan_description INTEGER DEFAULT 1,
+            pill_type TEXT DEFAULT 'keyword',
+            description_text TEXT,
+            description_embedding BLOB,
+            similarity_threshold REAL DEFAULT 0.55,
+            scan_days INTEGER DEFAULT 7,
             created_at TEXT DEFAULT (datetime('now')),
             article_count INTEGER DEFAULT 0,
             last_built_at TEXT
@@ -61,6 +66,8 @@ def init_user_db():
             elapsed_seconds REAL
         );
     """)
+    # Migrate: add columns if missing (idempotent)
+    _migrate_semantic_columns(con)
     con.close()
 
 
@@ -140,6 +147,22 @@ def email_exists(email: str) -> bool:
 # Pill operations
 # ---------------------------------------------------------------------------
 
+def _migrate_semantic_columns(con):
+    """Add semantic pill columns if they don't exist (for upgrades)."""
+    cols = {r[1] for r in con.execute("PRAGMA table_info(custom_pills)").fetchall()}
+    migrations = {
+        "pill_type": "ALTER TABLE custom_pills ADD COLUMN pill_type TEXT DEFAULT 'keyword'",
+        "description_text": "ALTER TABLE custom_pills ADD COLUMN description_text TEXT",
+        "description_embedding": "ALTER TABLE custom_pills ADD COLUMN description_embedding BLOB",
+        "similarity_threshold": "ALTER TABLE custom_pills ADD COLUMN similarity_threshold REAL DEFAULT 0.55",
+        "scan_days": "ALTER TABLE custom_pills ADD COLUMN scan_days INTEGER DEFAULT 7",
+    }
+    for col, sql in migrations.items():
+        if col not in cols:
+            con.execute(sql)
+    con.commit()
+
+
 def _slugify(name: str) -> str:
     import re
     slug = re.sub(r"[^a-z0-9]+", "-", name.lower().strip()).strip("-")
@@ -170,10 +193,41 @@ def create_pill(user_id: int, name: str, keywords: list[str],
     return pill_id
 
 
+def create_semantic_pill(user_id: int, name: str, description: str,
+                         embedding: bytes, threshold: float = 0.55,
+                         scan_days: int = 7) -> str:
+    """Create a semantic pill that matches articles by embedding similarity."""
+    pill_id = _slugify(name)
+    con = get_user_db()
+    base = pill_id
+    counter = 1
+    while con.execute("SELECT 1 FROM custom_pills WHERE id=?", (pill_id,)).fetchone():
+        pill_id = f"{base}-{counter}"
+        counter += 1
+    con.execute(
+        "INSERT INTO custom_pills "
+        "(id, user_id, name, pill_type, description_text, description_embedding, "
+        " similarity_threshold, scan_days, keywords_json, scan_description) "
+        "VALUES (?, ?, ?, 'semantic', ?, ?, ?, ?, '[]', 1)",
+        (pill_id, user_id, name.strip(), description.strip(),
+         embedding, threshold, scan_days),
+    )
+    con.execute(
+        "INSERT INTO pill_jobs (pill_id, status) VALUES (?, 'queued')",
+        (pill_id,),
+    )
+    con.commit()
+    con.close()
+    return pill_id
+
+
 def get_user_pills(user_id: int) -> list[dict]:
     con = get_user_db()
     rows = con.execute(
-        "SELECT p.*, j.status as job_status, j.progress_pct, j.elapsed_seconds "
+        "SELECT p.id, p.user_id, p.name, p.keywords_json, p.scan_description, "
+        "p.pill_type, p.description_text, p.similarity_threshold, p.scan_days, "
+        "p.created_at, p.article_count, p.last_built_at, "
+        "j.status as job_status, j.progress_pct, j.elapsed_seconds "
         "FROM custom_pills p "
         "LEFT JOIN pill_jobs j ON j.pill_id = p.id "
         "WHERE p.user_id = ? "

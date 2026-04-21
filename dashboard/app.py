@@ -19,7 +19,8 @@ from flask_login import login_user, logout_user, login_required, current_user
 from views import VIEWS, find_view
 from models import (
     init_user_db, create_user, authenticate, email_exists,
-    get_user_pills, create_pill, get_pill, get_pill_job_status,
+    get_user_pills, create_pill, create_semantic_pill,
+    get_pill, get_pill_job_status,
     delete_pill, list_users, approve_user, reject_user,
 )
 from auth import init_auth, User
@@ -51,7 +52,7 @@ if not req_log.handlers:
 # 10 GB (observed this session). Without this, per-request connections
 # accumulated page cache across requests and the proc drifted OOM-ward.
 CONN_MEMORY_LIMIT = "1500MB"
-CONN_THREADS = 2
+CONN_THREADS = 4
 STATEMENT_TIMEOUT_S = 35  # dashboard aborts its own slow queries at 35s
 
 
@@ -64,7 +65,7 @@ def get_db(max_retries=3):
     """
     for attempt in range(max_retries):
         try:
-            con = duckdb.connect(str(DB_PATH), read_only=True)
+            con = duckdb.connect(str(DB_PATH))
             try:
                 con.execute(f"SET memory_limit='{CONN_MEMORY_LIMIT}'")
                 con.execute(f"SET threads={CONN_THREADS}")
@@ -238,6 +239,141 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/search")
+def search_page():
+    """Standalone semantic search interface."""
+    return render_template("search.html")
+
+
+@app.route("/api/semantic_search")
+def api_semantic_search():
+    """Semantic search over the pre-embedded article corpus.
+
+    Query params:
+        q: query text (required)
+        hours: relative time window (e.g. 24, 168)
+        date_from: YYYY-MM-DD
+        date_to: YYYY-MM-DD
+        domain: filter by source domain (ILIKE substring)
+        language: e.g. 'en'
+        page, per_page: pagination (default 1, 25)
+        k: candidates to retrieve from FAISS (default 500)
+
+    Returns ranked results with similarity scores. Public — no auth required.
+    """
+    import semantic_search
+
+    q = (request.args.get("q") or "").strip()
+    if not q:
+        return jsonify({"error": "Missing q parameter"}), 400
+    if len(q) > 500:
+        return jsonify({"error": "Query too long (max 500 chars)"}), 400
+
+    try:
+        page = max(1, int(request.args.get("page", 1)))
+        per_page = max(1, min(100, int(request.args.get("per_page", 25))))
+        k = max(per_page * page, min(2000, int(request.args.get("k", 500))))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid pagination params"}), 400
+
+    # Get top-K candidates from FAISS
+    t0 = time.time()
+    try:
+        candidates = semantic_search.search(q, k=k)
+    except Exception as e:
+        return jsonify({"error": f"Search backend error: {e}"}), 503
+    t_faiss = time.time() - t0
+
+    if not candidates:
+        return jsonify({
+            "query": q, "articles": [], "total": 0,
+            "page": page, "per_page": per_page, "pages": 0,
+            "timing_ms": {"faiss": int(t_faiss * 1000)},
+        })
+
+    # Build a lookup of url -> score for ranking after DuckDB join
+    score_by_url = {url: score for url, score in candidates}
+    candidate_urls = list(score_by_url.keys())
+
+    # Build filters
+    conds = ["url IN ({})".format(",".join(["?"] * len(candidate_urls)))]
+    params = list(candidate_urls)
+
+    hours, df, dt = _parse_date_filters(request)
+    if hours:
+        conds.append("crawled_at >= ?")
+        params.append(_hours_cutoff(hours))
+    if df is not None:
+        conds.append("crawled_at >= ?")
+        params.append(df)
+    if dt is not None:
+        conds.append("crawled_at <= ?")
+        params.append(dt)
+
+    domain = (request.args.get("domain") or "").strip()
+    if domain:
+        conds.append("domain ILIKE ?")
+        params.append(f"%{domain}%")
+
+    language = (request.args.get("language") or "").strip()
+    if language:
+        conds.append("language = ?")
+        params.append(language)
+
+    # Query DuckDB for full article metadata
+    con = get_db()
+    if con is None:
+        return jsonify({"error": "Database busy"}), 503
+
+    cancel = _arm_statement_timeout(con)
+    t1 = time.time()
+    try:
+        sql = (
+            f"SELECT {GAL_COLS} FROM gal WHERE " + " AND ".join(conds)
+        )
+        rows = con.execute(sql, params).fetchall()
+    except Exception as e:
+        return jsonify({"error": f"DB query error: {e}"}), 500
+    finally:
+        try: cancel()
+        except Exception: pass
+        try: con.close()
+        except Exception: pass
+    t_db = time.time() - t1
+
+    # Build result list, ranked by similarity score
+    cols = ["url", "crawled_at", "domain", "outlet_name", "title",
+            "image", "description", "language"]
+    articles = []
+    for row in rows:
+        d = dict(zip(cols, row))
+        d["score"] = score_by_url.get(d["url"], 0.0)
+        ts = format_timestamp(d.get("crawled_at"))
+        d["crawled_at_iso"] = ts.isoformat() if ts else None
+        d["time_ago"] = time_ago(ts) if ts else None
+        articles.append(d)
+    articles.sort(key=lambda a: a["score"], reverse=True)
+
+    total = len(articles)
+    pages = (total + per_page - 1) // per_page
+    start = (page - 1) * per_page
+    page_articles = articles[start:start + per_page]
+
+    return jsonify({
+        "query": q,
+        "articles": page_articles,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+        "pages": pages,
+        "k_searched": k,
+        "timing_ms": {
+            "faiss": int(t_faiss * 1000),
+            "db": int(t_db * 1000),
+        },
+    })
+
+
 @app.route("/api/views")
 def api_views():
     """Return shared views + logged-in user's custom pills."""
@@ -245,7 +381,8 @@ def api_views():
     if current_user.is_authenticated:
         for pill in get_user_pills(current_user.id):
             job_status = pill.get("job_status", "queued")
-            views.append({
+            pill_type = pill.get("pill_type", "keyword")
+            entry = {
                 "id": f"custom-{pill['id']}",
                 "name": pill["name"],
                 "description": f"Custom pill: {pill['name']}",
@@ -254,9 +391,14 @@ def api_views():
                 "default_hours": 24,
                 "custom": True,
                 "pill_id": pill["id"],
+                "pill_type": pill_type,
                 "job_status": job_status,
                 "article_count": pill.get("article_count", 0),
-            })
+            }
+            if pill_type == "semantic":
+                entry["description_text"] = pill.get("description_text", "")
+                entry["similarity_threshold"] = pill.get("similarity_threshold", 0.55)
+            views.append(entry)
     return jsonify({
         "views": views,
         "authenticated": current_user.is_authenticated,
@@ -453,6 +595,11 @@ def _build_gal_where(request):
     if dt is not None:
         conditions.append("crawled_at <= ?")
         params.append(dt)
+    # Safety net: if no time filter at all, default to 7 days to prevent
+    # full-table ILIKE scans on 25M rows (which take 35s+ and block ingest).
+    if not hours and df is None and dt is None:
+        conditions.append("crawled_at >= ?")
+        params.append(_hours_cutoff(168))
 
     q = request.args.get("q", "").strip()
     if q:
@@ -1433,6 +1580,47 @@ def api_pills_list():
 def api_pills_create():
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
+    pill_type = data.get("pill_type", "keyword")
+
+    if not name or len(name) > 100:
+        return jsonify({"error": "Name required (max 100 chars)"}), 400
+
+    if pill_type == "semantic":
+        description = (data.get("description") or "").strip()
+        if not description or len(description) < 10:
+            return jsonify({"error": "Description must be at least 10 characters"}), 400
+        if len(description) > 2000:
+            return jsonify({"error": "Description max 2000 characters"}), 400
+        threshold = data.get("similarity_threshold", 0.55)
+        try:
+            threshold = max(0.3, min(0.8, float(threshold)))
+        except (TypeError, ValueError):
+            threshold = 0.55
+        scan_days = data.get("scan_days", 7)
+        try:
+            scan_days = max(1, min(60, int(scan_days)))
+        except (TypeError, ValueError):
+            scan_days = 7
+
+        # Embed the description via rainbow-boi
+        import sys, struct
+        _pipeline = str(Path(__file__).resolve().parent.parent / "pipeline")
+        if _pipeline not in sys.path:
+            sys.path.insert(0, _pipeline)
+        try:
+            from embedder import embed_query
+            vec = embed_query(description)
+            embedding_blob = struct.pack(f"{len(vec)}f", *vec)
+        except Exception as e:
+            return jsonify({"error": f"Embedding service error: {e}"}), 503
+
+        pill_id = create_semantic_pill(
+            current_user.id, name, description, embedding_blob, threshold,
+            scan_days,
+        )
+        return jsonify({"pill_id": pill_id, "status": "queued", "pill_type": "semantic"}), 201
+
+    # Keyword pill (default)
     keywords_raw = data.get("keywords", "")
     scan_desc = data.get("scan_description", True)
 
@@ -1443,15 +1631,13 @@ def api_pills_create():
     else:
         keywords = []
 
-    if not name or len(name) > 100:
-        return jsonify({"error": "Name required (max 100 chars)"}), 400
     if len(keywords) < 2:
         return jsonify({"error": "At least 2 keywords required"}), 400
     if len(keywords) > 200:
         return jsonify({"error": "Max 200 keywords"}), 400
 
     pill_id = create_pill(current_user.id, name, keywords, scan_desc)
-    return jsonify({"pill_id": pill_id, "status": "queued"}), 201
+    return jsonify({"pill_id": pill_id, "status": "queued", "pill_type": "keyword"}), 201
 
 
 @app.route("/api/pills/<pill_id>/status")

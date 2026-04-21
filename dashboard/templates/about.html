@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <title>About — GDELT Monitor</title>
 <style>
   :root { --text: #1a1a1a; --text-secondary: #555; --text-tertiary: #888; --border: #ccc; --bg: #fafaf8; }
@@ -23,35 +24,40 @@
 <body>
 
 <h1>About GDELT Monitor</h1>
-<p class="subtitle">Real-time global news intelligence for supply chain awareness</p>
+<p class="subtitle">A real-time global news intelligence system</p>
 
 <h2>Why this exists</h2>
-<p>Medical device supply chains are global, complex, and fragile. A factory fire in one country, a tariff announcement in another, or a natural disaster near a key manufacturing hub can cascade into shortages and delays that affect patient care. Yet most supply chain monitoring is reactive — you learn about a disruption after it's already impacting you.</p>
+<p>I'm a Decision Scientist who keeps close tabs on national and global affairs. I wanted an intelligence system that could surface the signals that matter across the full breadth of the world's news output — not just what an algorithm thinks I should see, but what I decide to track, on my terms.</p>
 
-<p>GDELT Monitor was built to close that gap. It continuously ingests the GDELT Project's global news feed — over 25 million articles from tens of thousands of sources worldwide — and surfaces signals that matter: FDA-registered company mentions, supply chain disruption keywords, geopolitical shocks, trade policy changes, and natural disasters at manufacturing hubs.</p>
+<p>I'm also a computational modeler at heart, and building the pipeline was as much the point as using it. GDELT publishes a firehose of global news metadata — over 25 million articles from tens of thousands of sources worldwide — and the challenge was: how do you build a system that ingests all of it, matches against arbitrary patterns in near-real-time, and stays responsive on self-hosted hardware?</p>
+
+<h2>What it does</h2>
+<p>Every 15 minutes, the pipeline downloads the latest articles from GDELT's Global Article List and Global Knowledge Graph. Articles are loaded into a DuckDB analytical database and scanned against multiple classification systems — keyword pattern matching, entity recognition, and semantic embeddings.</p>
+
+<p>The system ships with a few built-in monitoring views as examples of what's possible:</p>
+<ul style="font-size:0.88rem; margin: 0 0 1rem 1.2rem;">
+  <li><strong>Medical Device Companies</strong> — matches articles mentioning any of ~4,000 FDA-registered manufacturers by name</li>
+  <li><strong>Supply Chain Alerts</strong> — tracks geopolitical shocks, trade disruptions, natural disasters, and logistics signals</li>
+  <li><strong>Semiconductor & Chip Geopolitics</strong> — monitors US-China trade restrictions, fab capacity, and chipmaker activity</li>
+</ul>
 
 <h2>How it works</h2>
-<p>Every 15 minutes, the pipeline downloads the latest articles from GDELT's Global Article List (GAL v3) and Global Knowledge Graph (GKG v2). Articles are loaded into a DuckDB analytical database and scanned using Aho-Corasick multi-pattern string matching — a trie-based algorithm that finds all occurrences of thousands of company names and keywords in a single linear pass over the text.</p>
-
-<p>Matches are materialized into indexed cache tables so the dashboard can serve results in under a second for any time window. The system maintains a rolling 60-day window of data, pruning older articles to keep storage bounded.</p>
-
-<p>Custom monitoring pills let registered users define their own keyword sets — the system builds a combined pattern automaton and scans the full article corpus, with new articles tagged incrementally on each 15-minute cycle.</p>
+<p>Articles are scanned using Aho-Corasick automata — a trie-based algorithm that finds all occurrences of thousands of patterns in a single linear pass. Matches are materialized into indexed cache tables so the dashboard can serve results in under a second. The system maintains a rolling 60-day window and prunes older data to keep storage bounded. New articles are classified every 15 minutes.</p>
 
 <h2>The tech stack</h2>
 <ul class="tech-list">
   <li><span>Data source</span> <span>GDELT Project v2 (GKG) + v3 (GAL)</span></li>
-  <li><span>Database</span> <span>DuckDB 1.5.1 (analytical queries) + SQLite (user data)</span></li>
+  <li><span>Database</span> <span>DuckDB 1.5.1 (analytical) + SQLite (user data)</span></li>
   <li><span>Pattern matching</span> <span>Aho-Corasick via pyahocorasick</span></li>
-  <li><span>Web framework</span> <span>Flask + Waitress (Windows WSGI)</span></li>
-  <li><span>Infrastructure</span> <span>Cloudflare Tunnel (zero-trust, no exposed ports)</span></li>
+  <li><span>Embeddings</span> <span>nomic-embed-text v1.5 via Ollama</span></li>
+  <li><span>Web framework</span> <span>Flask + Waitress</span></li>
+  <li><span>Infrastructure</span> <span>Cloudflare Tunnel (zero-trust)</span></li>
   <li><span>Language</span> <span>Python 3.13</span></li>
-  <li><span>Hosting</span> <span>Self-hosted on a home server with an NVIDIA RTX 4060</span></li>
+  <li><span>Hosting</span> <span>Self-hosted, NVIDIA RTX 4060</span></li>
 </ul>
 
 <h2>Built by</h2>
-<p><strong>Sidd Nambiar</strong> — I built this as a side project to explore what's possible when you combine a massive real-time news feed with fast pattern matching and a clean analytical interface. The framework is general enough to monitor any topic.</p>
-
-<p>The source code is available at <a href="https://github.com/sidscorp/gdelt-events" target="_blank">github.com/sidscorp/gdelt-events</a>.</p>
+<p><strong>Sidd Nambiar</strong> — Decision Scientist, computational modeler, and builder of systems that help make sense of the world. This project sits at the intersection of what I do professionally and what I find genuinely interesting: turning large, noisy data streams into useful intelligence.</p>
 
 <footer>
   <a href="/">Back to dashboard</a> · Data from <a href="https://www.gdeltproject.org" target="_blank">GDELT Project</a>

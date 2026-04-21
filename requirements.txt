@@ -1,4 +1,9 @@
 requests
-rich
-matplotlib
 duckdb
+flask
+flask-login
+werkzeug
+waitress
+pyahocorasick
+numpy
+faiss-cpu

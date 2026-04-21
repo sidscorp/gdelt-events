@@ -126,25 +126,23 @@ def main():
     con = duckdb.connect(str(DB_PATH), read_only=True)
     con.execute("SET threads = 2")
 
-    try:
-        t0 = time.time()
-        missing = find_missing_urls(con, max_per_run)
-        log.info("Found %d missing URLs in %.1fs", len(missing), time.time() - t0)
+    t0 = time.time()
+    missing = find_missing_urls(con, max_per_run)
+    con.close()  # release DuckDB immediately so dashboard isn't blocked
+    log.info("Found %d missing URLs in %.1fs", len(missing), time.time() - t0)
 
-        if not missing:
-            log.info("Nothing to embed.")
-            return
+    if not missing:
+        log.info("Nothing to embed.")
+        return
 
-        t0 = time.time()
-        n = embed_and_store(missing)
-        elapsed = time.time() - t0
-        rate = n / elapsed if elapsed > 0 else 0
-        log.info("Embedded %d articles in %.1fs (%.0f/sec)", n, elapsed, rate)
+    t0 = time.time()
+    n = embed_and_store(missing)
+    elapsed = time.time() - t0
+    rate = n / elapsed if elapsed > 0 else 0
+    log.info("Embedded %d articles in %.1fs (%.0f/sec)", n, elapsed, rate)
 
-        s = embedding_store.stats()
-        log.info("Store now has %d active vectors", s["active"])
-    finally:
-        con.close()
+    s = embedding_store.stats()
+    log.info("Store now has %d active vectors", s["active"])
 
 
 if __name__ == "__main__":

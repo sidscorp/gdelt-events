@@ -1613,10 +1613,18 @@ def _build_briefing_prompt(headlines: list[str], view_name: str, view_desc: str,
         f"Below are {len(headlines)} article headlines from {time_label}, drawn from "
         f"44,000+ global news sources monitored in real-time.\n\n"
         f"{topic_context}"
-        f"Write a briefing of 4-6 sentences that synthesizes the key themes, breaking developments, "
-        f"and notable patterns. Be specific — name companies, countries, people, and figures. "
-        f"Highlight what changed, what's escalating, and what a strategist should watch. "
-        f"Do not list headlines — weave them into a coherent narrative.\n\n"
+        f"Write a structured intelligence briefing in this format:\n\n"
+        f"Start with a brief header stating the topic and time window "
+        f"(e.g., 'AI & Machine Learning — Last 24 Hours' or 'Global News — Last 7 Days'). "
+        f"The topic is \"{view_name}\" and the time window is {time_label}.\n\n"
+        f"Then write a 2-3 sentence executive summary of the overall landscape.\n\n"
+        f"Then provide 3-5 key highlights as bullet points (use • as the bullet character). "
+        f"Each highlight should be a single clear sentence naming specific companies, countries, "
+        f"people, or figures. Focus on what changed, what's escalating, what was announced, "
+        f"and what a strategist should watch.\n\n"
+        f"End with a single sentence on what to watch next.\n\n"
+        f"Be specific and concrete. No filler. No hedging. "
+        f"Use markdown formatting for emphasis and structure.\n\n"
         f"Headlines:\n{numbered}"
     )
 
@@ -1633,7 +1641,7 @@ def _generate_briefing_stream(headlines, view_name, view_desc, hours):
     payload = json.dumps({
         "model": BRIEFING_MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 500,
+        "max_tokens": 800,
         "temperature": 0.3,
         "stream": True,
     }).encode()

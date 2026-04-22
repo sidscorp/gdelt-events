@@ -1584,89 +1584,105 @@ def _get_openrouter_key():
     return None
 
 
-def _generate_briefing(headlines: list[str], view_name: str, view_desc: str) -> str | None:
-    """Call OpenRouter to generate a briefing from article headlines."""
-    from urllib.request import Request, urlopen
-    from urllib.error import URLError
-
-    key = _get_openrouter_key()
-    if not key:
-        return None
-
+def _build_briefing_prompt(headlines: list[str], view_name: str, view_desc: str,
+                            hours: int) -> str:
+    """Build a time-aware, context-rich briefing prompt."""
     numbered = "\n".join(f"{i+1}. {h}" for i, h in enumerate(headlines))
-    prompt = (
-        f"You are a news intelligence analyst. Below are the {len(headlines)} most recent "
-        f"article headlines from a monitoring feed"
-        + (f' focused on "{view_name}" ({view_desc})' if view_name else "")
-        + ".\n\n"
-        f"Summarize the key themes, developments, and notable events in 3-4 concise sentences. "
-        f"Focus on what a decision-maker would want to know. Be specific — name companies, "
-        f"countries, and figures when relevant. Do not list headlines — synthesize them into "
-        f"a coherent briefing.\n\n"
+
+    # Human-readable time range
+    if hours <= 1:
+        time_label = "the last hour"
+    elif hours <= 24:
+        time_label = f"the last {hours} hours"
+    elif hours <= 72:
+        time_label = f"the last {hours // 24} days"
+    elif hours <= 168:
+        time_label = "the last week"
+    else:
+        time_label = f"the last {hours // 24} days"
+
+    topic_context = ""
+    if view_name and view_name != "Global News":
+        topic_context = (
+            f'This feed monitors "{view_name}" — {view_desc}. '
+            f"Focus your analysis on developments relevant to this topic. "
+        )
+
+    return (
+        f"You are a senior news intelligence analyst writing a briefing for a decision-maker. "
+        f"Below are {len(headlines)} article headlines from {time_label}, drawn from "
+        f"44,000+ global news sources monitored in real-time.\n\n"
+        f"{topic_context}"
+        f"Write a briefing of 4-6 sentences that synthesizes the key themes, breaking developments, "
+        f"and notable patterns. Be specific — name companies, countries, people, and figures. "
+        f"Highlight what changed, what's escalating, and what a strategist should watch. "
+        f"Do not list headlines — weave them into a coherent narrative.\n\n"
         f"Headlines:\n{numbered}"
     )
 
+
+def _generate_briefing_stream(headlines, view_name, view_desc, hours):
+    """Stream briefing tokens from OpenRouter as SSE."""
+    from urllib.request import Request, urlopen
+
+    key = _get_openrouter_key()
+    if not key:
+        return
+
+    prompt = _build_briefing_prompt(headlines, view_name, view_desc, hours)
     payload = json.dumps({
         "model": BRIEFING_MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 300,
+        "max_tokens": 500,
         "temperature": 0.3,
+        "stream": True,
     }).encode()
 
+    req = Request(
+        OPENROUTER_URL,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {key}",
+        },
+    )
+    with urlopen(req, timeout=60) as resp:
+        for line in resp:
+            line = line.decode("utf-8").strip()
+            if not line or not line.startswith("data: "):
+                continue
+            data_str = line[6:]
+            if data_str == "[DONE]":
+                break
+            try:
+                chunk = json.loads(data_str)
+                delta = chunk.get("choices", [{}])[0].get("delta", {})
+                content = delta.get("content", "")
+                if content:
+                    yield content
+            except (json.JSONDecodeError, IndexError, KeyError):
+                continue
+
+
+def _generate_briefing(headlines, view_name, view_desc, hours):
+    """Non-streaming briefing generation (for caching)."""
+    parts = []
     try:
-        req = Request(
-            OPENROUTER_URL,
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {key}",
-            },
-        )
-        with urlopen(req, timeout=30) as resp:
-            data = json.loads(resp.read())
-        return data["choices"][0]["message"]["content"].strip()
+        for chunk in _generate_briefing_stream(headlines, view_name, view_desc, hours):
+            parts.append(chunk)
     except Exception as e:
         req_log.warning("Briefing generation failed: %s", e)
         return None
+    return "".join(parts).strip() if parts else None
 
 
-@app.route("/api/briefing")
-def api_briefing():
-    """AI-generated briefing for the current view and time range."""
-    view_id = (request.args.get("view") or "").strip()
-    hours = request.args.get("hours", 24, type=int)
-
-    # Cache key
-    cache_key = f"{view_id or '_all'}:{hours}"
-
-    # Check cache
-    from models import get_user_db
-    ucon = get_user_db()
-    cached = ucon.execute(
-        "SELECT briefing, article_count, generated_at FROM briefing_cache WHERE cache_key = ?",
-        (cache_key,),
-    ).fetchone()
-    if cached:
-        age_s = (datetime.utcnow() - datetime.strptime(cached["generated_at"], "%Y-%m-%d %H:%M:%S")).total_seconds()
-        if age_s < BRIEFING_TTL_S:
-            ucon.close()
-            return jsonify({
-                "briefing": cached["briefing"],
-                "article_count": cached["article_count"],
-                "generated_at": cached["generated_at"],
-                "cached": True,
-                "view": view_id or None,
-                "hours": hours,
-            })
-    ucon.close()
-
-    # Fetch article titles for this view
+def _fetch_briefing_headlines(view_id, hours):
+    """Fetch article titles for a briefing. Returns (headlines, view_name, view_desc)."""
     con = get_db()
     if con is None:
-        return jsonify({"error": "Database busy"}), 503
+        return [], "Global News", ""
 
     try:
-        # Build the same query the dashboard uses, but just grab titles
         cutoff = _hours_cutoff(hours) if hours else _hours_cutoff(168)
         view = find_view(view_id) if view_id else None
         view_name = view["name"] if view else "Global News"
@@ -1678,7 +1694,7 @@ def api_briefing():
                 "SELECT g.title FROM article_tags t "
                 "JOIN gal g ON g.url = t.article_id "
                 "WHERE t.category = ? AND t.source_type = 'gal' AND t.crawled_at >= ? "
-                "ORDER BY t.crawled_at DESC LIMIT 50",
+                "ORDER BY t.crawled_at DESC LIMIT 75",
                 [cat, cutoff],
             ).fetchall()
         elif view and view.get("kind") == "fda_match":
@@ -1686,18 +1702,17 @@ def api_briefing():
                 "SELECT g.title FROM fda_match_cache f "
                 "JOIN gal g ON g.url = f.article_id "
                 "WHERE f.source_type = 'gal' AND f.crawled_at >= ? "
-                "ORDER BY f.crawled_at DESC LIMIT 50",
+                "ORDER BY f.crawled_at DESC LIMIT 75",
                 [cutoff],
             ).fetchall()
         else:
-            # No view — general briefing from top articles
             rows = con.execute(
                 "SELECT title FROM gal WHERE crawled_at >= ? AND language = 'en' "
-                "AND title IS NOT NULL ORDER BY crawled_at DESC LIMIT 50",
+                "AND title IS NOT NULL ORDER BY crawled_at DESC LIMIT 75",
                 [cutoff],
             ).fetchall()
-    except Exception as e:
-        return jsonify({"error": f"Query failed: {e}"}), 500
+    except Exception:
+        rows = []
     finally:
         try:
             con.close()
@@ -1705,19 +1720,91 @@ def api_briefing():
             pass
 
     headlines = [r[0] for r in rows if r[0] and len(r[0].strip()) > 10]
-    if len(headlines) < 5:
-        return jsonify({
-            "briefing": None,
-            "article_count": len(headlines),
-            "error": "Not enough articles to generate a briefing",
-        })
+    return headlines, view_name, view_desc
 
-    # Generate briefing
-    briefing = _generate_briefing(headlines[:50], view_name, view_desc)
+
+@app.route("/api/briefing")
+def api_briefing():
+    """AI-generated briefing with optional SSE streaming."""
+    from flask import Response
+
+    view_id = (request.args.get("view") or "").strip()
+    hours = request.args.get("hours", 24, type=int)
+    stream = request.args.get("stream", "0") == "1"
+
+    cache_key = f"{view_id or '_all'}:{hours}"
+
+    # Check cache first (both streaming and non-streaming)
+    from models import get_user_db
+    ucon = get_user_db()
+    cached = ucon.execute(
+        "SELECT briefing, article_count, generated_at FROM briefing_cache WHERE cache_key = ?",
+        (cache_key,),
+    ).fetchone()
+    if cached:
+        age_s = (datetime.utcnow() - datetime.strptime(cached["generated_at"], "%Y-%m-%d %H:%M:%S")).total_seconds()
+        if age_s < BRIEFING_TTL_S:
+            ucon.close()
+            if stream:
+                # Send cached result as a single SSE event
+                def cached_stream():
+                    yield f"data: {json.dumps({'text': cached['briefing'], 'done': True, 'cached': True, 'article_count': cached['article_count']})}\n\n"
+                return Response(cached_stream(), mimetype="text/event-stream")
+            return jsonify({
+                "briefing": cached["briefing"],
+                "article_count": cached["article_count"],
+                "generated_at": cached["generated_at"],
+                "cached": True,
+                "view": view_id or None,
+                "hours": hours,
+            })
+    ucon.close()
+
+    # Fetch headlines
+    headlines, view_name, view_desc = _fetch_briefing_headlines(view_id, hours)
+    if len(headlines) < 5:
+        if stream:
+            def empty_stream():
+                yield f"data: {json.dumps({'error': 'Not enough articles', 'done': True})}\n\n"
+            return Response(empty_stream(), mimetype="text/event-stream")
+        return jsonify({"briefing": None, "error": "Not enough articles"})
+
+    if stream:
+        # Stream tokens via SSE
+        def sse_stream():
+            full_text = []
+            try:
+                for chunk in _generate_briefing_stream(headlines[:75], view_name, view_desc, hours):
+                    full_text.append(chunk)
+                    yield f"data: {json.dumps({'text': chunk})}\n\n"
+            except Exception as e:
+                yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
+                return
+
+            # Cache the completed briefing
+            briefing = "".join(full_text).strip()
+            if briefing:
+                generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                try:
+                    uc = get_user_db()
+                    uc.execute(
+                        "INSERT OR REPLACE INTO briefing_cache "
+                        "(cache_key, briefing, article_count, generated_at) VALUES (?, ?, ?, ?)",
+                        (cache_key, briefing, len(headlines), generated_at),
+                    )
+                    uc.commit()
+                    uc.close()
+                except Exception:
+                    pass
+            yield f"data: {json.dumps({'done': True, 'article_count': len(headlines)})}\n\n"
+
+        return Response(sse_stream(), mimetype="text/event-stream")
+
+    # Non-streaming fallback
+    briefing = _generate_briefing(headlines[:75], view_name, view_desc, hours)
     if not briefing:
         return jsonify({"briefing": None, "error": "Briefing generation unavailable"}), 503
 
-    # Cache it
     generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     ucon = get_user_db()
     ucon.execute(

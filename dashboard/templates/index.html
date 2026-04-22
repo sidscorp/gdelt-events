@@ -687,12 +687,15 @@
   </div>
   <div style="font-size:0.82rem; color:var(--text-secondary); margin-top:0.2rem;">
     Real-time monitoring of 44K global news sources, updated every 15 minutes.
-    Filter by curated topic, time range, or text. Or try
-    <a href="/search" style="color:var(--text-secondary);">semantic search</a>
-    to find articles by meaning.
+    Filter by curated topic, time range, or text below.
+  </div>
+  <div style="margin-top:0.5rem;">
+    <a href="/search" style="display:inline-flex; align-items:center; gap:0.4rem; font-size:0.82rem; color:var(--text); text-decoration:none; border:1px solid var(--border); padding:0.35rem 0.8rem; border-radius:3px; background:var(--bg-hover);">
+      <span style="font-size:1rem;">&#x1F50D;</span>
+      <span><strong>Semantic Search</strong> — describe what you're looking for in plain English and find articles by meaning, not just keywords</span>
+    </a>
   </div>
   <div id="navBar" style="font-size:0.75rem; margin-top:0.4rem; display:flex; gap:1rem; color:var(--text-tertiary);">
-    <a href="/search" style="color:var(--text-secondary); text-decoration:none;">Search</a>
     <a href="/about" style="color:var(--text-secondary); text-decoration:none;">About</a>
     <span id="navAuth"></span>
     <button class="theme-toggle" onclick="toggleDarkMode()" id="themeBtn" title="Toggle dark mode">light</button>
@@ -730,6 +733,15 @@
   <button class="time-pill" data-hours="72">3d</button>
   <button class="time-pill" data-hours="168">7d</button>
   <button class="time-pill" data-hours="720">30d</button>
+</div>
+
+<div id="briefingPanel" style="display:none; border:1px solid var(--border); padding:0.9rem 1.1rem; margin:0.6rem 0; background:var(--bg-hover); line-height:1.6;">
+  <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.4rem;">
+    <span style="font-size:0.72rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-tertiary);">AI Briefing</span>
+    <button onclick="document.getElementById('briefingPanel').style.display='none'" style="font-size:0.68rem; color:var(--text-tertiary); background:none; border:none; cursor:pointer; font-family:inherit;">dismiss</button>
+  </div>
+  <div id="briefingText" style="font-size:0.88rem; color:var(--text); font-style:italic;"></div>
+  <div id="briefingMeta" style="font-size:0.68rem; color:var(--text-tertiary); margin-top:0.4rem;"></div>
 </div>
 
 <div class="section-label">Refine results <span style="text-transform:none; letter-spacing:0; color:var(--text-tertiary); font-size:0.7rem;">— stack multiple filters; they combine with AND</span></div>
@@ -1611,6 +1623,60 @@ function toggleDarkMode() {
     document.getElementById('themeBtn').textContent = 'dark';
   }
 })();
+</script>
+
+<script>
+// AI Briefing — fetches a summary for the current view/time
+let _briefingView = null;
+let _briefingHours = null;
+
+async function fetchBriefing() {
+  const view = (typeof state !== 'undefined' && state.view) || '';
+  const hours = (typeof state !== 'undefined' && state.hours) || 24;
+
+  // Don't refetch if same params
+  if (view === _briefingView && hours === _briefingHours) return;
+  _briefingView = view;
+  _briefingHours = hours;
+
+  const panel = document.getElementById('briefingPanel');
+  const textEl = document.getElementById('briefingText');
+  const metaEl = document.getElementById('briefingMeta');
+
+  textEl.textContent = 'Generating briefing...';
+  metaEl.textContent = '';
+  panel.style.display = '';
+
+  try {
+    const params = new URLSearchParams();
+    if (view) params.set('view', view);
+    params.set('hours', hours);
+    const resp = await fetch('/api/briefing?' + params);
+    const data = await resp.json();
+
+    if (data.briefing) {
+      textEl.textContent = data.briefing;
+      const ago = data.cached ? 'cached' : 'just generated';
+      metaEl.textContent = `From ${data.article_count} articles · ${ago}`;
+      panel.style.display = '';
+    } else {
+      panel.style.display = 'none';
+    }
+  } catch (err) {
+    panel.style.display = 'none';
+  }
+}
+
+// Hook into article fetch — trigger briefing alongside
+const _origFetchArticles = typeof fetchArticles === 'function' ? fetchArticles : null;
+if (_origFetchArticles) {
+  const _wrappedFetch = fetchArticles;
+  fetchArticles = async function() {
+    const result = _wrappedFetch.apply(this, arguments);
+    fetchBriefing();  // fire in parallel, don't await
+    return result;
+  };
+}
 </script>
 </body>
 </html>

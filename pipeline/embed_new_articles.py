@@ -111,7 +111,7 @@ def status():
     log.info("  Total file rows: %d", s["total_rows"])
     log.info("  Vectors file:    %.1f MB", s["vectors_file_mb"])
 
-    con = duckdb.connect(str(DB_PATH), read_only=True)
+    con = duckdb.connect(str(DB_PATH))
     n_gal = con.execute(
         "SELECT count(*) FROM gal WHERE language = 'en'"
     ).fetchone()[0]
@@ -134,7 +134,7 @@ def main():
     log.info("Looking for missing URLs (max %d, hours_back=%d)...",
              max_per_run, hours_back)
 
-    con = duckdb.connect(str(DB_PATH), read_only=True)
+    con = duckdb.connect(str(DB_PATH))  # same mode as dashboard (no read_only)
     con.execute("SET threads = 2")
 
     t0 = time.time()

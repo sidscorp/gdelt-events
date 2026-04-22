@@ -1565,6 +1565,180 @@ def admin_reject(user_id):
 
 
 # ---------------------------------------------------------------------------
+# AI Briefing
+# ---------------------------------------------------------------------------
+
+OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+BRIEFING_MODEL = "google/gemini-2.5-flash"
+BRIEFING_TTL_S = 900  # 15 minutes
+_OPENROUTER_KEY_PATH = Path(__file__).resolve().parent.parent / "data" / ".openrouter_key"
+
+
+def _get_openrouter_key():
+    import os
+    key = os.environ.get("OPENROUTER_API_KEY")
+    if key:
+        return key
+    if _OPENROUTER_KEY_PATH.exists():
+        return _OPENROUTER_KEY_PATH.read_text().strip()
+    return None
+
+
+def _generate_briefing(headlines: list[str], view_name: str, view_desc: str) -> str | None:
+    """Call OpenRouter to generate a briefing from article headlines."""
+    from urllib.request import Request, urlopen
+    from urllib.error import URLError
+
+    key = _get_openrouter_key()
+    if not key:
+        return None
+
+    numbered = "\n".join(f"{i+1}. {h}" for i, h in enumerate(headlines))
+    prompt = (
+        f"You are a news intelligence analyst. Below are the {len(headlines)} most recent "
+        f"article headlines from a monitoring feed"
+        + (f' focused on "{view_name}" ({view_desc})' if view_name else "")
+        + ".\n\n"
+        f"Summarize the key themes, developments, and notable events in 3-4 concise sentences. "
+        f"Focus on what a decision-maker would want to know. Be specific — name companies, "
+        f"countries, and figures when relevant. Do not list headlines — synthesize them into "
+        f"a coherent briefing.\n\n"
+        f"Headlines:\n{numbered}"
+    )
+
+    payload = json.dumps({
+        "model": BRIEFING_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 300,
+        "temperature": 0.3,
+    }).encode()
+
+    try:
+        req = Request(
+            OPENROUTER_URL,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {key}",
+            },
+        )
+        with urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read())
+        return data["choices"][0]["message"]["content"].strip()
+    except Exception as e:
+        req_log.warning("Briefing generation failed: %s", e)
+        return None
+
+
+@app.route("/api/briefing")
+def api_briefing():
+    """AI-generated briefing for the current view and time range."""
+    view_id = (request.args.get("view") or "").strip()
+    hours = request.args.get("hours", 24, type=int)
+
+    # Cache key
+    cache_key = f"{view_id or '_all'}:{hours}"
+
+    # Check cache
+    from models import get_user_db
+    ucon = get_user_db()
+    cached = ucon.execute(
+        "SELECT briefing, article_count, generated_at FROM briefing_cache WHERE cache_key = ?",
+        (cache_key,),
+    ).fetchone()
+    if cached:
+        age_s = (datetime.utcnow() - datetime.strptime(cached["generated_at"], "%Y-%m-%d %H:%M:%S")).total_seconds()
+        if age_s < BRIEFING_TTL_S:
+            ucon.close()
+            return jsonify({
+                "briefing": cached["briefing"],
+                "article_count": cached["article_count"],
+                "generated_at": cached["generated_at"],
+                "cached": True,
+                "view": view_id or None,
+                "hours": hours,
+            })
+    ucon.close()
+
+    # Fetch article titles for this view
+    con = get_db()
+    if con is None:
+        return jsonify({"error": "Database busy"}), 503
+
+    try:
+        # Build the same query the dashboard uses, but just grab titles
+        cutoff = _hours_cutoff(hours) if hours else _hours_cutoff(168)
+        view = find_view(view_id) if view_id else None
+        view_name = view["name"] if view else "Global News"
+        view_desc = view.get("description", "") if view else "All articles from 44K+ sources worldwide"
+
+        if view and view.get("kind") == "tag_match":
+            cat = view["tag_category"]
+            rows = con.execute(
+                "SELECT g.title FROM article_tags t "
+                "JOIN gal g ON g.url = t.article_id "
+                "WHERE t.category = ? AND t.source_type = 'gal' AND t.crawled_at >= ? "
+                "ORDER BY t.crawled_at DESC LIMIT 50",
+                [cat, cutoff],
+            ).fetchall()
+        elif view and view.get("kind") == "fda_match":
+            rows = con.execute(
+                "SELECT g.title FROM fda_match_cache f "
+                "JOIN gal g ON g.url = f.article_id "
+                "WHERE f.source_type = 'gal' AND f.crawled_at >= ? "
+                "ORDER BY f.crawled_at DESC LIMIT 50",
+                [cutoff],
+            ).fetchall()
+        else:
+            # No view — general briefing from top articles
+            rows = con.execute(
+                "SELECT title FROM gal WHERE crawled_at >= ? AND language = 'en' "
+                "AND title IS NOT NULL ORDER BY crawled_at DESC LIMIT 50",
+                [cutoff],
+            ).fetchall()
+    except Exception as e:
+        return jsonify({"error": f"Query failed: {e}"}), 500
+    finally:
+        try:
+            con.close()
+        except Exception:
+            pass
+
+    headlines = [r[0] for r in rows if r[0] and len(r[0].strip()) > 10]
+    if len(headlines) < 5:
+        return jsonify({
+            "briefing": None,
+            "article_count": len(headlines),
+            "error": "Not enough articles to generate a briefing",
+        })
+
+    # Generate briefing
+    briefing = _generate_briefing(headlines[:50], view_name, view_desc)
+    if not briefing:
+        return jsonify({"briefing": None, "error": "Briefing generation unavailable"}), 503
+
+    # Cache it
+    generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    ucon = get_user_db()
+    ucon.execute(
+        "INSERT OR REPLACE INTO briefing_cache (cache_key, briefing, article_count, generated_at) "
+        "VALUES (?, ?, ?, ?)",
+        (cache_key, briefing, len(headlines), generated_at),
+    )
+    ucon.commit()
+    ucon.close()
+
+    return jsonify({
+        "briefing": briefing,
+        "article_count": len(headlines),
+        "generated_at": generated_at,
+        "cached": False,
+        "view": view_id or None,
+        "hours": hours,
+    })
+
+
+# ---------------------------------------------------------------------------
 # Custom pill API
 # ---------------------------------------------------------------------------
 

@@ -65,6 +65,14 @@ def init_user_db():
             error_message TEXT,
             elapsed_seconds REAL
         );
+
+
+        CREATE TABLE IF NOT EXISTS briefing_cache (
+            cache_key TEXT PRIMARY KEY,
+            briefing TEXT NOT NULL,
+            article_count INTEGER,
+            generated_at TEXT DEFAULT (datetime('now'))
+        );
     """)
     # Migrate: add columns if missing (idempotent)
     _migrate_semantic_columns(con)

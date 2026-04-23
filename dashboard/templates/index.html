@@ -68,7 +68,7 @@
     background: var(--bg);
     line-height: 1.5;
     font-size: 15px;
-    max-width: 1100px;
+    max-width: none;
     margin: 0 auto;
     padding: 1.5rem 1rem;
   }
@@ -1559,6 +1559,13 @@ setInterval(() => {
     fetchArticles();
   }
 }, 60000);
+
+// Auto-refresh briefing every 15 min (matches cache TTL)
+setInterval(() => {
+  if (document.hidden) return;
+  _briefingView = null;  // force re-fetch
+  fetchBriefing();
+}, 900000);
 </script>
 
 <script>
@@ -1606,7 +1613,7 @@ async function fetchBriefing() {
   const view = (typeof state !== 'undefined' && state.view) || '';
   const hours = (typeof state !== 'undefined' && state.hours) || 24;
 
-  if (view === _briefingView && hours === _briefingHours) return;
+  if (_briefingView !== null && view === _briefingView && hours === _briefingHours) return;
   _briefingView = view;
   _briefingHours = hours;
 

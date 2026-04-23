@@ -1167,7 +1167,10 @@ def _fetch_gal_tag_view(con, view, request, per_page, page) -> tuple[int, list]:
 
 
 def _api_articles_inner(con):
-    source = _resolve_source(request)
+    """Unified feed: always queries both GAL and GKG, deduplicates by URL
+    (preferring GKG for richer metadata). When entity filters (person, org,
+    theme, location, tone) are active, only GKG articles are returned since
+    GAL lacks entity extraction."""
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(100, request.args.get("per_page", 50, type=int))
     offset = (page - 1) * per_page
@@ -1178,21 +1181,24 @@ def _api_articles_inner(con):
     is_tag = view_kind == "tag_match"
     view_match_info: dict[str, tuple[str, str]] = {}
 
+    has_entity_filters = _gkg_entity_filters_set(request)
+
     gkg_rows: list = []
     gal_rows: list = []
     gkg_total = 0
     gal_total = 0
 
-    if source in ("gkg", "all"):
-        if is_fda:
-            gkg_total, gkg_rows, mi = _fetch_gkg_view(con, view, request, per_page, page)
-            view_match_info.update(mi)
-        elif is_tag:
-            gkg_total, gkg_rows = _fetch_gkg_tag_view(con, view, request, per_page, page)
-        else:
-            gkg_total, gkg_rows = _fetch_gkg_plain(con, request, per_page, page)
+    # Always fetch GKG
+    if is_fda:
+        gkg_total, gkg_rows, mi = _fetch_gkg_view(con, view, request, per_page, page)
+        view_match_info.update(mi)
+    elif is_tag:
+        gkg_total, gkg_rows = _fetch_gkg_tag_view(con, view, request, per_page, page)
+    else:
+        gkg_total, gkg_rows = _fetch_gkg_plain(con, request, per_page, page)
 
-    if source in ("gal", "all"):
+    # Fetch GAL only if no entity filters are active
+    if not has_entity_filters:
         try:
             if is_fda:
                 gal_total, gal_rows, mi = _fetch_gal_view(con, view, request, per_page, page)
@@ -1204,49 +1210,28 @@ def _api_articles_inner(con):
         except Exception:
             gal_total, gal_rows = 0, []
 
-    # Build articles — merge only when source=all, otherwise single-source
-    if source == "all":
-        seen_urls = set()
-        merged = []
-        for r in gkg_rows:
-            art = _gkg_row_to_article(r)
-            if art["url"] and art["url"] not in seen_urls:
-                seen_urls.add(art["url"])
-                mi = view_match_info.get(art["id"]) or view_match_info.get(art["url"])
-                if mi:
-                    art["matched_name"], art["matched_specialty"] = mi
-                merged.append(art)
-        for r in gal_rows:
-            art = _gal_row_to_article(r)
-            if art["url"] and art["url"] not in seen_urls:
-                seen_urls.add(art["url"])
-                mi = view_match_info.get(art["url"])
-                if mi:
-                    art["matched_name"], art["matched_specialty"] = mi
-                merged.append(art)
-        merged.sort(key=lambda a: a["sort_key"], reverse=(_sort_dir(request) == "DESC"))
-        total = gkg_total + gal_total
-        articles = merged[offset:offset + per_page]
-    elif source == "gkg":
-        merged = []
-        for r in gkg_rows:
-            art = _gkg_row_to_article(r)
+    # Merge and deduplicate — prefer GKG version when same URL exists in both
+    seen_urls = set()
+    merged = []
+    for r in gkg_rows:
+        art = _gkg_row_to_article(r)
+        if art["url"] and art["url"] not in seen_urls:
+            seen_urls.add(art["url"])
             mi = view_match_info.get(art["id"]) or view_match_info.get(art["url"])
             if mi:
                 art["matched_name"], art["matched_specialty"] = mi
             merged.append(art)
-        total = gkg_total
-        articles = merged[offset:offset + per_page]
-    else:  # gal
-        merged = []
-        for r in gal_rows:
-            art = _gal_row_to_article(r)
+    for r in gal_rows:
+        art = _gal_row_to_article(r)
+        if art["url"] and art["url"] not in seen_urls:
+            seen_urls.add(art["url"])
             mi = view_match_info.get(art["url"])
             if mi:
                 art["matched_name"], art["matched_specialty"] = mi
             merged.append(art)
-        total = gal_total
-        articles = merged[offset:offset + per_page]
+    merged.sort(key=lambda a: a["sort_key"], reverse=(_sort_dir(request) == "DESC"))
+    total = gkg_total + gal_total
+    articles = merged[offset:offset + per_page]
 
     for a in articles:
         a.pop("sort_key", None)
@@ -1257,7 +1242,6 @@ def _api_articles_inner(con):
         "page": page,
         "per_page": per_page,
         "pages": (total + per_page - 1) // per_page,
-        "source": source,
     })
 
 

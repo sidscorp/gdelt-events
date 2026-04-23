@@ -42,8 +42,7 @@
     color: var(--text);
     border-color: var(--border);
   }
-  body.dark .source-tab { background: var(--bg); }
-  body.dark .source-tab.active { background: var(--text); color: var(--bg); }
+  /* source-tab styles removed — unified feed */
   body.dark .view-pill { background: var(--bg); border-color: var(--border); color: var(--text); }
   body.dark .view-pill.active { background: var(--text); color: var(--bg); }
   body.dark .time-pill { border-color: var(--border); color: var(--text-secondary); }
@@ -133,23 +132,26 @@
 
   .filter-label:first-child { margin-left: 0; }
 
-  /* Source-aware filter visibility. Each filter wraps its label+input in
-     a .filter-group and is tagged with .f-gal, .f-gkg, or .f-shared. */
+  /* All filters always visible in unified feed */
   .filter-group { display: flex; align-items: center; }
-  body[data-source="gal"] .f-gkg { display: none; }
-  body[data-source="gkg"] .f-gal { display: none; }
-  /* On the "all" tab, both are visible but annotated so users know which
-     source each filter applies to. */
-  body[data-source="all"] .f-gkg .filter-label::after {
-    content: " (gkg only)";
-    opacity: 0.55;
-    font-size: 0.65rem;
+  .f-entity .filter-label::after {
+    content: " (GKG)";
+    opacity: 0.45;
+    font-size: 0.6rem;
   }
-  body[data-source="all"] .f-gal .filter-label::after {
-    content: " (gal only)";
-    opacity: 0.55;
-    font-size: 0.65rem;
+
+  .source-badge {
+    font-size: 0.6rem;
+    padding: 0.05rem 0.3rem;
+    border-radius: 2px;
+    margin-left: 0.3rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
   }
+  .source-badge.gal { background: #f0ede6; color: #888; }
+  .source-badge.gkg { background: #e8edf5; color: #5a7aaa; }
+  body.dark .source-badge.gal { background: #2a2520; color: #78716c; }
+  body.dark .source-badge.gkg { background: #1e2530; color: #7a9abf; }
 
   .btn-clear {
     font-family: inherit;
@@ -307,7 +309,8 @@
   }
 
   /* Source tabs — GAL / GKG / All */
-  .source-tabs {
+  /* source-tabs removed — unified feed */
+  .source-tabs-REMOVED {
     display: flex;
     gap: 0;
     margin-bottom: 0.6rem;
@@ -703,18 +706,7 @@
   <div class="header-stats" id="stats">loading...</div>
 </header>
 
-<div class="section-label" title="GAL = Global Article List (titles + sources). GKG = Global Knowledge Graph (themes, persons, organizations, locations).">Source database</div>
-<div class="source-tabs" id="sourceTabs">
-  <button class="source-tab active" data-source="gal">
-    <span>GAL</span><span class="source-tab-count" id="galCount">…</span>
-  </button>
-  <button class="source-tab" data-source="gkg">
-    <span>GKG</span><span class="source-tab-count" id="gkgCount">…</span>
-  </button>
-  <button class="source-tab" data-source="all">
-    <span>All</span><span class="source-tab-count" id="allCount">…</span>
-  </button>
-</div>
+<!-- Source tabs removed — unified feed -->
 
 <div class="section-label">Curated topics <span style="text-transform:none; letter-spacing:0; color:var(--text-tertiary); font-size:0.7rem;">— click for pre-built filters, or click the ? to see what each one matches</span></div>
 <div style="display:flex; align-items:center; flex-wrap:wrap; gap:0.3rem;">
@@ -746,62 +738,62 @@
 
 <div class="section-label">Refine results <span style="text-transform:none; letter-spacing:0; color:var(--text-tertiary); font-size:0.7rem;">— stack multiple filters; they combine with AND</span></div>
 <div class="filters">
-  <div class="filter-group f-shared">
+  <div class="filter-group">
     <span class="filter-label">Search</span>
     <input type="text" id="searchInput" placeholder="title, description…" autocomplete="off">
   </div>
 
-  <div class="filter-group f-shared">
+  <div class="filter-group">
     <span class="filter-label">Title</span>
     <input type="text" id="titleInput" placeholder="in article title…" autocomplete="off">
   </div>
 
-  <div class="filter-group f-gal">
+  <div class="filter-group">
     <span class="filter-label">Description</span>
     <input type="text" id="descriptionInput" placeholder="in description…" autocomplete="off">
   </div>
 
-  <div class="filter-group f-gkg">
+  <div class="filter-group f-entity">
     <span class="filter-label">Person</span>
     <input type="text" id="personInput" placeholder="name…" autocomplete="off">
   </div>
 
-  <div class="filter-group f-gkg">
+  <div class="filter-group f-entity">
     <span class="filter-label">Org</span>
     <input type="text" id="orgInput" placeholder="organization…" autocomplete="off">
   </div>
 
-  <div class="filter-group f-gkg">
+  <div class="filter-group f-entity">
     <span class="filter-label">Place</span>
     <input type="text" id="locationInput" placeholder="location…" autocomplete="off">
   </div>
 
-  <div class="filter-group f-gkg">
+  <div class="filter-group f-entity">
     <span class="filter-label">Theme</span>
     <input type="text" id="themeInput" placeholder="theme…" autocomplete="off">
   </div>
 
-  <div class="filter-group f-shared">
+  <div class="filter-group">
     <span class="filter-label">Domain</span>
     <input type="text" id="domainInput" placeholder="nytimes.com…" autocomplete="off">
   </div>
 
-  <div class="filter-group f-gal">
+  <div class="filter-group">
     <span class="filter-label">Outlet</span>
     <input type="text" id="outletInput" placeholder="outlet name…" autocomplete="off">
   </div>
 
-  <div class="filter-group f-gal">
+  <div class="filter-group">
     <span class="filter-label">Language</span>
     <select id="languageSelect"><option value="">any</option></select>
   </div>
 
-  <div class="filter-group f-shared">
+  <div class="filter-group">
     <span class="filter-label">From</span>
     <input type="date" id="dateFrom">
   </div>
 
-  <div class="filter-group f-shared">
+  <div class="filter-group">
     <span class="filter-label">To</span>
     <input type="date" id="dateTo">
   </div>
@@ -846,16 +838,8 @@ const state = {
   sort: 'newest', // 'newest' | 'oldest'
 };
 
-// Resolve initial source from URL, then localStorage, then default 'gal'.
-(function initSource() {
-  const p = new URLSearchParams(location.search);
-  const urlS = (p.get('source') || '').toLowerCase();
-  const lsS = (localStorage.getItem('dashSource') || '').toLowerCase();
-  const pick = (['gal','gkg','all'].includes(urlS)) ? urlS :
-               (['gal','gkg','all'].includes(lsS)) ? lsS : 'gal';
-  state.source = pick;
-  document.body.setAttribute('data-source', pick);
-})();
+// Unified feed — no source selection needed
+state.source = 'all';
 
 // Resolve initial match_types from URL, then localStorage, then default.
 (function initMatchTypes() {
@@ -936,32 +920,11 @@ document.getElementById('sortSelect').addEventListener('change', (e) => {
   fetchArticles();
 });
 
-// Source tab clicks
-document.getElementById('sourceTabs').addEventListener('click', (e) => {
-  const btn = e.target.closest('.source-tab');
-  if (!btn) return;
-  const newSource = btn.dataset.source;
-  if (newSource === state.source) return;
-  switchSource(newSource);
+// Source tabs removed — unified feed
+// (no click handler needed
 });
 
-function switchSource(newSource) {
-  state.source = newSource;
-  localStorage.setItem('dashSource', newSource);
-  document.body.setAttribute('data-source', newSource);
-  document.querySelectorAll('.source-tab').forEach(t => {
-    t.classList.toggle('active', t.dataset.source === newSource);
-  });
-  if (newSource === 'gal') {
-    clearFields(['person','org','location','theme'], ['personInput','orgInput','locationInput','themeInput']);
-  } else if (newSource === 'gkg') {
-    clearFields(['description','outlet','language'], ['descriptionInput','outletInput']);
-    document.getElementById('languageSelect').value = '';
-  }
-  state.page = 1;
-  updateUrl();
-  fetchArticles();
-}
+// switchSource removed — unified feed
 
 function clearFields(stateKeys, domIds) {
   stateKeys.forEach(k => { state[k] = ''; });
@@ -970,7 +933,7 @@ function clearFields(stateKeys, domIds) {
 
 function updateUrl() {
   const p = new URLSearchParams(location.search);
-  p.set('source', state.source);
+  p.delete('source');  // unified feed
   if (state.view) p.set('view', state.view); else p.delete('view');
   if (state.match_types && state.match_types.length && state.view) {
     p.set('match_types', state.match_types.join(','));
@@ -1141,8 +1104,8 @@ function renderArticle(a) {
   const title = a.title || a.url.replace(/https?:\/\//, '').substring(0, 80) + '...';
 
   const srcBadge = a.source_type === 'gal'
-    ? `<span class="src-badge src-gal" title="Global Article List — broader coverage, no entity extraction">gal</span>`
-    : '';
+    ? `<span class="source-badge gal" title="Global Article List — broad coverage">GAL</span>`
+    : `<span class="source-badge gkg" title="Global Knowledge Graph — enriched with entities, themes, tone">GKG</span>`;
 
   let matchBadge = '';
   if (a.matched_name) {
@@ -1185,7 +1148,6 @@ async function fetchArticles() {
   renderActiveFilters();
 
   const params = new URLSearchParams();
-  params.set('source', state.source);
   if (state.hours) params.set('hours', state.hours);
   if (state.view) params.set('view', state.view);
   if (state.match_types && state.match_types.length) {
@@ -1320,13 +1282,7 @@ async function fetchStats() {
       `<span>window: ${data.earliest_display} → ${data.latest_display}</span>` +
       `<span>latest: ${data.latest_ago}</span>`;
 
-    // Per-source tab counts
-    const galEl = document.getElementById('galCount');
-    const gkgEl = document.getElementById('gkgCount');
-    const allEl = document.getElementById('allCount');
-    if (galEl) galEl.textContent = compact(data.gal_articles);
-    if (gkgEl) gkgEl.textContent = compact(data.gkg_articles);
-    if (allEl) allEl.textContent = compact(data.total_articles);
+    // Source tab counts removed — unified feed
 
     // Constrain date pickers to the actual data window
     if (data.earliest_date && data.latest_date) {
@@ -1586,10 +1542,7 @@ async function createPill() {
   });
 })();
 
-// Reflect restored source on the tab row before first fetch.
-document.querySelectorAll('.source-tab').forEach(t => {
-  t.classList.toggle('active', t.dataset.source === state.source);
-});
+// Source tabs removed — unified feed
 
 // Init
 fetchViews();

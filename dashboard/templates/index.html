@@ -1144,6 +1144,7 @@ function goPage(p) {
 
 async function fetchArticles() {
   renderActiveFilters();
+  fetchBriefing();
 
   const params = new URLSearchParams();
   if (state.hours) params.set('hours', state.hours);
@@ -1674,16 +1675,6 @@ async function fetchBriefing() {
   }
 }
 
-// Hook into article fetch — trigger briefing alongside
-const _origFetchArticles = typeof fetchArticles === 'function' ? fetchArticles : null;
-if (_origFetchArticles) {
-  const _wrappedFetch = fetchArticles;
-  fetchArticles = async function() {
-    const result = _wrappedFetch.apply(this, arguments);
-    fetchBriefing();
-    return result;
-  };
-}
 // Trigger briefing on initial page load
 fetchBriefing();
 </script>

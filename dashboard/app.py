@@ -65,7 +65,7 @@ def get_db(max_retries=3):
     """
     for attempt in range(max_retries):
         try:
-            con = duckdb.connect(str(DB_PATH))
+            con = duckdb.connect(str(DB_PATH), read_only=True)
             try:
                 con.execute(f"SET memory_limit='{CONN_MEMORY_LIMIT}'")
                 con.execute(f"SET threads={CONN_THREADS}")
@@ -1553,7 +1553,7 @@ def admin_reject(user_id):
 # ---------------------------------------------------------------------------
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-BRIEFING_MODEL = "google/gemini-2.5-flash"
+BRIEFING_MODEL = "google/gemini-flash-1.5"
 BRIEFING_TTL_S = 900  # 15 minutes
 _OPENROUTER_KEY_PATH = Path(__file__).resolve().parent.parent / "data" / ".openrouter_key"
 
@@ -1741,7 +1741,7 @@ def api_briefing():
                 # Send cached result as a single SSE event
                 def cached_stream():
                     yield f"data: {json.dumps({'text': cached['briefing'], 'done': True, 'cached': True, 'article_count': cached['article_count']})}\n\n"
-                return Response(cached_stream(), mimetype="text/event-stream")
+                return Response(cached_stream(), mimetype="text/event-stream", headers={"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no"})
             return jsonify({
                 "briefing": cached["briefing"],
                 "article_count": cached["article_count"],
@@ -1758,7 +1758,7 @@ def api_briefing():
         if stream:
             def empty_stream():
                 yield f"data: {json.dumps({'error': 'Not enough articles', 'done': True})}\n\n"
-            return Response(empty_stream(), mimetype="text/event-stream")
+            return Response(empty_stream(), mimetype="text/event-stream", headers={"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no"})
         return jsonify({"briefing": None, "error": "Not enough articles"})
 
     if stream:
@@ -1790,7 +1790,7 @@ def api_briefing():
                     pass
             yield f"data: {json.dumps({'done': True, 'article_count': len(headlines)})}\n\n"
 
-        return Response(sse_stream(), mimetype="text/event-stream")
+        return Response(sse_stream(), mimetype="text/event-stream", headers={"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no"})
 
     # Non-streaming fallback
     briefing = _generate_briefing(headlines[:75], view_name, view_desc, hours)

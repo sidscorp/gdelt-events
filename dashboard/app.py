@@ -1553,7 +1553,7 @@ def admin_reject(user_id):
 # ---------------------------------------------------------------------------
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-BRIEFING_MODEL = "google/gemini-1.5-flash"
+BRIEFING_MODEL = "google/gemini-2.0-flash-001"
 BRIEFING_TTL_S = 900  # 15 minutes
 _OPENROUTER_KEY_PATH = Path(__file__).resolve().parent.parent / "data" / ".openrouter_key"
 

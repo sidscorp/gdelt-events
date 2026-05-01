@@ -1144,7 +1144,7 @@ function goPage(p) {
 
 async function fetchArticles() {
   renderActiveFilters();
-  fetchBriefing();
+  if (typeof fetchBriefing === "function") fetchBriefing();
 
   const params = new URLSearchParams();
   if (state.hours) params.set('hours', state.hours);

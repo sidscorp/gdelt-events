@@ -880,13 +880,13 @@ def _fetch_gkg_view(con, view, request, per_page, page) -> tuple[int, list, dict
     raw = _phase("gkg_join", lambda: con.execute(
         f"""
         WITH top_ids AS (
-            SELECT article_id, crawled_at, matched_name, medical_specialties
+            SELECT article_id, crawled_at, matched_name, medical_specialties, match_type
             FROM fda_match_cache
             WHERE {cache_where}
             ORDER BY crawled_at {sd}
             LIMIT ?
         )
-        SELECT {GKG_COLS}, top_ids.matched_name, top_ids.medical_specialties
+        SELECT {GKG_COLS}, top_ids.matched_name, top_ids.medical_specialties, top_ids.match_type
         FROM top_ids
         INNER JOIN gkg ON gkg."GKGRECORDID" = top_ids.article_id
         WHERE 1=1{join_where_suffix}
@@ -898,8 +898,8 @@ def _fetch_gkg_view(con, view, request, per_page, page) -> tuple[int, list, dict
 
     rows, match_info = [], {}
     for r in raw:
-        base = r[:-2]
-        match_info[base[0]] = (r[-2] or "", r[-1] or "")
+        base = r[:-3]
+        match_info[base[0]] = (r[-3] or "", r[-2] or "", r[-1] or "")
         rows.append(base)
     if extra_where:
         total = len(rows)
@@ -935,7 +935,7 @@ def _fetch_gal_view(con, view, request, per_page, page) -> tuple[int, list, dict
 
     top_gal = _phase("gal_cache", lambda: con.execute(
         f"""
-        SELECT article_id, crawled_at, matched_name, medical_specialties
+        SELECT article_id, crawled_at, matched_name, medical_specialties, match_type
         FROM fda_match_cache
         WHERE {cache_where}
         ORDER BY crawled_at {sd}
@@ -948,7 +948,7 @@ def _fetch_gal_view(con, view, request, per_page, page) -> tuple[int, list, dict
         return total, [], {}
 
     urls = [r[0] for r in top_gal]
-    gal_meta = {r[0]: (r[2], r[3]) for r in top_gal}
+    gal_meta = {r[0]: (r[2], r[3], r[4]) for r in top_gal}
     placeholders = ",".join(["?"] * len(urls))
     lookup = _phase("gal_join", lambda: con.execute(
         f"SELECT {GAL_COLS} FROM gal WHERE url IN ({placeholders})",
@@ -992,8 +992,8 @@ def _fetch_gal_view(con, view, request, per_page, page) -> tuple[int, list, dict
             continue
         if not _matches(row):
             continue
-        name, spec = gal_meta[url]
-        match_info[url] = (name or "", spec or "")
+        name, spec, mtype = gal_meta[url]
+        match_info[url] = (name or "", spec or "", mtype or "")
         rows.append(tuple(row))
         matched_count += 1
         if matched_count >= fetch_n:
@@ -1219,7 +1219,9 @@ def _api_articles_inner(con):
             seen_urls.add(art["url"])
             mi = view_match_info.get(art["id"]) or view_match_info.get(art["url"])
             if mi:
-                art["matched_name"], art["matched_specialty"] = mi
+                art["matched_name"], art["matched_specialty"] = mi[0], mi[1]
+                if len(mi) > 2:
+                    art["matched_type"] = mi[2]
             merged.append(art)
     for r in gal_rows:
         art = _gal_row_to_article(r)
@@ -1227,7 +1229,9 @@ def _api_articles_inner(con):
             seen_urls.add(art["url"])
             mi = view_match_info.get(art["url"])
             if mi:
-                art["matched_name"], art["matched_specialty"] = mi
+                art["matched_name"], art["matched_specialty"] = mi[0], mi[1]
+                if len(mi) > 2:
+                    art["matched_type"] = mi[2]
             merged.append(art)
     merged.sort(key=lambda a: a["sort_key"], reverse=(_sort_dir(request) == "DESC"))
     total = gkg_total + gal_total
@@ -1815,6 +1819,72 @@ def api_briefing():
         "view": view_id or None,
         "hours": hours,
     })
+
+
+
+@app.route("/api/fda_events")
+def api_fda_events():
+    """Recent FDA device regulatory events (recalls, 510k clearances, enforcement).
+
+    Query params:
+        days: how many days back to return (default 30, max 90)
+        type: filter by event_type ('recall', '510k', 'enforcement')
+        firm: case-insensitive substring filter on firm_name
+    """
+    try:
+        days = max(1, min(90, int(request.args.get("days", 30))))
+    except (TypeError, ValueError):
+        days = 30
+    event_type = (request.args.get("type") or "").strip().lower()
+    firm = (request.args.get("firm") or "").strip()
+
+    cutoff_date = int(
+        (datetime.utcnow() - timedelta(days=days)).strftime("%Y%m%d")
+    )
+
+    con = get_db()
+    if con is None:
+        return jsonify({"error": "Database busy"}), 503
+    try:
+        conds = ["event_date >= ?"]
+        params: list = [cutoff_date]
+        if event_type in ("recall", "510k", "enforcement"):
+            conds.append("event_type = ?")
+            params.append(event_type)
+        if firm:
+            conds.append("firm_name ILIKE ?")
+            params.append(f"%{firm}%")
+        where = " AND ".join(conds)
+        rows = con.execute(
+            f"SELECT event_id, event_type, event_date, firm_name, "
+            f"       product_description, recall_class, reason_for_recall, status "
+            f"FROM fda_regulatory_events "
+            f"WHERE {where} "
+            f"ORDER BY event_date DESC "
+            f"LIMIT 200",
+            params,
+        ).fetchall()
+    except Exception as e:
+        return jsonify({"error": f"DB error: {e}"}), 500
+    finally:
+        try: con.close()
+        except Exception: pass
+
+    events = []
+    for r in rows:
+        eid, etype, edate, fname, pdesc, rclass, reason, status = r
+        events.append({
+            "event_id": eid,
+            "event_type": etype,
+            "event_date": str(edate) if edate else None,
+            "firm_name": fname,
+            "product_description": pdesc,
+            "recall_class": rclass,
+            "reason_for_recall": reason,
+            "status": status,
+        })
+
+    return jsonify({"events": events, "days": days, "total": len(events)})
 
 
 # ---------------------------------------------------------------------------

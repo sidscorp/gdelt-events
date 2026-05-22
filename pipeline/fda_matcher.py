@@ -11,6 +11,12 @@ in benchmarks — the word-boundary check defeats RE2's automaton optimization.
 
 Matches are materialized into the `fda_match_cache` table at ingest time.
 Dashboard view queries do a fast IN-clause lookup, sub-100ms.
+
+match_type values:
+  legal      — full legal company name matched in title/orgs field
+  stripped   — base name (sans corporate suffix) matched in title/orgs
+  contextual — stripped/legal match in title AND a medical device keyword
+               confirmed in the description field (highest confidence)
 """
 
 import csv
@@ -64,6 +70,29 @@ STRIPPED_STOP_WORDS: frozenset[str] = frozenset({
     "beyond", "venture", "ventures", "planet", "outlook", "improve",
     "lemon", "compass", "meridian", "pivot", "graphy", "aurum",
     "apostle", "elmed", "billions", "micron", "mizuho", "a plus",
+    # Phase 1 additions — common geographic/generic words that produced
+    # thousands of false positives via stripped name matching:
+    "leone",        # LEONE SPA → matched ~3,600 Sierra Leone articles
+    "metropolis",   # Metropolis International → generic city/brand word
+    "panorama",     # PANORAMA INTERNATIONAL → BBC show, scenic viewpoints
+    "coastline",    # COASTLINE INTERNATIONAL → too generic
+    "evergreen",    # EVERGREEN INTERNATIONAL GROUP → container ships, forests
+    "registrar",    # Registrar Corp → common English noun
+    "aesthetic",    # Aesthetic Group → beauty/design articles
+    "goodman",      # Goodman Co., Ltd. → common surname
+    "the standard", # The Standard Co., Ltd. → hotel/publication name
+    "barco",        # BARCO NV → journalist surname (Mandalit del Barco)
+    "lowell",       # Lowell Inc. → city name, common surname
+    "glaser",       # GLASER AG → common surname
+    "talley",       # TALLEY GROUP LTD. → common surname
+    # Second-pass additions — still too generic after min_stripped_length=7:
+    "hoosier",      # HOOSIER, INC. → Indiana sports/geographic term
+    "cadence",      # Cadence, Inc. → music/semiconductor/general term
+    "polymer",      # Polymer Corporation → generic chemistry term
+    "prowess",      # PROWESS, INC. → common English word
+    "biometrics",   # BIOMETRICS LTD → ubiquitous tech buzzword
+    "fashionable",  # Fashionable, Inc. → common English word
+    "ray vision",   # Ray Vision Inc → matches "X-ray vision" in news
 })
 
 
@@ -211,9 +240,13 @@ def build_automaton(
     con: duckdb.DuckDBPyConnection,
     min_length: int = 2,
     include_stripped: bool = True,
+    min_stripped_length: int = 7,
 ) -> tuple[ahocorasick.Automaton, dict[str, str]]:
     """Build Aho-Corasick automaton from fda_companies. Returns (automaton, specialty_map).
-    include_stripped adds base-name variants (e.g. 'pfizer' alongside 'pfizer inc.')."""
+    include_stripped adds base-name variants (e.g. 'pfizer' alongside 'pfizer inc.').
+    min_stripped_length: minimum character length for stripped base names (default 7).
+    Raised from the previous implicit min_length=5 to reduce geographic/surname noise.
+    """
     rows = con.execute(
         "SELECT firm_name, medical_specialties FROM fda_companies "
         "WHERE firm_name IS NOT NULL"
@@ -237,7 +270,7 @@ def build_automaton(
             base = _strip_corporate_suffix(firm_name)
             if (
                 base
-                and len(base) >= min_length
+                and len(base) >= min_stripped_length
                 and base not in seen
                 and base not in STRIPPED_STOP_WORDS
                 and not base.isdigit()
@@ -246,10 +279,47 @@ def build_automaton(
                 A.add_word(base, (base, firm_name, "stripped"))
     A.make_automaton()
     log.info(
-        "automaton built: %d unique patterns (from %d firms, include_stripped=%s, min_length=%d)",
-        len(seen), len(specialty_map), include_stripped, min_length,
+        "automaton built: %d unique patterns (from %d firms, include_stripped=%s, "
+        "min_length=%d, min_stripped_length=%d)",
+        len(seen), len(specialty_map), include_stripped, min_length, min_stripped_length,
     )
     return A, specialty_map
+
+
+def _build_context_automaton() -> ahocorasick.Automaton:
+    """Build a small Aho-Corasick automaton from medical device keywords.
+    Used to confirm that an article's description mentions an actual medical
+    device — upgrading a company name match to match_type='contextual'.
+    """
+    try:
+        from .tagger import CATEGORIES
+    except ImportError:
+        from tagger import CATEGORIES  # fallback when run as a script
+    keywords = CATEGORIES.get("medical_devices", {}).get("keywords", [])
+    A = ahocorasick.Automaton()
+    for kw in keywords:
+        low = kw.lower().strip()
+        if low:
+            A.add_word(low, low)
+    A.make_automaton()
+    log.debug("context automaton: %d medical device keywords", len(keywords))
+    return A
+
+
+def _context_scan(automaton: ahocorasick.Automaton, text: str) -> bool:
+    """Return True if any word-bounded medical device keyword appears in text."""
+    if not text:
+        return False
+    low = text.lower()
+    n = len(low)
+    for end_idx, kw in automaton.iter(low):
+        start = end_idx - len(kw) + 1
+        if start > 0 and _WORD_RE.match(low[start - 1]):
+            continue
+        if end_idx + 1 < n and _WORD_RE.match(low[end_idx + 1]):
+            continue
+        return True
+    return False
 
 
 def _scan(
@@ -383,12 +453,18 @@ def _match_gal_stream(
     automaton: ahocorasick.Automaton,
     specialty_map: dict[str, str],
     since_ts: int = 0,
+    context_automaton: ahocorasick.Automaton | None = None,
 ) -> tuple[int, int, int]:
     """Scan GAL rows newer than since_ts, write matches to cache.
 
     GAL has no orgs field, so we match the article title. The calling code
-    builds the automaton with `min_length=5` so short/ambiguous names like
-    "Keos" or "CorDx" won't match — there's no NER backstop for GAL.
+    builds the automaton with `min_stripped_length=7` so short/ambiguous
+    names won't match — there's no NER backstop for GAL.
+
+    When context_automaton is provided, the description field is additionally
+    scanned for medical device keywords. A match in both title (company name)
+    and description (device keyword) upgrades the match_type to 'contextual',
+    the highest-confidence tier.
 
     Also restricted to English articles: GAL includes Italian / Dutch /
     Spanish / German news where words like "avanti" / "eigen" / "proprio"
@@ -408,7 +484,7 @@ def _match_gal_stream(
 
     while True:
         chunk = con.execute(
-            f"SELECT url, crawled_at, title FROM gal {where} "
+            f"SELECT url, crawled_at, title, description FROM gal {where} "
             f"ORDER BY crawled_at LIMIT ? OFFSET ?",
             base_params + [CHUNK_SIZE, offset],
         ).fetchall()
@@ -416,7 +492,7 @@ def _match_gal_stream(
             break
 
         matches: list[tuple] = []
-        for url, crawled_at, title in chunk:
+        for url, crawled_at, title, description in chunk:
             scanned += 1
             if crawled_at and crawled_at > max_ts:
                 max_ts = crawled_at
@@ -425,6 +501,11 @@ def _match_gal_stream(
             hit = _scan(automaton, title)
             if hit:
                 firm_name, pattern, match_type = hit
+                # Upgrade to 'contextual' when description confirms medical
+                # device context (e.g. pacemaker, stent, surgical robot).
+                if context_automaton and description:
+                    if _context_scan(context_automaton, description):
+                        match_type = "contextual"
                 matches.append((
                     url,
                     "gal",
@@ -460,10 +541,11 @@ def initial_match(db_path: Path | None = None) -> dict:
         log.info("Clearing fda_match_cache...")
         con.execute("DELETE FROM fda_match_cache")
 
-        log.info("Building Aho-Corasick automatons (full, and GAL length>=5)...")
+        log.info("Building Aho-Corasick automatons...")
         t0 = time.time()
-        full_automaton, specialty_map = build_automaton(con, min_length=2)
-        gal_automaton, _ = build_automaton(con, min_length=5)
+        full_automaton, specialty_map = build_automaton(con, min_length=2, min_stripped_length=7)
+        gal_automaton, _ = build_automaton(con, min_length=5, min_stripped_length=7)
+        context_automaton = _build_context_automaton()
         summary["automaton_patterns_gkg"] = len(specialty_map)
         summary["automaton_patterns_gal"] = sum(1 for n in specialty_map if len(n) >= 5)
         summary["automaton_build_s"] = round(time.time() - t0, 2)
@@ -480,10 +562,11 @@ def initial_match(db_path: Path | None = None) -> dict:
             "SELECT count(*) FROM fda_match_cache WHERE source_type='gkg'"
         ).fetchone()[0]
 
-        log.info("Scanning GAL (title field, strict name length)...")
+        log.info("Scanning GAL (title + description context, strict name length)...")
         t0 = time.time()
         scanned, _matched, max_ts = _match_gal_stream(
-            con, gal_automaton, specialty_map, since_ts=0
+            con, gal_automaton, specialty_map, since_ts=0,
+            context_automaton=context_automaton,
         )
         summary["gal_scanned"] = scanned
         summary["gal_elapsed_s"] = round(time.time() - t0, 1)
@@ -507,16 +590,25 @@ def match_new_rows(db_path: Path | None = None) -> dict:
     con.execute("SET threads = 4")
     summary: dict = {}
     try:
-        full_automaton, specialty_map = build_automaton(con, min_length=2)
-        gal_automaton, _ = build_automaton(con, min_length=5)
+        full_automaton, specialty_map = build_automaton(con, min_length=2, min_stripped_length=7)
+        gal_automaton, _ = build_automaton(con, min_length=5, min_stripped_length=7)
+        context_automaton = _build_context_automaton()
 
-        for src, streamer, auto in [
-            ("gkg", _match_gkg_stream, full_automaton),
-            ("gal", _match_gal_stream, gal_automaton),
+        for src, streamer, auto, ctx in [
+            ("gkg", _match_gkg_stream, full_automaton, None),
+            ("gal", _match_gal_stream, gal_automaton, context_automaton),
         ]:
             since = _get_last_ts(con, src)
             t0 = time.time()
-            scanned, _matched, max_ts = streamer(con, auto, specialty_map, since_ts=since)
+            if src == "gal":
+                scanned, _matched, max_ts = streamer(
+                    con, auto, specialty_map, since_ts=since,
+                    context_automaton=ctx,
+                )
+            else:
+                scanned, _matched, max_ts = streamer(
+                    con, auto, specialty_map, since_ts=since
+                )
             summary[f"{src}_scanned"] = scanned
             summary[f"{src}_elapsed_s"] = round(time.time() - t0, 2)
             if max_ts > since:

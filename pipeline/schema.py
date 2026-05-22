@@ -204,7 +204,25 @@ def create_fda_tables(con: duckdb.DuckDBPyConnection) -> None:
     con.execute("CREATE INDEX IF NOT EXISTS idx_fda_cache_name "
                 "ON fda_match_cache(matched_name)")
 
-    # Add match_type/matched_pattern columns on existing DBs (no-op on
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS fda_regulatory_events (
+            event_id            VARCHAR PRIMARY KEY,
+            event_type          VARCHAR,   -- 'recall' | '510k' | 'enforcement'
+            event_date          INTEGER,   -- YYYYMMDD
+            firm_name           VARCHAR,
+            product_description VARCHAR,
+            recall_class        VARCHAR,   -- Class I/II/III for recalls; advisory committee for 510k
+            reason_for_recall   VARCHAR,
+            status              VARCHAR,
+            fetched_at          BIGINT     -- YYYYMMDDHHMMSS when we pulled this row
+        )
+    """)
+    con.execute("CREATE INDEX IF NOT EXISTS idx_fda_events_date "
+                "ON fda_regulatory_events(event_date)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_fda_events_firm "
+                "ON fda_regulatory_events(firm_name)")
+
+        # Add match_type/matched_pattern columns on existing DBs (no-op on
     # fresh ones) and create the (source_type, match_type, crawled_at)
     # composite index. Must run AFTER the CREATE TABLE IF NOT EXISTS so
     # the ALTER TABLE has a table to alter.

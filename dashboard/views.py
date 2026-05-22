@@ -5,6 +5,7 @@ Each view is one of:
   kind="filters": a bundle of the same filter args the API already accepts.
                   Merged with user-supplied filters at query time.
   kind="fda_match": special-cased semi-join against fda_match_cache.
+  kind="tag_match": keyword/theme tag join against article_tags.
 
 Add a new view by appending to VIEWS and restarting the dashboard.
 """
@@ -14,13 +15,23 @@ VIEWS = [
         "id": "fda-medical-devices",
         "name": "Medical Device Companies",
         "description": (
-            "Articles mentioning any FDA-registered medical device manufacturer. "
-            "Use the Strict/Broad toggle to trade precision for recall."
+            "Articles mentioning FDA-registered medical device manufacturers. "
+            "Verified = company name confirmed alongside device context in description. "
+            "Strict = legal names only. Broad = includes abbreviated names."
         ),
         "kind": "fda_match",
         "default_hours": 24,
-        "default_match_types": ["legal"],
+        "default_match_types": ["legal", "contextual"],
         "available_match_types": [
+            {
+                "id": "verified",
+                "label": "Verified",
+                "description": (
+                    "Company name + medical device keyword confirmed in article description. "
+                    "Highest precision — filters out incidental name matches."
+                ),
+                "match_types": ["legal", "contextual"],
+            },
             {
                 "id": "legal",
                 "label": "Strict",

@@ -1,0 +1,14 @@
+/* admin.css — page-specific styles for the Admin / User Management page (tokens/reset in base.css). */
+body { max-width: 700px; margin: 60px auto; padding: 0 1.5rem; }
+h1 { font-size: 1.4rem; margin-bottom: 1.5rem; }
+table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+th { text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-tertiary); padding: 0.4rem 0.5rem; border-bottom: 2px solid var(--text); }
+td { padding: 0.5rem; border-bottom: 1px solid #eee; }
+.status-pending { color: #b87300; }
+.status-approved { color: #2d7a3a; }
+form { display: inline; }
+button { font-family: inherit; font-size: 0.75rem; padding: 0.2rem 0.5rem; border: 1px solid var(--border); background: #fff; cursor: pointer; }
+button:hover { background: var(--text); color: var(--bg); }
+.btn-reject { color: #a33; border-color: #a33; }
+.links { margin-top: 2rem; font-size: 0.78rem; }
+.links a { color: var(--text-secondary); }

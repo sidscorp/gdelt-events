@@ -1,0 +1,13 @@
+/* login.css — page-specific styles for the Login page (tokens/reset in base.css). */
+body { max-width: 400px; margin: 80px auto; padding: 0 1rem; }
+h1 { font-size: 1.4rem; margin-bottom: 0.3rem; }
+.subtitle { font-size: 0.82rem; color: var(--text-tertiary); margin-bottom: 2rem; }
+form { display: flex; flex-direction: column; gap: 0.8rem; }
+label { font-size: 0.78rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
+input { font-family: inherit; font-size: 0.9rem; padding: 0.5rem; border: 1px solid var(--border); background: #fff; }
+input:focus { outline: none; border-color: var(--accent); }
+button { font-family: inherit; font-size: 0.85rem; padding: 0.55rem 1.2rem; background: var(--text); color: var(--bg); border: none; cursor: pointer; }
+button:hover { opacity: 0.85; }
+.flash { font-size: 0.82rem; color: #a33; margin-bottom: 1rem; }
+.links { margin-top: 1.5rem; font-size: 0.78rem; color: var(--text-tertiary); }
+.links a { color: var(--text-secondary); }

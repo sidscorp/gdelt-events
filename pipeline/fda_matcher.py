@@ -53,6 +53,23 @@ STOP_WORDS: frozenset[str] = frozenset({
     "walmart inc.", "walmart inc",
 })
 
+# Legal-name stop words: FDA-registered names that are single generic words
+# (common nouns, surnames, brand names in other industries) and would match
+# huge volumes of unrelated news even as a full-legal-name match.
+LEGAL_STOP_WORDS: frozenset[str] = frozenset({
+    "sherpa",       # matches Sherpa climbers, motorcycle brand, tech tools
+    "primus",       # rock band, Latin adjective
+    "integer",      # programming/math term; a company name but too generic
+    "amplitude",    # analytics company (not devices), physics term
+    "east west",    # too generic — matches any East-West geopolitical article
+    "healthwatch",  # TV health news segments, not a device company context
+    "haleon",       # consumer health spinoff (OTC brands, not devices)
+    "cintas",       # uniform/linen services — FDA-registered for some items
+    "td synnex",    # IT distributor — not medical devices
+    "galaxy",       # too generic (phones, countries, AI initiatives)
+    "procter",      # P&G — FDA-registered for some items but news is consumer goods
+})
+
 STRIPPED_STOP_WORDS: frozenset[str] = frozenset({
     "apple", "tesla", "walmart", "google", "amazon", "microsoft",
     "meta", "facebook", "netflix", "disney", "target", "costco",
@@ -261,6 +278,8 @@ def build_automaton(
         if len(firm_name) < min_length:
             continue
         low = firm_name.lower()
+        if low in LEGAL_STOP_WORDS:
+            continue
         if low not in seen:
             seen.add(low)
             A.add_word(low, (low, firm_name, "legal"))

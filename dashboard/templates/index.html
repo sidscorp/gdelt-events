@@ -2,9 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 <title>GDELT News</title>
+<!-- PWA: installable app with an instant offline shell -->
+<link rel="manifest" href="/static/manifest.json">
+<meta name="theme-color" content="#b4621a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="GDELT">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
 <style>
   /* Tufte-inspired: high data-ink ratio, no decoration */
   :root {
@@ -20,6 +27,16 @@
     --tone-neutral: #888;
     --tag-bg: #f0ede6;
     --tag-border: #d4d0c8;
+    /* Bolder modernization tokens */
+    --accent-brand: #b4621a;
+    --accent-brand-2: #cf7d1f;
+    --accent-soft: rgba(180, 98, 26, 0.10);
+    --surface: #ffffff;
+    --surface-border: #e7e2d6;
+    --radius: 9px;
+    --radius-sm: 6px;
+    --shadow: 0 1px 2px rgba(40,30,15,0.05), 0 2px 8px rgba(40,30,15,0.05);
+    --shadow-hover: 0 2px 6px rgba(40,30,15,0.07), 0 8px 22px rgba(40,30,15,0.10);
   }
 
   /* Dark mode */
@@ -36,6 +53,14 @@
     --tone-neutral: #78716c;
     --tag-bg: #2a2520;
     --tag-border: #3d3730;
+    /* Bolder modernization tokens (dark) */
+    --accent-brand: #e3a857;
+    --accent-brand-2: #f0bd72;
+    --accent-soft: rgba(227, 168, 87, 0.13);
+    --surface: #221e19;
+    --surface-border: #38322b;
+    --shadow: 0 1px 2px rgba(0,0,0,0.30), 0 2px 10px rgba(0,0,0,0.25);
+    --shadow-hover: 0 2px 8px rgba(0,0,0,0.40), 0 10px 26px rgba(0,0,0,0.35);
   }
   body.dark input, body.dark select, body.dark textarea {
     background: var(--bg-hover);
@@ -265,6 +290,25 @@
   }
 
   .btn-clear:hover { color: var(--text); }
+
+  .btn-more-filters {
+    font-family: inherit;
+    font-size: 0.78rem;
+    padding: 0.3rem 0.7rem;
+    border: 1px solid var(--border);
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  .btn-more-filters:hover { border-color: var(--text-secondary); color: var(--text); }
+  .btn-more-filters.active { background: var(--bg-hover); color: var(--text); }
+  .more-filters-dot { color: #4a7c59; font-size: 0.65rem; margin-left: 0.25rem; }
+  #moreFiltersDrawer {
+    border-top: 1px solid var(--border);
+    padding-top: 0.5rem;
+    margin-top: -0.5rem;
+    margin-bottom: 0.6rem;
+  }
 
   /* Views bar — saved-filter presets above the time pills */
   .views-bar {
@@ -712,8 +756,8 @@
   /* Dim controls while fetching so it's obvious they're locked */
   body.fetching .time-pill,
   body.fetching .views-bar button,
-  body.fetching #filters input,
-  body.fetching #filters select {
+  body.fetching .filters input,
+  body.fetching .filters select {
     opacity: 0.55;
     cursor: wait;
   }
@@ -763,9 +807,202 @@
     font-size: 0.72rem;
     color: var(--text-tertiary);
   }
+  /* ===================================================================== */
+  /* === Bolder modernization (layered over the Tufte base) ============== */
+  /* ===================================================================== */
+
+  /* Header: confident title + accent rule + stat chips */
+  header { border-bottom: 2px solid var(--accent-brand); padding-bottom: 0.7rem; }
+  header h1 { font-size: 1.75rem; letter-spacing: 0.03em; }
+  .header-stats { margin-top: 0.5rem; }
+  .header-stats span {
+    display: inline-block; margin-right: 0.45rem; padding: 0.14rem 0.6rem;
+    background: var(--bg-hover); border: 1px solid var(--border);
+    border-radius: 999px; font-size: 0.74rem; color: var(--text-secondary);
+  }
+
+  /* Curated-topic pills: tactile, accent active */
+  .view-pill {
+    border-radius: 999px !important; padding: 0.34rem 0.9rem !important;
+    border: 1px solid var(--border); transition: all 0.13s ease; font-weight: 500;
+  }
+  .view-pill:hover { border-color: var(--accent-brand); color: var(--text); background: var(--accent-soft); }
+  .view-pill.active, body.dark .view-pill.active {
+    background: var(--accent-brand); color: #fff; border-color: var(--accent-brand);
+  }
+  body.dark .view-pill.active { color: #1a1714; }
+
+  /* Time pills: accent active */
+  .time-pill { border-radius: var(--radius-sm); transition: all 0.13s ease; }
+  .time-pill.active, body.dark .time-pill.active {
+    background: var(--accent-soft); color: var(--accent-brand); border: 1px solid var(--accent-brand);
+  }
+  .time-pill:hover { color: var(--accent-brand); }
+
+  /* Feed cards: real surfaces with hover elevation */
+  .article {
+    background: var(--surface); border: 1px solid var(--surface-border);
+    border-radius: var(--radius); padding: 0.7rem 0.95rem; margin: 0 0 0.55rem;
+    box-shadow: var(--shadow);
+    transition: box-shadow 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
+  }
+  .article:hover {
+    background: var(--surface); margin: 0 0 0.55rem; padding: 0.7rem 0.95rem;
+    box-shadow: var(--shadow-hover); transform: translateY(-1px); border-color: var(--accent-brand);
+  }
+  .article-title a:hover { color: var(--accent-brand); text-decoration: none; }
+
+  /* Rollup "covered by N sources" -> prominent accent badge (the marquee feature) */
+  .rollup > button {
+    background: var(--accent-soft) !important; color: var(--accent-brand) !important;
+    border: 1px solid var(--accent-brand) !important; border-radius: 999px !important;
+    font-weight: 600 !important; padding: 0.12rem 0.6rem !important;
+  }
+  .rollup a { color: var(--accent-brand); }
+
+  /* AI Briefing: a real card */
+  .briefing-card {
+    border: 1px solid var(--surface-border); border-left: 3px solid var(--accent-brand);
+    border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow);
+    padding: 1.1rem 1.3rem; margin: 0.7rem 0;
+  }
+  .briefing-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.55rem; }
+  .briefing-label {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700; color: var(--accent-brand);
+  }
+  .briefing-dismiss {
+    font-size: 0.68rem; color: var(--text-tertiary); background: none; border: none; cursor: pointer; font-family: inherit;
+  }
+  .briefing-dismiss:hover { color: var(--text); }
+  .briefing-body { font-size: 0.92rem; line-height: 1.72; color: var(--text); }
+  .briefing-body h4 {
+    font-size: 1.1rem !important; font-weight: 600 !important; margin: 0 0 0.55rem !important;
+    color: var(--text); letter-spacing: 0.01em;
+  }
+  .briefing-body ul { list-style: none; padding-left: 0; margin: 0.55rem 0; }
+  .briefing-body li { position: relative; padding-left: 1.15rem; margin: 0.5rem 0; }
+  .briefing-body li::before {
+    content: "▸"; position: absolute; left: 0; top: 0.02em; color: var(--accent-brand); font-size: 0.82rem;
+  }
+  .briefing-meta {
+    font-size: 0.7rem; color: var(--text-tertiary); margin-top: 0.8rem; padding-top: 0.55rem;
+    border-top: 1px solid var(--surface-border);
+  }
+
+  /* Citations: legible accent superscripts */
+  sup.cite { line-height: 0; white-space: nowrap; }
+  sup.cite a { color: var(--accent-brand); text-decoration: none; font-weight: 700; font-size: 0.62rem; padding: 0 1.5px; }
+  sup.cite a:hover { text-decoration: underline; }
+
+  /* Pagination + inputs */
+  .pagination button { border-radius: var(--radius-sm); transition: all 0.13s ease; }
+  .pagination button:hover:not(:disabled) { border-color: var(--accent-brand); color: var(--accent-brand); }
+  .filters input, .filters select { border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--surface-border); }
+  .filters input:focus, .filters select:focus { border-color: var(--accent-brand); box-shadow: 0 0 0 2px var(--accent-soft); }
+
+  /* FDA panel: align to surface + accent */
+  #fdaEventsPanel { border: 1px solid var(--surface-border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+/* Entity filters (person/org/place/theme) retired with the GKG view — GAL has no entities */
+.f-entity { display: none !important; }
+
+/* Auto-widen notice (shown when an empty window steps out to a wider one) */
+.feed-notice {
+  list-style: none; padding: 0.5rem 0.7rem; margin: 0 0 0.5rem;
+  font-size: 0.8rem; color: var(--text-secondary);
+  background: var(--accent-soft, rgba(180,98,26,0.08));
+  border-left: 3px solid var(--accent-brand); border-radius: var(--radius-sm, 6px);
+}
+
+/* GAL reading card: thumbnail + summary */
+.article-row { display: flex; gap: 0.8rem; align-items: flex-start; }
+.article-body { flex: 1 1 auto; min-width: 0; }
+.article-thumb { flex: 0 0 auto; }
+.article-thumb img {
+  width: 120px; height: 84px; object-fit: cover; display: block;
+  border-radius: var(--radius-sm, 6px); background: var(--surface-border, #eee);
+}
+.article-desc {
+  font-size: 0.84rem; color: var(--text-secondary); line-height: 1.45;
+  margin: 0.3rem 0 0.15rem;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+@media (max-width: 560px) {
+  .article-thumb img { width: 84px; height: 62px; }
+  .article-desc { -webkit-line-clamp: 4; }
+}
+
+/* English-only toggle (sits in the time-pill row) */
+.lang-toggle {
+  margin-left: 0.5rem; font-size: 0.76rem; padding: 0.3rem 0.7rem;
+  border: 1px solid var(--surface-border, var(--border));
+  border-radius: var(--radius-sm, 6px); background: var(--surface, var(--bg));
+  color: var(--text-secondary); cursor: pointer; transition: all 0.13s ease;
+}
+.lang-toggle:hover { border-color: var(--accent-brand); color: var(--text); }
+.lang-toggle.active { background: var(--accent-brand); border-color: var(--accent-brand); color: #fff; }
+body.dark .lang-toggle.active { color: #1a1714; }
+
+/* Fast, styled hover tooltip for view pills (replaces the slow native title) */
+.pill-tip {
+  position: fixed; z-index: 9999; max-width: 320px;
+  background: var(--surface, #fff); color: var(--text);
+  border: 1px solid var(--surface-border, var(--border));
+  border-radius: var(--radius-sm, 6px); box-shadow: var(--shadow, 0 4px 14px rgba(0,0,0,0.14));
+  padding: 0.5rem 0.65rem; font-size: 0.78rem; line-height: 1.38;
+  pointer-events: none; opacity: 0; transform: translateY(-3px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.pill-tip.show { opacity: 1; transform: translateY(0); }
 </style>
 </head>
 <body>
+<script>
+/* RUM: real-user front-end timings -> /api/perf. Native marks always work;
+   web-vitals (INP/CLS/LCP) loads async and is optional. */
+(function(){
+  window.__perf = [];
+  window.__lcp = 0; window.__ttaSent = false;
+  window.perfMark = function(metric, value){
+    try { if (value==null || !isFinite(value)) return;
+      window.__perf.push({ metric: metric, value: Math.round(value),
+        view: (window.state&&state.view)||'', hours:(window.state&&state.hours)||0 });
+    } catch(e){}
+  };
+  try { new PerformanceObserver(function(l){ var es=l.getEntries(); window.__lcp = es[es.length-1].startTime; })
+        .observe({type:'largest-contentful-paint', buffered:true}); } catch(e){}
+  window.perfFlush = function(){
+    try {
+      if (window.__lcp) { window.perfMark('lcp', window.__lcp); window.__lcp = 0; }
+      if (!window.__perf.length) return;
+      var body = JSON.stringify({samples: window.__perf.splice(0)});
+      if (navigator.sendBeacon) navigator.sendBeacon('/api/perf', new Blob([body], {type:'application/json'}));
+      else fetch('/api/perf', {method:'POST', headers:{'Content-Type':'application/json'}, body: body, keepalive:true});
+    } catch(e){}
+  };
+  addEventListener('load', function(){
+    try {
+      var nav = performance.getEntriesByType('navigation')[0];
+      if (nav){ window.perfMark('ttfb', nav.responseStart); }
+      var fcp = performance.getEntriesByName('first-contentful-paint')[0];
+      if (fcp) window.perfMark('fcp', fcp.startTime);
+    } catch(e){}
+    setTimeout(window.perfFlush, 2500);
+  });
+  // Register the service worker (instant app-shell open on subsequent loads).
+  if ('serviceWorker' in navigator) {
+    addEventListener('load', function(){ navigator.serviceWorker.register('/sw.js').catch(function(){}); });
+  }
+  addEventListener('visibilitychange', function(){ if (document.visibilityState==='hidden') window.perfFlush(); });
+  var s=document.createElement('script');
+  s.src='https://unpkg.com/web-vitals@4/dist/web-vitals.iife.js'; s.async=true;
+  s.onload=function(){ try{
+    webVitals.onINP(function(m){window.perfMark('inp', m.value);});
+    webVitals.onCLS(function(m){window.perfMark('cls', m.value*1000);});
+    webVitals.onLCP(function(m){window.perfMark('lcp_wv', m.value);});
+  }catch(e){} };
+  document.head.appendChild(s);
+})();
+</script>
 
 <div id="topProgress"></div>
 
@@ -791,8 +1028,11 @@
   <div style="font-size:0.82rem; color:var(--text-secondary); margin-top:0.2rem;">
     Real-time monitoring of 44K global news sources, updated every 15 minutes.
     Filter by curated topic, time range, or text below.
+    Coverage spans roughly the past 60 days.
+    <br>A hobby project by <a href="https://www.linkedin.com/in/siddnambiar" target="_blank" rel="noopener" style="color:var(--text-secondary);">Sidd Nambiar</a>.
+    <br>Self-hosted on personal hardware.
   </div>
-  <div style="margin-top:0.5rem;">
+  <div style="margin-top:0.5rem; display:none;">
     <a href="/search" style="display:inline-flex; align-items:center; gap:0.4rem; font-size:0.82rem; color:var(--text); text-decoration:none; border:1px solid var(--border); padding:0.35rem 0.8rem; border-radius:3px; background:var(--bg-hover);">
       <span style="font-size:1rem;">&#x1F50D;</span>
       <span><strong>Semantic Search</strong> — describe what you're looking for in plain English and find articles by meaning, not just keywords</span>
@@ -819,21 +1059,22 @@
 
 <div class="section-label">Time range</div>
 <div class="time-pills" id="timePills">
-  <button class="time-pill active" data-hours="1">1h</button>
+  <button class="time-pill active" data-hours="3">3h</button>
   <button class="time-pill" data-hours="6">6h</button>
   <button class="time-pill" data-hours="24">24h</button>
   <button class="time-pill" data-hours="72">3d</button>
   <button class="time-pill" data-hours="168">7d</button>
   <button class="time-pill" data-hours="720">30d</button>
+  <button id="enOnlyToggle" class="lang-toggle active" title="Show only English-language articles (off = all languages)">🌐 English only</button>
 </div>
 
-<div id="briefingPanel" style="display:none; border:1px solid var(--border); padding:0.9rem 1.1rem; margin:0.6rem 0; background:var(--bg-hover); line-height:1.6;">
-  <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.4rem;">
-    <span style="font-size:0.72rem; text-transform:uppercase; letter-spacing:0.06em; color:var(--text-tertiary);">AI Briefing</span>
-    <button onclick="document.getElementById('briefingPanel').style.display='none'" style="font-size:0.68rem; color:var(--text-tertiary); background:none; border:none; cursor:pointer; font-family:inherit;">dismiss</button>
+<div id="briefingPanel" class="briefing-card" style="display:none;">
+  <div class="briefing-head">
+    <span class="briefing-label">✦ AI Briefing</span>
+    <button class="briefing-dismiss" onclick="document.getElementById('briefingPanel').style.display='none'">dismiss</button>
   </div>
-  <div id="briefingText" style="font-size:0.88rem; color:var(--text); line-height:1.7;"></div>
-  <div id="briefingMeta" style="font-size:0.68rem; color:var(--text-tertiary); margin-top:0.4rem;"></div>
+  <div id="briefingText" class="briefing-body"></div>
+  <div id="briefingMeta" class="briefing-meta"></div>
 </div>
 
 
@@ -845,83 +1086,67 @@
   <div id="fdaEventsList"><div style="padding:0.5rem 0.8rem; color:var(--text-tertiary); font-size:0.78rem;">Loading...</div></div>
 </div>
 
-<div class="section-label">Refine results <span style="text-transform:none; letter-spacing:0; color:var(--text-tertiary); font-size:0.7rem;">— stack multiple filters; they combine with AND</span></div>
-<div class="filters">
-  <div class="filter-group">
+<div class="section-label">Refine results</div>
+<div id="mainFilters" class="filters">
+  <div class="filter-group" style="flex:1; min-width:180px;">
     <span class="filter-label">Search</span>
-    <input type="text" id="searchInput" placeholder="title, description…" autocomplete="off">
+    <input type="text" id="searchInput" placeholder="search articles…" autocomplete="off" style="width:100%;">
   </div>
-
-  <div class="filter-group">
-    <span class="filter-label">Title</span>
-    <input type="text" id="titleInput" placeholder="in article title…" autocomplete="off">
-  </div>
-
-  <div class="filter-group">
-    <span class="filter-label">Description</span>
-    <input type="text" id="descriptionInput" placeholder="in description…" autocomplete="off">
-  </div>
-
-  <div class="filter-group f-entity">
-    <span class="filter-label">Person</span>
-    <input type="text" id="personInput" placeholder="name…" autocomplete="off">
-  </div>
-
-  <div class="filter-group f-entity">
-    <span class="filter-label">Org</span>
-    <input type="text" id="orgInput" placeholder="organization…" autocomplete="off">
-  </div>
-
-  <div class="filter-group f-entity">
-    <span class="filter-label">Place</span>
-    <input type="text" id="locationInput" placeholder="location…" autocomplete="off">
-  </div>
-
-  <div class="filter-group f-entity">
-    <span class="filter-label">Theme</span>
-    <input type="text" id="themeInput" placeholder="theme…" autocomplete="off">
-  </div>
-
-  <div class="filter-group">
-    <span class="filter-label">Domain</span>
-    <input type="text" id="domainInput" placeholder="nytimes.com…" autocomplete="off">
-  </div>
-
-  <div class="filter-group">
-    <span class="filter-label">Outlet</span>
-    <input type="text" id="outletInput" placeholder="outlet name…" autocomplete="off">
-  </div>
-
   <div class="filter-group">
     <span class="filter-label">Language</span>
     <select id="languageSelect"><option value="">any</option></select>
   </div>
-
   <div class="filter-group">
-    <span class="filter-label">From</span>
-    <input type="date" id="dateFrom">
-  </div>
-
-  <div class="filter-group">
-    <span class="filter-label">To</span>
-    <input type="date" id="dateTo">
-  </div>
-
-  <button class="btn-clear" onclick="clearFilters()">clear all</button>
-</div>
-
-<div class="active-filters" id="activeFilters"></div>
-
-<div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; margin-bottom:0.3rem;">
-  <div class="results-meta" id="resultsMeta"></div>
-  <div style="display:flex; align-items:baseline; gap:0.3rem; font-size:0.75rem;">
-    <span style="color:var(--text-tertiary); text-transform:uppercase; letter-spacing:0.05em; font-size:0.66rem;">Sort</span>
-    <select id="sortSelect" style="font-size:0.74rem; border:1px solid var(--border); background:#fff; padding:0.15rem 0.3rem; cursor:pointer;">
+    <span class="filter-label">Sort</span>
+    <select id="sortSelect">
       <option value="newest">Newest first</option>
       <option value="oldest">Oldest first</option>
     </select>
   </div>
+  <button class="btn-more-filters" id="moreFiltersBtn" onclick="toggleMoreFilters()">
+    More filters <span id="moreFiltersDot" class="more-filters-dot" style="display:none;">●</span>
+  </button>
+  <button class="btn-clear" onclick="clearFilters()">clear all</button>
 </div>
+
+<div id="moreFiltersDrawer" class="filters" style="display:none;">
+  <div class="filter-group f-entity">
+    <span class="filter-label">Person</span>
+    <input type="text" id="personInput" placeholder="name…" autocomplete="off">
+  </div>
+  <div class="filter-group f-entity">
+    <span class="filter-label">Org</span>
+    <input type="text" id="orgInput" placeholder="organization…" autocomplete="off">
+  </div>
+  <div class="filter-group f-entity">
+    <span class="filter-label">Place</span>
+    <input type="text" id="locationInput" placeholder="location…" autocomplete="off">
+  </div>
+  <div class="filter-group f-entity">
+    <span class="filter-label">Theme</span>
+    <input type="text" id="themeInput" placeholder="theme…" autocomplete="off">
+  </div>
+  <div class="filter-group">
+    <span class="filter-label">Domain</span>
+    <input type="text" id="domainInput" placeholder="nytimes.com…" autocomplete="off">
+  </div>
+  <div class="filter-group">
+    <span class="filter-label">Outlet</span>
+    <input type="text" id="outletInput" placeholder="outlet name…" autocomplete="off">
+  </div>
+  <div class="filter-group">
+    <span class="filter-label">From</span>
+    <input type="date" id="dateFrom">
+  </div>
+  <div class="filter-group">
+    <span class="filter-label">To</span>
+    <input type="date" id="dateTo">
+  </div>
+</div>
+
+<div class="active-filters" id="activeFilters"></div>
+
+<div class="results-meta" id="resultsMeta" style="margin-bottom:0.3rem;"></div>
 
 <ul class="article-list" id="articleList">
   <li class="loading">Loading articles...</li>
@@ -936,8 +1161,8 @@
 <script>
 const state = {
   page: 1,
-  hours: 1,
-  q: '', title: '', description: '',
+  hours: 3,
+  q: '',
   person: '', org: '', location: '', theme: '',
   domain: '', outlet: '', language: '',
   date_from: '', date_to: '',
@@ -945,6 +1170,7 @@ const state = {
   source: 'gal', // 'gal' | 'gkg' | 'all'
   match_types: ['legal'], // ['legal'] = Strict, ['legal','stripped'] = Broad
   sort: 'newest', // 'newest' | 'oldest'
+  en_only: true, // English-only by default; ?en_only=0 to include all languages
 };
 
 // Unified feed — no source selection needed
@@ -959,6 +1185,16 @@ state.source = 'all';
   const parts = raw.split(',').map(s => s.trim()).filter(Boolean);
   const valid = parts.filter(t => ['legal','stripped','contextual'].includes(t));
   state.match_types = valid.length ? valid : ['legal'];
+})();
+
+// Restore more-filters drawer state from localStorage
+(function initMoreFilters() {
+  if (localStorage.getItem('moreFiltersOpen') === '1') {
+    const drawer = document.getElementById('moreFiltersDrawer');
+    const btn = document.getElementById('moreFiltersBtn');
+    if (drawer) drawer.style.display = '';
+    if (btn) btn.classList.add('active');
+  }
 })();
 
 // The actual data window (populated from /api/stats)
@@ -981,6 +1217,9 @@ const _urlParams = new URLSearchParams(window.location.search);
 if (_urlParams.get('view')) {
   state.view = _urlParams.get('view');
 }
+if (_urlParams.get('en_only') === '0') {
+  state.en_only = false;
+}
 
 // Time pills
 document.getElementById('timePills').addEventListener('click', (e) => {
@@ -996,11 +1235,42 @@ document.getElementById('timePills').addEventListener('click', (e) => {
   fetchArticles();
 });
 
+// English-only toggle (default on)
+const _enBtn = document.getElementById('enOnlyToggle');
+function syncEnBtn() {
+  _enBtn.classList.toggle('active', state.en_only);
+  _enBtn.setAttribute('aria-pressed', String(state.en_only));
+  _enBtn.textContent = state.en_only ? '🌐 English only' : '🌐 All languages';
+}
+syncEnBtn();
+_enBtn.addEventListener('click', () => {
+  state.en_only = !state.en_only;
+  state.page = 1;
+  syncEnBtn();
+  if (typeof updateUrl === 'function') updateUrl();
+  fetchArticles();
+});
+
+// Fast, styled hover tooltip for view pills (shows the view's description)
+const _pillTip = document.createElement('div');
+_pillTip.className = 'pill-tip';
+document.body.appendChild(_pillTip);
+document.addEventListener('mouseover', (e) => {
+  const el = e.target.closest && e.target.closest('.view-pill[data-tip]');
+  if (!el) return;
+  _pillTip.textContent = el.dataset.tip;
+  const r = el.getBoundingClientRect();
+  _pillTip.style.left = Math.min(Math.max(8, r.left), window.innerWidth - 332) + 'px';
+  _pillTip.style.top = (r.bottom + 6) + 'px';
+  _pillTip.classList.add('show');
+});
+document.addEventListener('mouseout', (e) => {
+  if (e.target.closest && e.target.closest('.view-pill[data-tip]')) _pillTip.classList.remove('show');
+});
+
 // Filter inputs. Map DOM id -> state field name.
 const FILTER_INPUT_MAP = {
   searchInput: 'q',
-  titleInput: 'title',
-  descriptionInput: 'description',
   personInput: 'person',
   orgInput: 'org',
   locationInput: 'location',
@@ -1014,6 +1284,7 @@ Object.entries(FILTER_INPUT_MAP).forEach(([id, field]) => {
   el.addEventListener('input', (e) => {
     state[field] = e.target.value;
     state.page = 1;
+    updateMoreFiltersDot();
     clearTimeout(debounceTimer);
     debounceTimer = setTimeout(fetchArticles, 300);
   });
@@ -1047,6 +1318,7 @@ function updateUrl() {
   } else {
     p.delete('match_types');
   }
+  if (state.en_only) p.delete('en_only'); else p.set('en_only', '0');
   history.replaceState(null, '', location.pathname + '?' + p.toString());
 }
 
@@ -1055,7 +1327,7 @@ function updateUrl() {
 // fetchViews). Data-driven: reads `available_match_types` off the view.
 function renderMatchProfile() {
   // Show or hide the FDA Events panel based on whether an FDA view is active
-  const curView = state.view ? views.find(v => v.id === state.view) : null;
+  const curView = state.view ? viewsById[state.view] : null;
   if (curView && curView.kind === 'fda_match') {
     if (!_fdaEventsLoaded) loadFdaEvents(state.hours || 168);
   } else {
@@ -1105,25 +1377,56 @@ function renderMatchProfile() {
       state.hours = '';
       document.querySelectorAll('.time-pill').forEach(p => p.classList.remove('active'));
     }
+    updateMoreFiltersDot();
     fetchArticles();
   });
 });
 
 function clearFilters() {
-  state.q = ''; state.title = ''; state.description = '';
+  state.q = '';
   state.person = ''; state.org = ''; state.location = ''; state.theme = '';
   state.domain = ''; state.outlet = ''; state.language = '';
   state.date_from = ''; state.date_to = '';
   state.view = '';
   state.page = 1;
-  ['searchInput','titleInput','descriptionInput','personInput','orgInput',
+  ['searchInput','personInput','orgInput',
    'locationInput','themeInput','domainInput','outletInput','dateFrom','dateTo'
   ].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
   const ls = document.getElementById('languageSelect');
   if (ls) ls.value = '';
   document.querySelectorAll('.view-pill').forEach(p => p.classList.remove('active'));
+  updateMoreFiltersDot();
   updateUrl();
   fetchArticles();
+}
+
+function toggleMoreFilters() {
+  const drawer = document.getElementById('moreFiltersDrawer');
+  const btn = document.getElementById('moreFiltersBtn');
+  if (drawer.style.display === 'none') {
+    drawer.style.display = '';
+    btn.classList.add('active');
+    localStorage.setItem('moreFiltersOpen', '1');
+  } else {
+    drawer.style.display = 'none';
+    btn.classList.remove('active');
+    localStorage.setItem('moreFiltersOpen', '0');
+  }
+}
+
+function updateMoreFiltersDot() {
+  const adv = ['person','org','location','theme','domain','outlet','date_from','date_to'];
+  const active = adv.some(f => state[f]);
+  const dot = document.getElementById('moreFiltersDot');
+  const btn = document.getElementById('moreFiltersBtn');
+  if (dot) dot.style.display = active ? '' : 'none';
+  if (active) {
+    const drawer = document.getElementById('moreFiltersDrawer');
+    if (drawer && drawer.style.display === 'none') {
+      drawer.style.display = '';
+      if (btn) btn.classList.add('active');
+    }
+  }
 }
 
 function applyFilter(type, value) {
@@ -1198,28 +1501,26 @@ function renderActiveFilters() {
   });
 }
 
+function esc(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// Time-window ladder for auto-widening an empty feed (3h is the floor).
+const TIME_LADDER = [3, 6, 24, 72, 168, 720];
+function hoursLabel(h) {
+  return { 3:'3h', 6:'6h', 24:'24h', 72:'3 days', 168:'7 days', 720:'30 days' }[h] || (h + 'h');
+}
+
 function renderArticle(a) {
-  const persons = a.persons.slice(0, 5).map(p =>
-    `<span class="entity-tag person" onclick="applyFilter('person','${p.replace(/'/g, "\\'")}')">${p}</span>`
-  ).join('');
-
-  const orgs = a.organizations.slice(0, 4).map(o =>
-    `<span class="entity-tag org" onclick="applyFilter('organization','${o.replace(/'/g, "\\'")}')">${o}</span>`
-  ).join('');
-
-  const locs = a.locations.slice(0, 3).map(l =>
-    `<span class="entity-tag location" onclick="applyFilter('location','${l.name.replace(/'/g, "\\'")}')">${l.name}</span>`
-  ).join('');
-
-  const themes = a.themes.slice(0, 3).map(t =>
-    `<span class="entity-tag theme" onclick="applyFilter('theme','${t.replace(/'/g, "\\'")}')">${t}</span>`
-  ).join('');
-
   const title = a.title || a.url.replace(/https?:\/\//, '').substring(0, 80) + '...';
 
-  const srcBadge = a.source_type === 'gal'
-    ? `<span class="source-badge gal" title="Global Article List — broad coverage">GAL</span>`
-    : `<span class="source-badge gkg" title="Global Knowledge Graph — enriched with entities, themes, tone">GKG</span>`;
+  const rawDesc = (a.description || '').trim();
+  const descHtml = rawDesc ? `<div class="article-desc">${esc(rawDesc)}</div>` : '';
+
+  const img = (a.image || '').trim();
+  const thumbHtml = img
+    ? `<div class="article-thumb"><img src="${esc(img)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest('.article-thumb').remove()"></div>`
+    : '';
 
   let matchBadge = '';
   if (a.matched_name) {
@@ -1228,20 +1529,54 @@ function renderArticle(a) {
     const verifiedBadge = a.matched_type === 'contextual'
       ? ' <span class="match-verified" title="Device context confirmed in article description">&#10003; verified</span>'
       : '';
-    matchBadge = `<span class="match-badge" title="Matched FDA-registered company: ${a.matched_name}${a.matched_specialty ? ' — medical specialty: ' + a.matched_specialty : ''}"><span class="match-label">FDA co.</span> ${a.matched_name}${specSuffix}${verifiedBadge}</span>`;
+    matchBadge = `<span class="match-badge" title="Matched FDA-registered company: ${esc(a.matched_name)}${a.matched_specialty ? ' — medical specialty: ' + esc(a.matched_specialty) : ''}"><span class="match-label">FDA co.</span> ${esc(a.matched_name)}${specSuffix}${verifiedBadge}</span>`;
+  }
+
+  let rollupHtml = '';
+  if (a.variant_count && a.variant_count > 1) {
+    const vid = 'var_' + (a.cluster_id || Math.random().toString(36).slice(2));
+    const shown = (a.variants || []);
+    const items = shown.map(v =>
+      `<li style="padding:0.3rem 0; border-top:1px solid var(--border);">
+         <span style="color:var(--accent-brand,#d8a657); font-size:0.78rem;">${esc(v.outlet_name || 'source')}</span>
+         <span style="color:var(--text-tertiary); font-size:0.72rem; margin-left:0.4rem;">${v.time_ago || ''}</span>
+         <a href="${v.url}" target="_blank" rel="noopener" style="display:block; font-size:0.82rem;">${esc(v.title || v.url)}</a>
+       </li>`
+    ).join('');
+    const moreCount = a.variant_count - shown.length;
+    const moreItem = moreCount > 0
+      ? `<li style="padding:0.4rem 0; border-top:1px solid var(--border);"><a href="${a.event_url}">+ ${moreCount} more on the event page &rarr;</a></li>`
+      : '';
+    rollupHtml = `
+      <div class="rollup" style="margin-top:0.4rem; font-size:0.8rem;">
+        <button onclick="toggleVariants('${vid}')" style="background:none; border:1px solid var(--border); color:var(--text-tertiary); border-radius:3px; padding:0.1rem 0.5rem; cursor:pointer; font-family:inherit; font-size:0.74rem;">
+          &#9636; covered by ${a.variant_count} sources
+        </button>
+        <a href="${a.event_url}" style="margin-left:0.5rem; font-size:0.74rem;">view event &rarr;</a>
+        <ul id="${vid}" style="display:none; list-style:none; margin:0.5rem 0 0; padding:0;">${items}${moreItem}</ul>
+      </div>`;
   }
 
   return `<li class="article">
-    <div class="article-header">
-      <span class="article-source">${a.source}</span>
-      ${srcBadge}
-      <span class="article-time">${a.time_ago}</span>
-      <span class="article-tone ${toneClass(a.tone)}">${toneLabel(a.tone)}</span>
+    <div class="article-row">
+      ${thumbHtml}
+      <div class="article-body">
+        <div class="article-header">
+          <span class="article-source">${esc(a.source)}</span>
+          <span class="article-time">${a.time_ago}</span>
+        </div>
+        <div class="article-title"><a href="${a.url}" target="_blank" rel="noopener">${esc(title)}</a></div>
+        ${descHtml}
+        ${matchBadge ? `<div class="match-line">${matchBadge}</div>` : ''}
+        ${rollupHtml}
+      </div>
     </div>
-    <div class="article-title"><a href="${a.url}" target="_blank" rel="noopener">${title}</a></div>
-    ${matchBadge ? `<div class="match-line">${matchBadge}</div>` : ''}
-    <div class="article-entities">${persons}${orgs}${locs}${themes}</div>
   </li>`;
+}
+
+function toggleVariants(id) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = (el.style.display === 'none') ? 'block' : 'none';
 }
 
 function renderPagination(data) {
@@ -1259,6 +1594,43 @@ function goPage(p) {
   state.page = p;
   fetchArticles();
   window.scrollTo(0, 0);
+}
+
+// Instant-paint: persist the last clean (unfiltered, page-1) feed + briefing to
+// localStorage so the app shows content the instant it opens, then refreshes.
+function _snapKey() {
+  const hasFilters = state.q || state.person || state.org || state.location ||
+    state.theme || state.domain || state.outlet || state.date_from || state.date_to || state.page > 1;
+  if (hasFilters) return null;
+  return `snap:${state.view}|${state.hours}|${state.en_only ? 1 : 0}`;
+}
+function saveSnapshot() {
+  const k = _snapKey(); if (!k) return;
+  try {
+    const bp = document.getElementById('briefingPanel');
+    localStorage.setItem(k, JSON.stringify({
+      ts: Date.now(),
+      feed: document.getElementById('articleList').innerHTML,
+      briefing: (document.getElementById('briefingText') || {}).innerHTML || '',
+      briefingMeta: (document.getElementById('briefingMeta') || {}).textContent || '',
+      briefingShown: bp ? bp.style.display !== 'none' : false,
+    }));
+  } catch (e) {}
+}
+function restoreSnapshot() {
+  const k = _snapKey(); if (!k) return false;
+  try {
+    const raw = localStorage.getItem(k); if (!raw) return false;
+    const s = JSON.parse(raw);
+    if (!s.feed || Date.now() - s.ts > 6 * 3600 * 1000) return false; // skip if stale (>6h)
+    document.getElementById('articleList').innerHTML = s.feed;
+    if (s.briefingShown && s.briefing) {
+      document.getElementById('briefingPanel').style.display = '';
+      document.getElementById('briefingText').innerHTML = s.briefing;
+      document.getElementById('briefingMeta').textContent = s.briefingMeta || '';
+    }
+    return true;
+  } catch (e) { return false; }
 }
 
 async function fetchArticles() {
@@ -1281,6 +1653,7 @@ async function fetchArticles() {
   if (state.domain) params.set('domain', state.domain);
   if (state.outlet) params.set('outlet', state.outlet);
   if (state.language) params.set('language', state.language);
+  params.set('en_only', state.en_only ? '1' : '0');
   if (state.date_from) params.set('date_from', state.date_from);
   if (state.date_to) params.set('date_to', state.date_to);
   if (state.sort && state.sort !== 'newest') params.set('sort', state.sort);
@@ -1304,13 +1677,18 @@ async function fetchArticles() {
 
   const list = document.getElementById('articleList');
   const fetchStart = performance.now();
-  list.innerHTML = '<li class="loading"><span class="spinner"></span>Loading articles…<span class="loading-elapsed" id="loadElapsed">0.0s elapsed</span></li>';
+  // Keep existing content visible while refreshing (restored snapshot, previous
+  // render, or auto-refresh) — only show the full spinner on a truly empty list.
+  const hasContent = !!list.querySelector('li.article');
+  if (!hasContent) {
+    list.innerHTML = '<li class="loading"><span class="spinner"></span>Loading articles…<span class="loading-elapsed" id="loadElapsed">0.0s elapsed</span></li>';
+  }
   document.body.classList.add('fetching');
   document.getElementById('topProgress').classList.add('active');
   const elapsedEl = document.getElementById('loadElapsed');
   currentFetchTimer = setInterval(() => {
     if (myGen !== currentFetchGen) { clearInterval(currentFetchTimer); return; }
-    if (!elapsedEl.isConnected) { clearInterval(currentFetchTimer); return; }
+    if (!elapsedEl || !elapsedEl.isConnected) { clearInterval(currentFetchTimer); return; }
     const s = ((performance.now() - fetchStart) / 1000).toFixed(1);
     elapsedEl.textContent = `${s}s elapsed${s > 5 ? ' — still working' : ''}`;
   }, 100);
@@ -1346,6 +1724,20 @@ async function fetchArticles() {
     meta.textContent = `${data.total.toLocaleString()} articles`;
 
     if (data.articles.length === 0) {
+      // Auto-widen: an empty time window (with no custom date range) steps out to
+      // the next wider window until articles appear — covers the default + sparse pills.
+      const curH = parseInt(state.hours, 10);
+      const li = TIME_LADDER.indexOf(curH);
+      if (data.total === 0 && !state.date_from && !state.date_to && li > -1 && li < TIME_LADDER.length - 1) {
+        if (window.__widenFrom == null) window.__widenFrom = curH;
+        state.hours = String(TIME_LADDER[li + 1]);
+        document.querySelectorAll('.time-pill').forEach(p => p.classList.toggle('active', p.dataset.hours === state.hours));
+        if (typeof updateUrl === 'function') updateUrl();
+        finishLoading();
+        fetchArticles();
+        return;
+      }
+      window.__widenFrom = null;
       // Check if the date range is (partly) outside the data window
       let hint = '';
       if (dataWindow.earliest && dataWindow.latest) {
@@ -1357,7 +1749,17 @@ async function fetchArticles() {
       }
       list.innerHTML = `<li class="loading">No articles match these filters.${hint}</li>`;
     } else {
-      list.innerHTML = data.articles.map(renderArticle).join('');
+      let noticeHtml = '';
+      if (window.__widenFrom != null && String(window.__widenFrom) !== String(state.hours)) {
+        noticeHtml = `<li class="feed-notice">No articles in the last ${hoursLabel(window.__widenFrom)} — showing the last ${hoursLabel(parseInt(state.hours, 10))}.</li>`;
+      }
+      window.__widenFrom = null;
+      list.innerHTML = noticeHtml + data.articles.map(renderArticle).join('');
+      if (window.perfMark) {
+        window.perfMark('feed_ms', performance.now() - fetchStart);
+        if (!window.__ttaSent) { window.__ttaSent = true; window.perfMark('time_to_articles', performance.now()); }
+      }
+      saveSnapshot();
     }
 
     renderPagination(data);
@@ -1446,7 +1848,7 @@ async function fetchViews() {
       btn.className = 'view-pill' + (state.view === v.id ? ' active' : '');
       // no-op; segmented control is rendered after the loop
       btn.textContent = v.name;
-      btn.title = v.description || '';
+      if (v.description) btn.dataset.tip = v.description;
       btn.dataset.viewId = v.id;
 
       const infoBtn = document.createElement('button');
@@ -1663,11 +2065,22 @@ async function createPill() {
 
 // Source tabs removed — unified feed
 
-// Init
-fetchViews();
+// Init — paint the last snapshot instantly (if any), then fetch fresh data.
+restoreSnapshot();
+fetchViews().catch(e => console.error("fetchViews:", e));
 fetchStats();
 fetchGalFacets();
-fetchArticles();
+fetchArticles().catch(e => console.error("fetchArticles:", e));
+
+// When the app/tab is reopened, refresh in the background (content stays visible).
+let _lastRefresh = Date.now();
+addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (Date.now() - _lastRefresh < 20000) return; // debounce rapid focus changes
+  _lastRefresh = Date.now();
+  fetchStats();
+  if (!currentFetchController && state.page === 1) fetchArticles();
+});
 
 // Auto-refresh. Only refresh stats unconditionally; only auto-refresh
 // articles when (a) tab is visible, (b) no fetch is in flight, (c) we're on
@@ -1725,6 +2138,21 @@ function renderMd(text) {
   return html;
 }
 
+// Turn [N] citation markers into clickable superscripts linking to the source's
+// event page (or article). The model only emits indices, so links can't be
+// hallucinated; out-of-range markers are left as plain text.
+function linkifyCitations(html, sources) {
+  if (!sources || !sources.length) return html;
+  return html.replace(/\[(\d+)\]/g, (m, num) => {
+    const s = sources[parseInt(num, 10) - 1];
+    if (!s || !s.link) return m;
+    const cnt = (s.n_sources && s.n_sources > 1) ? ` · ${s.n_sources} sources` : '';
+    const tip = ((s.outlet || 'source') + cnt + (s.title ? ' — ' + s.title : ''))
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+    return `<sup class="cite"><a href="${s.link}" target="_blank" rel="noopener" title="${tip}">${num}</a></sup>`;
+  });
+}
+
 // AI Briefing — streams a summary for the current view/time via SSE
 let _briefingView = null;
 let _briefingHours = null;
@@ -1745,9 +2173,14 @@ async function fetchBriefing() {
   const textEl = document.getElementById('briefingText');
   const metaEl = document.getElementById('briefingMeta');
 
-  textEl.textContent = '';
-  metaEl.textContent = 'Generating briefing...';
+  // Keep any existing (e.g. restored-from-snapshot) briefing visible until the
+  // new one arrives — the first streamed token replaces it. Avoids a blank flash.
+  const hadContent = textEl.textContent.trim().length > 0;
+  if (!hadContent) textEl.textContent = '';
+  metaEl.textContent = hadContent ? 'Updating…' : 'Generating briefing...';
   panel.style.display = '';
+  const briefStart = performance.now();
+  let briefFirstMarked = false;
 
   const params = new URLSearchParams();
   if (view) params.set('view', view);
@@ -1763,33 +2196,61 @@ async function fetchBriefing() {
     const decoder = new TextDecoder();
     let fullText = '';
     let articleCount = 0;
+    let buffer = '';
+    let sourcesMap = [];
+
+    // Process one complete SSE "data:" line. Returns true if the stream
+    // signalled that we should stop (error/return).
+    const handleLine = (line) => {
+      if (!line.startsWith('data: ')) return false;
+      try {
+        const data = JSON.parse(line.slice(6));
+        if (data.error) {
+          if (data.found !== undefined) {
+            textEl.innerHTML = '<span style="color:var(--text-tertiary); font-style:italic;">Not enough recent articles for a briefing — try a wider time range.</span>';
+            metaEl.textContent = '';
+          } else {
+            panel.style.display = 'none';
+          }
+          return true;
+        }
+        if (data.sources) sourcesMap = data.sources;
+        if (data.text) {
+          if (!briefFirstMarked && window.perfMark) { briefFirstMarked = true; window.perfMark('briefing_first', performance.now() - briefStart); }
+          fullText += data.text;
+          textEl.innerHTML = linkifyCitations(renderMd(fullText), sourcesMap);
+        }
+        if (data.article_count) articleCount = data.article_count;
+        if (data.done) {
+          const label = data.cached ? 'cached' : 'just generated';
+          metaEl.textContent = articleCount ? `From ${articleCount} articles · ${label}` : '';
+          if (window.perfMark) { window.perfMark(data.cached ? 'briefing_done_cached' : 'briefing_done', performance.now() - briefStart); window.perfFlush(); }
+          if (typeof saveSnapshot === 'function') saveSnapshot();
+        }
+      } catch (_) {}
+      return false;
+    };
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
 
-      const chunk = decoder.decode(value, { stream: true });
-      for (const line of chunk.split('\n')) {
-        if (!line.startsWith('data: ')) continue;
-        try {
-          const data = JSON.parse(line.slice(6));
-          if (data.error) {
-            panel.style.display = 'none';
-            return;
-          }
-          if (data.text) {
-            fullText += data.text;
-            textEl.innerHTML = renderMd(fullText);
-          }
-          if (data.article_count) articleCount = data.article_count;
-          if (data.done) {
-            const label = data.cached ? 'cached' : 'just generated';
-            metaEl.textContent = articleCount ? `From ${articleCount} articles · ${label}` : '';
-          }
-        } catch (_) {}
+      // Buffer across reads: an SSE event can be split across network chunks,
+      // so only parse complete lines and keep the trailing partial for later.
+      buffer += decoder.decode(value, { stream: true });
+      let nl;
+      while ((nl = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, nl);
+        buffer = buffer.slice(nl + 1);
+        if (handleLine(line)) return;
       }
     }
-    if (!fullText.trim()) panel.style.display = 'none';
+    // Flush any final line left without a trailing newline.
+    if (buffer && handleLine(buffer)) return;
+    if (!fullText.trim()) {
+      textEl.innerHTML = '<span style="color:var(--text-tertiary); font-style:italic;">Briefing unavailable — try a wider time range.</span>';
+      metaEl.textContent = '';
+    }
   } catch (err) {
     if (err.name !== 'AbortError') panel.style.display = 'none';
   }

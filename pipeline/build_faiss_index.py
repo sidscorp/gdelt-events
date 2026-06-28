@@ -25,7 +25,8 @@ log = logging.getLogger("build_faiss")
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import embedding_store
 
-BASE_DIR = Path(__file__).resolve().parent.parent / "data" / "embeddings"
+# Single source of truth for the embeddings dir (honors GDELT_DATA_DIR).
+BASE_DIR = embedding_store.BASE_DIR
 INDEX_PATH = BASE_DIR / "articles.faiss"
 URLS_FILE = BASE_DIR / "index_urls.txt"
 META_JSON = BASE_DIR / "index_meta.json"

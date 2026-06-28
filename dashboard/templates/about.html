@@ -26,11 +26,6 @@
 <h1>About GDELT Monitor</h1>
 <p class="subtitle">A real-time global news intelligence system</p>
 
-<h2>Why this exists</h2>
-<p>I'm a Decision Scientist who keeps close tabs on national and global affairs. I wanted an intelligence system that could surface the signals that matter across the full breadth of the world's news output — not just what an algorithm thinks I should see, but what I decide to track, on my terms.</p>
-
-<p>I'm also a computational modeler at heart, and building the pipeline was as much the point as using it. GDELT publishes a firehose of global news metadata — over 25 million articles from tens of thousands of sources worldwide — and the challenge was: how do you build a system that ingests all of it, matches against arbitrary patterns in near-real-time, and stays responsive on self-hosted hardware?</p>
-
 <h2>What it does</h2>
 <p>Every 15 minutes, the pipeline downloads the latest articles from GDELT's Global Article List and Global Knowledge Graph. Articles are loaded into a DuckDB analytical database and scanned against multiple classification systems — keyword pattern matching, entity recognition, and semantic embeddings.</p>
 
@@ -50,7 +45,10 @@
   <li><span>Database</span> <span>DuckDB 1.5.1 (analytical) + SQLite (user data)</span></li>
   <li><span>Pattern matching</span> <span>Aho-Corasick via pyahocorasick</span></li>
   <li><span>Embeddings</span> <span>nomic-embed-text v1.5 via Ollama</span></li>
+  <li><span>Event clustering</span> <span>FAISS IVF-PQ + exact-cosine re-rank</span></li>
+  <li><span>AI briefings</span> <span>Gemini 2.5 Flash via OpenRouter</span></li>
   <li><span>Web framework</span> <span>Flask + Waitress</span></li>
+  <li><span>App</span> <span>Installable PWA (service worker)</span></li>
   <li><span>Infrastructure</span> <span>Cloudflare Tunnel (zero-trust)</span></li>
   <li><span>Language</span> <span>Python 3.13</span></li>
   <li><span>Hosting</span> <span>Self-hosted, NVIDIA RTX 4060</span></li>

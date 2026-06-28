@@ -1,5 +1,6 @@
 """GDELT v2 pipeline configuration."""
 
+import os
 from pathlib import Path
 
 # ── URLs ─────────────────────────────────────────────────────────────────────
@@ -12,7 +13,9 @@ GAL_FILE_URL_TEMPLATE = "http://data.gdeltproject.org/gdeltv3/gal/{timestamp}.ga
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 REPO_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = REPO_DIR / "data"
+# DATA_DIR can be overridden via GDELT_DATA_DIR for an isolated dev instance
+# (e.g. a 7-day-slice data dir). Unset -> production default <repo>/data.
+DATA_DIR = Path(os.environ.get("GDELT_DATA_DIR") or (REPO_DIR / "data"))
 RAW_DIR = DATA_DIR / "raw"
 GAL_RAW_DIR = DATA_DIR / "raw_gal"
 DB_PATH = DATA_DIR / "gdelt.duckdb"

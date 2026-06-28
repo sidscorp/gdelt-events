@@ -25,9 +25,14 @@ from models import (
 )
 from auth import init_auth, User
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "gdelt.duckdb"
-LOG_DIR = Path(__file__).resolve().parent.parent / "data" / "logs"
+from _paths import DB_PATH, LOG_DIR, OPENROUTER_KEY_PATH
 LOG_DIR.mkdir(parents=True, exist_ok=True)
+(DB_PATH.parent / "duckdb_tmp").mkdir(parents=True, exist_ok=True)
+
+# Over-fetch multiplier for the within-buffer rollup (pills/FDA views), so a
+# page still fills after duplicate cluster members are collapsed in Python.
+ROLLUP_FETCH_FACTOR = 3
+
 
 app = Flask(__name__)
 app.jinja_env.filters["from_json"] = json.loads
@@ -69,6 +74,10 @@ def get_db(max_retries=3):
             try:
                 con.execute(f"SET memory_limit='{CONN_MEMORY_LIMIT}'")
                 con.execute(f"SET threads={CONN_THREADS}")
+                # Read-only connections have no valid default spill dir on
+                # Windows; point at a real one so joins that spill (e.g. the
+                # event-dedup anti-join) don't fail with an invalid temp path.
+                con.execute(f"SET temp_directory='{(DB_PATH.parent / 'duckdb_tmp').as_posix()}'")
             except Exception:
                 pass  # older DuckDB versions may differ; not fatal
             return con
@@ -100,6 +109,10 @@ def _req_start():
 
 @app.after_request
 def _req_end(resp):
+    # Always revalidate HTML so deployed UI changes show on a normal reload
+    # (no hard-refresh needed). The page is tiny + gzipped, so this is cheap.
+    if resp.headers.get("Content-Type", "").startswith("text/html"):
+        resp.headers["Cache-Control"] = "no-cache"
     t0 = getattr(g, "_req_t0", None)
     if t0 is None:
         return resp
@@ -237,6 +250,16 @@ def time_ago(dt):
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/sw.js")
+def service_worker():
+    """Serve the service worker from root scope so it controls the whole site."""
+    from flask import send_from_directory
+    resp = send_from_directory(app.static_folder, "sw.js", mimetype="application/javascript")
+    resp.headers["Service-Worker-Allowed"] = "/"
+    resp.headers["Cache-Control"] = "no-cache"  # so SW updates propagate immediately
+    return resp
 
 
 @app.route("/search")
@@ -574,6 +597,11 @@ def _build_gkg_where(request):
             conditions.append('CAST(split_part("V15TONE", \',\', 1) AS DOUBLE) <= ?')
             params.append(tone_max)
 
+    # English-only: GKG records translated from another language carry a
+    # populated V2TRANSLATIONINFO (srclc:…); natively-English ones leave it empty.
+    if request.args.get("en_only") == "1":
+        conditions.append('("V2TRANSLATIONINFO" IS NULL OR "V2TRANSLATIONINFO" = \'\')')
+
     where = " AND ".join(conditions) if conditions else "1=1"
     return where, params
 
@@ -630,6 +658,9 @@ def _build_gal_where(request):
         params.append(f"%{outlet}%")
 
     language = request.args.get("language", "").strip()
+    if request.args.get("en_only") == "1":
+        # English-only toggle wins over the (rarely-used) language dropdown.
+        language = "en"
     if language:
         # Exact match — language codes are short ISO codes (en, es, de, …).
         conditions.append("language = ?")
@@ -714,6 +745,23 @@ def _gal_row_to_article(row):
     }
 
 
+# In-process feed cache. The feed only changes on the 15-min ingest, so caching
+# the assembled response for ~90s makes repeat loads + the page's 60s auto-refresh
+# instant, and skips the DuckDB connection + query entirely on a hit.
+_feed_cache: dict = {}
+_FEED_TTL_S = 180  # feed only changes on the ~15-min ingest/cluster cycle; warm_feed.py refreshes every ~2.5 min
+_FEED_CACHE_MAX = 256
+_FEED_KEYS = (
+    "view", "hours", "page", "per_page", "match_types", "q", "title", "description",
+    "person", "org", "location", "theme", "domain", "outlet", "language",
+    "date_from", "date_to", "sort", "rollup", "source", "en_only",
+)
+
+
+def _feed_cache_key():
+    return "|".join(f"{k}={request.args.get(k, '')}" for k in _FEED_KEYS)
+
+
 @app.route("/api/articles")
 def api_articles():
     """Main API endpoint for article list with filtering.
@@ -722,6 +770,18 @@ def api_articles():
     - If any entity-only filter is set (person/org/theme/location/tone) → GKG only.
     - Otherwise → UNION GKG + GAL, dedup by URL (prefer GKG), sort by date desc.
     """
+    from flask import Response
+    now = time.time()
+    key = _feed_cache_key()
+    # warm=1 (used by pipeline/warm_feed.py) forces a recompute + re-store so the
+    # cache stays warm; it does NOT affect the cache key (not in _FEED_KEYS), so
+    # the page's normal request hits the freshly-stored entry.
+    warming = request.args.get("warm") == "1"
+    hit = _feed_cache.get(key)
+    if hit and hit[0] > now and not warming:
+        g._req_phases["feed_cache"] = 0.0  # mark a cache hit in the log
+        return Response(hit[1], mimetype="application/json")
+
     con = get_db()
     if con is None:
         return jsonify({
@@ -731,7 +791,12 @@ def api_articles():
 
     cancel_timeout = _arm_statement_timeout(con)
     try:
-        return _api_articles_inner(con)
+        resp = _api_articles_inner(con)
+        if getattr(resp, "status_code", 200) == 200:
+            _feed_cache[key] = (now + _FEED_TTL_S, resp.get_data())
+            if len(_feed_cache) > _FEED_CACHE_MAX:
+                _feed_cache.pop(min(_feed_cache, key=lambda k: _feed_cache[k][0]), None)
+        return resp
     except duckdb.InterruptException:
         return jsonify({
             "error": "Query timed out server-side. Try a narrower time window.",
@@ -804,6 +869,8 @@ def _extra_gal_filters(request) -> tuple[str, list]:
     if outlet:
         conds.append("outlet_name ILIKE ?"); params.append(f"%{outlet}%")
     language = (request.args.get("language") or "").strip()
+    if request.args.get("en_only") == "1":
+        language = "en"
     if language:
         conds.append("language = ?"); params.append(language)
     return (" AND ".join(conds), params)
@@ -1006,10 +1073,13 @@ def _fetch_gal_view(con, view, request, per_page, page) -> tuple[int, list, dict
 def _fetch_gkg_plain(con, request, per_page, page) -> tuple[int, list]:
     """Non-view GKG path with filter support."""
     gkg_where, gkg_params = _build_gkg_where(request)
+    sd = _sort_dir(request)
     fetch_n = (page * per_page) + per_page
+    # Deterministic order (time, then doc-id/url) so the top-N is a stable
+    # prefix across page sizes — keeps pagination + event rollup consistent.
     rows = _phase("gkg_query", lambda: con.execute(
         f'SELECT {GKG_COLS} FROM gkg WHERE {gkg_where} '
-        f'ORDER BY "V1DATE" {_sort_dir(request)} LIMIT ?',
+        f'ORDER BY "V1DATE" {sd}, "V2DOCUMENTIDENTIFIER" {sd} LIMIT ?',
         gkg_params + [fetch_n],
     ).fetchall())
     total = _phase("gkg_total", lambda: con.execute(
@@ -1025,7 +1095,7 @@ def _fetch_gal_plain(con, request, per_page, page) -> tuple[int, list]:
     fetch_n = (page * per_page) + per_page
     rows = _phase("gal_query", lambda: con.execute(
         f"SELECT {GAL_COLS} FROM gal WHERE {gal_where} "
-        f"ORDER BY crawled_at {sd} LIMIT ?",
+        f"ORDER BY crawled_at {sd}, url {sd} LIMIT ?",
         gal_params + [fetch_n],
     ).fetchall())
     total = _phase("gal_total", lambda: con.execute(
@@ -1167,10 +1237,10 @@ def _fetch_gal_tag_view(con, view, request, per_page, page) -> tuple[int, list]:
 
 
 def _api_articles_inner(con):
-    """Unified feed: always queries both GAL and GKG, deduplicates by URL
-    (preferring GKG for richer metadata). When entity filters (person, org,
-    theme, location, tone) are active, only GKG articles are returned since
-    GAL lacks entity extraction."""
+    """GAL-only reading feed: web articles with summaries + thumbnail images,
+    rolled up into events via the cluster tables. (The GKG/entity-based view was
+    retired 2026-06-27 — GAL carries descriptions+images and the clusters are
+    100% GAL URLs. See memory: revisit GKG/GSG as a future project.)"""
     page = max(1, request.args.get("page", 1, type=int))
     per_page = min(100, request.args.get("per_page", 50, type=int))
     offset = (page - 1) * per_page
@@ -1181,48 +1251,22 @@ def _api_articles_inner(con):
     is_tag = view_kind == "tag_match"
     view_match_info: dict[str, tuple[str, str]] = {}
 
-    has_entity_filters = _gkg_entity_filters_set(request)
+    # Event rollup: over-fetch, then collapse duplicate cluster members in
+    # Python, keeping each cluster's newest member (deterministic time,url order
+    # gives global dedup with no expensive anti-join).
+    rollup_on = request.args.get("rollup", "1") != "0"
+    fetch_pp = per_page * ROLLUP_FETCH_FACTOR if rollup_on else per_page
 
-    gkg_rows: list = []
-    gal_rows: list = []
-    gkg_total = 0
-    gal_total = 0
-
-    # Always fetch GKG
     if is_fda:
-        gkg_total, gkg_rows, mi = _fetch_gkg_view(con, view, request, per_page, page)
+        gal_total, gal_rows, mi = _fetch_gal_view(con, view, request, fetch_pp, page)
         view_match_info.update(mi)
     elif is_tag:
-        gkg_total, gkg_rows = _fetch_gkg_tag_view(con, view, request, per_page, page)
+        gal_total, gal_rows = _fetch_gal_tag_view(con, view, request, fetch_pp, page)
     else:
-        gkg_total, gkg_rows = _fetch_gkg_plain(con, request, per_page, page)
+        gal_total, gal_rows = _fetch_gal_plain(con, request, fetch_pp, page)
 
-    # Fetch GAL only if no entity filters are active
-    if not has_entity_filters:
-        try:
-            if is_fda:
-                gal_total, gal_rows, mi = _fetch_gal_view(con, view, request, per_page, page)
-                view_match_info.update(mi)
-            elif is_tag:
-                gal_total, gal_rows = _fetch_gal_tag_view(con, view, request, per_page, page)
-            else:
-                gal_total, gal_rows = _fetch_gal_plain(con, request, per_page, page)
-        except Exception:
-            gal_total, gal_rows = 0, []
-
-    # Merge and deduplicate — prefer GKG version when same URL exists in both
     seen_urls = set()
     merged = []
-    for r in gkg_rows:
-        art = _gkg_row_to_article(r)
-        if art["url"] and art["url"] not in seen_urls:
-            seen_urls.add(art["url"])
-            mi = view_match_info.get(art["id"]) or view_match_info.get(art["url"])
-            if mi:
-                art["matched_name"], art["matched_specialty"] = mi[0], mi[1]
-                if len(mi) > 2:
-                    art["matched_type"] = mi[2]
-            merged.append(art)
     for r in gal_rows:
         art = _gal_row_to_article(r)
         if art["url"] and art["url"] not in seen_urls:
@@ -1233,8 +1277,15 @@ def _api_articles_inner(con):
                 if len(mi) > 2:
                     art["matched_type"] = mi[2]
             merged.append(art)
-    merged.sort(key=lambda a: a["sort_key"], reverse=(_sort_dir(request) == "DESC"))
-    total = gkg_total + gal_total
+    merged.sort(key=lambda a: (a["sort_key"], a.get("url") or ""),
+                reverse=(_sort_dir(request) == "DESC"))
+    total = gal_total
+
+    # Roll up near-duplicate / same-event articles into single cards (no-op if
+    # the cluster tables don't exist yet, so this is safe before backfill).
+    if rollup_on:
+        merged = _rollup_articles(con, merged)
+
     articles = merged[offset:offset + per_page]
 
     for a in articles:
@@ -1249,9 +1300,161 @@ def _api_articles_inner(con):
     })
 
 
+def _enrich_descriptions(con, articles):
+    """Backfill a short summary onto articles that lack one. GKG records carry no
+    description, but ~91% have a matching GAL row (by URL) that does — one indexed
+    IN-list lookup over the page of articles, only on a feed cache miss."""
+    need = [a["url"] for a in articles
+            if a.get("url") and not (a.get("description") or "").strip()]
+    if not need:
+        return
+    try:
+        placeholders = ",".join(["?"] * len(need))
+        rows = con.execute(
+            f"SELECT url, description FROM gal "
+            f"WHERE url IN ({placeholders}) AND description IS NOT NULL AND description <> ''",
+            need,
+        ).fetchall()
+        desc_by_url = {u: d for (u, d) in rows}
+        for a in articles:
+            if not (a.get("description") or "").strip():
+                d = desc_by_url.get(a.get("url"))
+                if d:
+                    a["description"] = d.strip()[:300]
+    except Exception:
+        pass
+
+
+def _rollup_articles(con, merged):
+    """Collapse articles that belong to the same materialized event cluster.
+
+    For each cluster present on the page, emit ONE representative card (the
+    best/first member present, time-sorted) annotated with the FULL cluster
+    size and the on-page variants. Articles with no cluster pass through.
+    Safe no-op when the cluster tables are absent (e.g. before backfill).
+    """
+    if not merged:
+        return merged
+    urls = [a["url"] for a in merged if a.get("url")]
+    if not urls:
+        return merged
+
+    url2cid = {}
+    try:
+        for i in range(0, len(urls), 500):
+            chunk = urls[i:i + 500]
+            ph = ",".join(["?"] * len(chunk))
+            for u, cid in con.execute(
+                f"SELECT article_url, cluster_id FROM cluster_members WHERE article_url IN ({ph})",
+                chunk,
+            ).fetchall():
+                url2cid[u] = cid
+    except Exception:
+        return merged  # cluster tables not present -> no rollup
+    if not url2cid:
+        return merged
+
+    cids = list(set(url2cid.values()))
+    cluster_meta = {}
+    for i in range(0, len(cids), 500):
+        chunk = cids[i:i + 500]
+        ph = ",".join(["?"] * len(chunk))
+        for cid, size in con.execute(
+            f"SELECT cluster_id, size FROM clusters WHERE cluster_id IN ({ph})",
+            chunk,
+        ).fetchall():
+            cluster_meta[cid] = size
+
+    out = []
+    card_by_cid = {}
+    for a in merged:
+        cid = url2cid.get(a.get("url"))
+        if not cid or cid not in cluster_meta:
+            out.append(a)
+            continue
+        rep = card_by_cid.get(cid)
+        if rep is None:
+            # first member on this page becomes the visible representative
+            a["cluster_id"] = cid
+            a["variant_count"] = cluster_meta[cid]
+            a["event_url"] = f"/event/{cid}"
+            a["variants"] = []
+            card_by_cid[cid] = a
+            out.append(a)
+        else:
+            rep["variants"].append({
+                "url": a.get("url"),
+                "outlet_name": a.get("outlet_name") or a.get("source"),
+                "title": a.get("title"),
+                "time_ago": a.get("time_ago"),
+            })
+    return out
+
+
+def _fmt_event_ts(ts):
+    """Format a YYYYMMDDHHMMSS bigint as a readable UTC string."""
+    if not ts:
+        return ""
+    s = str(int(ts)).zfill(14)
+    try:
+        return datetime(int(s[0:4]), int(s[4:6]), int(s[6:8]),
+                        int(s[8:10]), int(s[10:12])).strftime("%b %d, %Y %H:%M UTC")
+    except Exception:
+        return ""
+
+
+@app.route("/event/<cluster_id>")
+def event_detail(cluster_id):
+    """Persistent, shareable event page: representative + all variants.
+
+    Renders from the denormalized members_json snapshot so the page survives
+    even after the underlying articles age out of the embedding window.
+    """
+    con = get_db()
+    row = None
+    if con is not None:
+        try:
+            row = con.execute(
+                "SELECT cluster_id, rep_url, title, image, size, first_seen, latest_seen, members_json "
+                "FROM clusters WHERE cluster_id = ?",
+                [cluster_id],
+            ).fetchone()
+        except Exception:
+            row = None
+        finally:
+            con.close()
+    if not row:
+        return render_template("event_detail.html", cluster=None,
+                               error="Event not found"), 404
+
+    cid, rep_url, title, image, size, first_seen, latest_seen, mjson = row
+    members = json.loads(mjson) if mjson else []
+    members.sort(key=lambda m: m.get("crawled_at") or 0, reverse=True)
+    for m in members:
+        m["when"] = _fmt_event_ts(m.get("crawled_at"))
+    cluster = {
+        "id": cid,
+        "rep_url": rep_url,
+        "title": title or "(untitled event)",
+        "image": image,
+        "size": size,
+        "first_seen": _fmt_event_ts(first_seen),
+        "latest_seen": _fmt_event_ts(latest_seen),
+        "members": members,
+    }
+    return render_template("event_detail.html", cluster=cluster, error=None)
+
+
+_stats_cache = {"at": 0.0, "data": None}
+_STATS_TTL_S = 300  # full-table count(distinct) over 25M rows — fine to cache 5 min
+
+
 @app.route("/api/stats")
 def api_stats():
     """Quick stats for the header."""
+    now = time.time()
+    if _stats_cache["data"] and now - _stats_cache["at"] < _STATS_TTL_S:
+        return jsonify(_stats_cache["data"])
     con = get_db()
     if con is None:
         return jsonify({"error": "Database busy", "total_articles": 0, "sources": 0, "latest_ago": "loading..."}), 503
@@ -1279,7 +1482,7 @@ def api_stats():
     if gal_latest and (not latest_dt or gal_latest > latest_dt):
         latest_dt = gal_latest
 
-    return jsonify({
+    data = {
         "total_articles": gkg_row[0] + gal_row[0],
         "gkg_articles": gkg_row[0],
         "gal_articles": gal_row[0],
@@ -1293,7 +1496,44 @@ def api_stats():
         "sources": gkg_row[3] + gal_row[2],
         "gkg_sources": gkg_row[3],
         "gal_sources": gal_row[2],
-    })
+    }
+    _stats_cache["at"] = now
+    _stats_cache["data"] = data
+    return jsonify(data)
+
+
+@app.route("/api/perf", methods=["POST"])
+def api_perf():
+    """Receive RUM beacons (real-user front-end timings) and store a capped log."""
+    try:
+        from models import get_user_db
+        payload = request.get_json(force=True, silent=True) or {}
+        samples = payload.get("samples") or []
+        if not samples:
+            return ("", 204)
+        ts = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        rows = []
+        for s in samples[:40]:
+            try:
+                rows.append((
+                    ts, str(s.get("metric", ""))[:40], float(s.get("value") or 0),
+                    str(s.get("view") or "")[:60], int(s.get("hours") or 0),
+                ))
+            except (TypeError, ValueError):
+                continue
+        if rows:
+            uc = get_user_db()
+            uc.executemany(
+                "INSERT INTO perf_samples (ts, metric, value, view, hours) VALUES (?, ?, ?, ?, ?)",
+                rows,
+            )
+            # keep the table bounded (~last 20k samples)
+            uc.execute("DELETE FROM perf_samples WHERE id < (SELECT max(id) - 20000 FROM perf_samples)")
+            uc.commit()
+            uc.close()
+    except Exception:
+        pass
+    return ("", 204)
 
 
 # Facets cache for GAL — refreshed lazily with a 10-min TTL.
@@ -1557,9 +1797,9 @@ def admin_reject(user_id):
 # ---------------------------------------------------------------------------
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
-BRIEFING_MODEL = "google/gemini-2.0-flash-001"
-BRIEFING_TTL_S = 900  # 15 minutes
-_OPENROUTER_KEY_PATH = Path(__file__).resolve().parent.parent / "data" / ".openrouter_key"
+BRIEFING_MODEL = "google/gemini-2.5-flash"
+BRIEFING_TTL_S = 2700  # 45 minutes (pre-warmed for hot combos; news doesn't move that fast)
+_OPENROUTER_KEY_PATH = OPENROUTER_KEY_PATH
 
 
 def _get_openrouter_key():
@@ -1572,10 +1812,21 @@ def _get_openrouter_key():
     return None
 
 
-def _build_briefing_prompt(headlines: list[str], view_name: str, view_desc: str,
+def _build_briefing_prompt(sources: list[dict], view_name: str, view_desc: str,
                             hours: int) -> str:
-    """Build a time-aware, context-rich briefing prompt."""
-    numbered = "\n".join(f"{i+1}. {h}" for i, h in enumerate(headlines))
+    """Build a time-aware, context-rich briefing prompt with numbered sources
+    the model can cite by index."""
+    def _fmt(s):
+        outlet = s.get("outlet") or "source"
+        n = s.get("n_sources") or 1
+        tag = f"{outlet} · {n} sources" if n > 1 else outlet
+        line = f"[{tag}] {s.get('title') or ''}"
+        desc = (s.get("description") or "").strip()
+        if desc:
+            line += f" — {desc}"
+        return line
+
+    numbered = "\n".join(f"{i+1}. {_fmt(s)}" for i, s in enumerate(sources))
 
     # Human-readable time range
     if hours <= 1:
@@ -1598,26 +1849,32 @@ def _build_briefing_prompt(headlines: list[str], view_name: str, view_desc: str,
 
     return (
         f"You are a senior news intelligence analyst writing a briefing for a decision-maker. "
-        f"Below are {len(headlines)} article headlines from {time_label}, drawn from "
-        f"44,000+ global news sources monitored in real-time.\n\n"
+        f"Below are {len(sources)} numbered news stories from {time_label}, drawn from "
+        f"44,000+ global sources monitored in real-time and de-duplicated into distinct events "
+        f"(a story covered by many outlets shows a 'N sources' count and is a single numbered item).\n\n"
         f"{topic_context}"
         f"Write a structured intelligence briefing in this format:\n\n"
-        f"Start with a brief header stating the topic and time window "
-        f"(e.g., 'AI & Machine Learning — Last 24 Hours' or 'Global News — Last 7 Days'). "
+        f"Start with a markdown H2 header line (begins with '## ') stating the topic and time window "
+        f"(e.g., '## AI & Machine Learning — Last 24 Hours' or '## Global News — Last 7 Days'). "
         f"The topic is \"{view_name}\" and the time window is {time_label}.\n\n"
-        f"Then write a 2-3 sentence executive summary of the overall landscape.\n\n"
-        f"Then provide 3-5 key highlights as bullet points (use • as the bullet character). "
-        f"Each highlight should be a single clear sentence naming specific companies, countries, "
+        f"Then write a 3-4 sentence executive summary of the overall landscape.\n\n"
+        f"Then provide 5-8 key highlights as a markdown bullet list (use '- ' for each bullet). "
+        f"Each highlight should be a clear, specific sentence naming concrete companies, countries, "
         f"people, or figures. Focus on what changed, what's escalating, what was announced, "
         f"and what a strategist should watch.\n\n"
         f"End with a single sentence on what to watch next.\n\n"
+        f"CITATIONS: After each highlight (and any specific factual claim), cite the supporting "
+        f"story/stories using bracketed numbers that match the numbered list below, e.g. '[3]' or "
+        f"'[3][7]'. Each number is one story even if covered by many outlets — cite it once, not per "
+        f"outlet. Cite only stories that directly support the claim; aim for 1-2 citations per "
+        f"highlight. Use only numbers from the list — never invent numbers, and never write URLs.\n\n"
         f"Be specific and concrete. No filler. No hedging. "
         f"Use markdown formatting for emphasis and structure.\n\n"
-        f"Headlines:\n{numbered}"
+        f"Numbered sources:\n{numbered}"
     )
 
 
-def _generate_briefing_stream(headlines, view_name, view_desc, hours):
+def _generate_briefing_stream(sources, view_name, view_desc, hours):
     """Stream briefing tokens from OpenRouter as SSE."""
     from urllib.request import Request, urlopen
 
@@ -1625,11 +1882,11 @@ def _generate_briefing_stream(headlines, view_name, view_desc, hours):
     if not key:
         return
 
-    prompt = _build_briefing_prompt(headlines, view_name, view_desc, hours)
+    prompt = _build_briefing_prompt(sources, view_name, view_desc, hours)
     payload = json.dumps({
         "model": BRIEFING_MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 800,
+        "max_tokens": 2000,
         "temperature": 0.3,
         "stream": True,
     }).encode()
@@ -1644,7 +1901,9 @@ def _generate_briefing_stream(headlines, view_name, view_desc, hours):
     )
     with urlopen(req, timeout=60) as resp:
         for line in resp:
-            line = line.decode("utf-8").strip()
+            # 'replace' so a chunk-boundary split can never crash (and truncate)
+            # the stream; malformed events are skipped by the json guard below.
+            line = line.decode("utf-8", "replace").strip()
             if not line or not line.startswith("data: "):
                 continue
             data_str = line[6:]
@@ -1660,11 +1919,11 @@ def _generate_briefing_stream(headlines, view_name, view_desc, hours):
                 continue
 
 
-def _generate_briefing(headlines, view_name, view_desc, hours):
+def _generate_briefing(sources, view_name, view_desc, hours):
     """Non-streaming briefing generation (for caching)."""
     parts = []
     try:
-        for chunk in _generate_briefing_stream(headlines, view_name, view_desc, hours):
+        for chunk in _generate_briefing_stream(sources, view_name, view_desc, hours):
             parts.append(chunk)
     except Exception as e:
         req_log.warning("Briefing generation failed: %s", e)
@@ -1672,51 +1931,174 @@ def _generate_briefing(headlines, view_name, view_desc, hours):
     return "".join(parts).strip() if parts else None
 
 
-def _fetch_briefing_headlines(view_id, hours):
-    """Fetch article titles for a briefing. Returns (headlines, view_name, view_desc)."""
+BRIEFING_EVENT_BUFFER = 400   # articles pulled before dedup (pills/filtered)
+BRIEFING_EVENT_LIMIT = 50     # distinct events fed to the model
+BRIEFING_DESC_CHARS = 220
+
+
+def _cluster_ids(con, urls):
+    """url -> cluster_id for any of urls that are cluster members (chunked, guarded)."""
+    out = {}
+    try:
+        for i in range(0, len(urls), 400):
+            chunk = urls[i:i + 400]
+            ph = ",".join(["?"] * len(chunk))
+            for u, cid in con.execute(
+                f"SELECT article_url, cluster_id FROM cluster_members WHERE article_url IN ({ph})",
+                chunk,
+            ).fetchall():
+                out[u] = cid
+    except Exception:
+        pass  # cluster_members absent -> all singletons
+    return out
+
+
+def _cluster_sizes(con, cids):
+    sizes = {}
+    cids = [c for c in cids if c]
+    try:
+        for i in range(0, len(cids), 400):
+            chunk = cids[i:i + 400]
+            ph = ",".join(["?"] * len(chunk))
+            for cid, size in con.execute(
+                f"SELECT cluster_id, size FROM clusters WHERE cluster_id IN ({ph})", chunk,
+            ).fetchall():
+                sizes[cid] = size
+    except Exception:
+        pass
+    return sizes
+
+
+def _rep_from_members(mjson):
+    """(outlet, description) from a cluster's denormalized members snapshot."""
+    try:
+        members = json.loads(mjson) if mjson else []
+        if members:
+            m = members[0]
+            return m.get("outlet"), (m.get("desc") or "")[:BRIEFING_DESC_CHARS]
+    except Exception:
+        pass
+    return None, ""
+
+
+def _dedup_rank_events(con, rows):
+    """rows=[(url,title,outlet,desc)] -> distinct events (one per cluster, newest
+    member kept), ranked by source coverage then recency, capped."""
+    urls = [r[0] for r in rows if r[0]]
+    cmap = _cluster_ids(con, urls)
+    sizes = _cluster_sizes(con, set(cmap.values()))
+    seen, events = set(), []
+    for url, title, outlet, desc in rows:
+        if not title or len(title.strip()) <= 10:
+            continue
+        cid = cmap.get(url)
+        key = cid or url
+        if key in seen:
+            continue
+        seen.add(key)
+        events.append({
+            "title": title, "description": (desc or "")[:BRIEFING_DESC_CHARS],
+            "outlet": outlet, "n_sources": (sizes.get(cid, 1) if cid else 1),
+            "link": f"/event/{cid}" if cid else url,
+        })
+    events.sort(key=lambda e: e["n_sources"], reverse=True)  # stable: recency tiebreak
+    return events[:BRIEFING_EVENT_LIMIT]
+
+
+def _global_briefing_events(con, cutoff):
+    """Global feed: the window's most-covered events (from the clusters table,
+    so it spans the whole window, not just the newest minutes) plus the latest
+    breaking single-source items."""
+    events, seen_cids = [], set()
+    try:
+        for cid, title, size, mjson in con.execute(
+            "SELECT cluster_id, title, size, members_json FROM clusters "
+            "WHERE latest_seen >= ? AND status = 'active' ORDER BY size DESC LIMIT 35",
+            [cutoff],
+        ).fetchall():
+            outlet, desc = _rep_from_members(mjson)
+            events.append({"title": title, "description": desc, "outlet": outlet,
+                           "n_sources": size, "link": f"/event/{cid}"})
+            seen_cids.add(cid)
+    except Exception:
+        pass
+    # recent breaking singletons (newest articles not in any cluster)
+    try:
+        rows = con.execute(
+            "SELECT url, title, outlet_name, description FROM gal "
+            "WHERE crawled_at >= ? AND language = 'en' AND title IS NOT NULL "
+            "ORDER BY crawled_at DESC LIMIT 80",
+            [cutoff],
+        ).fetchall()
+        cmap = _cluster_ids(con, [r[0] for r in rows])
+        added = 0
+        for url, title, outlet, desc in rows:
+            if added >= 15:
+                break
+            if cmap.get(url) or not title or len(title.strip()) <= 10:
+                continue  # clustered -> covered above (or a minor cluster we skip)
+            events.append({"title": title, "description": (desc or "")[:BRIEFING_DESC_CHARS],
+                           "outlet": outlet, "n_sources": 1, "link": url})
+            added += 1
+    except Exception:
+        pass
+    return events
+
+
+def _fetch_briefing_events(view_id, hours):
+    """Fetch deduped EVENTS for a briefing (one per story, ranked by coverage),
+    each with a 'link' to its event page (all outlets) or the article, and an
+    'n_sources' count. Returns (events, view_name, view_desc)."""
     con = get_db()
     if con is None:
         return [], "Global News", ""
 
+    events = []
+    view_name, view_desc = "Global News", "All articles from 44K+ sources worldwide"
     try:
         cutoff = _hours_cutoff(hours) if hours else _hours_cutoff(168)
         view = find_view(view_id) if view_id else None
-        view_name = view["name"] if view else "Global News"
-        view_desc = view.get("description", "") if view else "All articles from 44K+ sources worldwide"
+        if view:
+            view_name = view["name"]
+            view_desc = view.get("description", "") or view_desc
 
-        if view and view.get("kind") == "tag_match":
-            cat = view["tag_category"]
+        if view is None:
+            events = _global_briefing_events(con, cutoff)
+        elif view.get("kind") == "tag_match":
             rows = con.execute(
-                "SELECT g.title FROM article_tags t "
+                "SELECT g.url, g.title, g.outlet_name, g.description FROM article_tags t "
                 "JOIN gal g ON g.url = t.article_id "
                 "WHERE t.category = ? AND t.source_type = 'gal' AND t.crawled_at >= ? "
-                "ORDER BY t.crawled_at DESC LIMIT 75",
-                [cat, cutoff],
+                "ORDER BY t.crawled_at DESC LIMIT ?",
+                [view["tag_category"], cutoff, BRIEFING_EVENT_BUFFER],
             ).fetchall()
-        elif view and view.get("kind") == "fda_match":
+            events = _dedup_rank_events(con, rows)
+        elif view.get("kind") == "fda_match":
             rows = con.execute(
-                "SELECT g.title FROM fda_match_cache f "
+                "SELECT g.url, g.title, g.outlet_name, g.description FROM fda_match_cache f "
                 "JOIN gal g ON g.url = f.article_id "
                 "WHERE f.source_type = 'gal' AND f.crawled_at >= ? "
-                "ORDER BY f.crawled_at DESC LIMIT 75",
-                [cutoff],
+                "ORDER BY f.crawled_at DESC LIMIT ?",
+                [cutoff, BRIEFING_EVENT_BUFFER],
             ).fetchall()
+            events = _dedup_rank_events(con, rows)
         else:
             rows = con.execute(
-                "SELECT title FROM gal WHERE crawled_at >= ? AND language = 'en' "
-                "AND title IS NOT NULL ORDER BY crawled_at DESC LIMIT 75",
-                [cutoff],
+                "SELECT url, title, outlet_name, description FROM gal "
+                "WHERE crawled_at >= ? AND language = 'en' AND title IS NOT NULL "
+                "ORDER BY crawled_at DESC LIMIT ?",
+                [cutoff, BRIEFING_EVENT_BUFFER],
             ).fetchall()
+            events = _dedup_rank_events(con, rows)
     except Exception:
-        rows = []
+        events = []
     finally:
         try:
             con.close()
         except Exception:
             pass
 
-    headlines = [r[0] for r in rows if r[0] and len(r[0].strip()) > 10]
-    return headlines, view_name, view_desc
+    return events, view_name, view_desc
 
 
 @app.route("/api/briefing")
@@ -1727,6 +2109,7 @@ def api_briefing():
     view_id = (request.args.get("view") or "").strip()
     hours = request.args.get("hours", 24, type=int)
     stream = request.args.get("stream", "0") == "1"
+    refresh = request.args.get("refresh") == "1"  # pre-warm: force regeneration
 
     cache_key = f"{view_id or '_all'}:{hours}"
 
@@ -1734,20 +2117,26 @@ def api_briefing():
     from models import get_user_db
     ucon = get_user_db()
     cached = ucon.execute(
-        "SELECT briefing, article_count, generated_at FROM briefing_cache WHERE cache_key = ?",
+        "SELECT briefing, article_count, generated_at, sources_json FROM briefing_cache WHERE cache_key = ?",
         (cache_key,),
     ).fetchone()
-    if cached:
+    if cached and not refresh:
         age_s = (datetime.utcnow() - datetime.strptime(cached["generated_at"], "%Y-%m-%d %H:%M:%S")).total_seconds()
         if age_s < BRIEFING_TTL_S:
             ucon.close()
+            try:
+                cached_sources = json.loads(cached["sources_json"]) if cached["sources_json"] else []
+            except Exception:
+                cached_sources = []
             if stream:
-                # Send cached result as a single SSE event
+                # Send cached sources + briefing as SSE events
                 def cached_stream():
+                    yield f"data: {json.dumps({'sources': cached_sources})}\n\n"
                     yield f"data: {json.dumps({'text': cached['briefing'], 'done': True, 'cached': True, 'article_count': cached['article_count']})}\n\n"
                 return Response(cached_stream(), mimetype="text/event-stream", headers={"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no"})
             return jsonify({
                 "briefing": cached["briefing"],
+                "sources": cached_sources,
                 "article_count": cached["article_count"],
                 "generated_at": cached["generated_at"],
                 "cached": True,
@@ -1756,28 +2145,40 @@ def api_briefing():
             })
     ucon.close()
 
-    # Fetch headlines
-    headlines, view_name, view_desc = _fetch_briefing_headlines(view_id, hours)
-    if len(headlines) < 5:
+    # Fetch deduped EVENTS for the selected window (no auto-widen — stays
+    # consistent with the feed). If too sparse, "Not enough articles".
+    sources, view_name, view_desc = _fetch_briefing_events(view_id, hours)
+    if len(sources) < 2:
+        _found = len(sources)
         if stream:
-            def empty_stream():
-                yield f"data: {json.dumps({'error': 'Not enough articles', 'done': True})}\n\n"
+            def empty_stream(_f=_found):
+                yield f"data: {json.dumps({'error': 'Not enough articles', 'found': _f, 'done': True})}\n\n"
             return Response(empty_stream(), mimetype="text/event-stream", headers={"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no"})
-        return jsonify({"briefing": None, "error": "Not enough articles"})
+        return jsonify({"briefing": None, "error": "Not enough articles", "found": _found})
+
+    sources = sources[:BRIEFING_EVENT_LIMIT]
+    # Compact map sent to the client to resolve [N] citation markers -> links.
+    sources_payload = [
+        {"n": i + 1, "link": s["link"], "outlet": s.get("outlet"),
+         "title": s.get("title"), "n_sources": s.get("n_sources", 1)}
+        for i, s in enumerate(sources)
+    ]
+    sources_json = json.dumps(sources_payload)
 
     if stream:
-        # Stream tokens via SSE
+        # Stream tokens via SSE (sources first so the client can linkify [N]).
         def sse_stream():
+            yield f"data: {json.dumps({'sources': sources_payload})}\n\n"
             full_text = []
             try:
-                for chunk in _generate_briefing_stream(headlines[:75], view_name, view_desc, hours):
+                for chunk in _generate_briefing_stream(sources, view_name, view_desc, hours):
                     full_text.append(chunk)
                     yield f"data: {json.dumps({'text': chunk})}\n\n"
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
                 return
 
-            # Cache the completed briefing
+            # Cache the completed briefing + its sources map
             briefing = "".join(full_text).strip()
             if briefing:
                 generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
@@ -1785,35 +2186,37 @@ def api_briefing():
                     uc = get_user_db()
                     uc.execute(
                         "INSERT OR REPLACE INTO briefing_cache "
-                        "(cache_key, briefing, article_count, generated_at) VALUES (?, ?, ?, ?)",
-                        (cache_key, briefing, len(headlines), generated_at),
+                        "(cache_key, briefing, article_count, generated_at, sources_json) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (cache_key, briefing, len(sources), generated_at, sources_json),
                     )
                     uc.commit()
                     uc.close()
                 except Exception:
                     pass
-            yield f"data: {json.dumps({'done': True, 'article_count': len(headlines)})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'article_count': len(sources)})}\n\n"
 
         return Response(sse_stream(), mimetype="text/event-stream", headers={"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no"})
 
     # Non-streaming fallback
-    briefing = _generate_briefing(headlines[:75], view_name, view_desc, hours)
+    briefing = _generate_briefing(sources, view_name, view_desc, hours)
     if not briefing:
         return jsonify({"briefing": None, "error": "Briefing generation unavailable"}), 503
 
     generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     ucon = get_user_db()
     ucon.execute(
-        "INSERT OR REPLACE INTO briefing_cache (cache_key, briefing, article_count, generated_at) "
-        "VALUES (?, ?, ?, ?)",
-        (cache_key, briefing, len(headlines), generated_at),
+        "INSERT OR REPLACE INTO briefing_cache (cache_key, briefing, article_count, generated_at, sources_json) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (cache_key, briefing, len(sources), generated_at, sources_json),
     )
     ucon.commit()
     ucon.close()
 
     return jsonify({
         "briefing": briefing,
-        "article_count": len(headlines),
+        "sources": sources_payload,
+        "article_count": len(sources),
         "generated_at": generated_at,
         "cached": False,
         "view": view_id or None,

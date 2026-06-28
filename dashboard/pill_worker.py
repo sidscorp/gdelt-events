@@ -26,8 +26,7 @@ if _PIPELINE_DIR not in sys.path:
 
 log = logging.getLogger("pill_worker")
 
-USERS_DB = Path(__file__).resolve().parent.parent / "data" / "users.db"
-GDELT_DB = Path(__file__).resolve().parent.parent / "data" / "gdelt.duckdb"
+from _paths import USERS_DB_PATH as USERS_DB, DB_PATH as GDELT_DB
 CHUNK_SIZE = 50_000
 _WORD_RE = re.compile(r"\w")
 

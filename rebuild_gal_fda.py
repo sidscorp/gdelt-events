@@ -12,6 +12,7 @@ from pipeline.loader import _open_connection
 from pipeline.schema import migrate_fda_match_cache
 from pipeline.fda_matcher import (
     build_automaton,
+    _build_context_automaton,
     _match_gal_stream,
     _set_last_ts,
 )
@@ -38,8 +39,6 @@ def main():
     con = _open_connection(DB_PATH)
     con.execute("SET threads = 8")
     try:
-        # Safety: make sure the schema has the new columns before any INSERT
-        # hits _bulk_insert_matches with an 8-tuple.
         migrate_fda_match_cache(con)
 
         delete_types = MODE_TO_DELETE_TYPES[args.mode]
@@ -65,24 +64,27 @@ def main():
             f"WHERE source_type='gal' AND match_type IN ({placeholders})",
             delete_types,
         )
-        # Reset the watermark so the scan starts from the beginning.
         con.execute("DELETE FROM fda_match_state WHERE source_type='gal'")
 
         include_stripped = args.mode in ("broad", "full")
         log.info(
             "Building Aho-Corasick automaton (gal, min_length=5, "
-            "include_stripped=%s)...", include_stripped,
+            "min_stripped_length=7, include_stripped=%s)...", include_stripped,
         )
         t0 = time.time()
         gal_automaton, specialty_map = build_automaton(
             con, min_length=5, include_stripped=include_stripped,
+            min_stripped_length=7,
         )
+        context_automaton = _build_context_automaton() if args.mode == "full" else None
         log.info("  built in %.1fs", time.time() - t0)
 
-        log.info("Scanning GAL...")
+        log.info("Scanning GAL (title%s)...",
+                 " + description context" if context_automaton else "")
         t0 = time.time()
         scanned, _matched, max_ts = _match_gal_stream(
             con, gal_automaton, specialty_map, since_ts=0,
+            context_automaton=context_automaton,
         )
         elapsed = time.time() - t0
         log.info("  scanned %d rows in %.1fs", scanned, elapsed)

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% if cluster %}{{ cluster.title }} — GDELT Monitor{% else %}Event not found{% endif %}</title>
+  {% if cluster %}
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="{{ cluster.title }}">
+  <meta property="og:description" content="Covered by {{ cluster.size }} source{{ '' if cluster.size == 1 else 's' }} — {{ cluster.first_seen }} to {{ cluster.latest_seen }}.">
+  {% if cluster.image %}<meta property="og:image" content="{{ cluster.image }}">{% endif %}
+  <meta name="twitter:card" content="summary_large_image">
+  {% endif %}
+  <style>
+    :root {
+      --bg: #14110f; --panel: #1d1916; --border: #34302b;
+      --text: #e9e4dc; --muted: #9a928a; --accent: #d8a657; --link: #7daea3;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--text);
+      font-family: -apple-system, Segoe UI, Roboto, sans-serif;
+      line-height: 1.6; font-size: 15px;
+    }
+    .wrap { max-width: 760px; margin: 0 auto; padding: 1.5rem 1.1rem 4rem; }
+    a { color: var(--link); }
+    .back { font-size: 0.8rem; color: var(--muted); text-decoration: none; }
+    .back:hover { color: var(--text); }
+    .event-head { border-bottom: 1px solid var(--border); padding-bottom: 1rem; margin: 0.8rem 0 1.2rem; }
+    .badge {
+      display: inline-block; font-size: 0.72rem; text-transform: uppercase;
+      letter-spacing: 0.05em; color: var(--accent); border: 1px solid var(--accent);
+      border-radius: 3px; padding: 0.1rem 0.45rem; margin-bottom: 0.6rem;
+    }
+    h1 { font-size: 1.5rem; line-height: 1.3; margin: 0.2rem 0 0.5rem; }
+    .meta { color: var(--muted); font-size: 0.82rem; }
+    .rep-link { display: inline-block; margin-top: 0.5rem; font-size: 0.9rem; }
+    .event-img { max-width: 100%; border-radius: 6px; margin: 0.9rem 0; border: 1px solid var(--border); }
+    .variants-title { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 1.4rem 0 0.5rem; }
+    ul.variants { list-style: none; margin: 0; padding: 0; }
+    li.variant { padding: 0.65rem 0; border-bottom: 1px solid var(--border); }
+    .v-outlet { color: var(--accent); font-size: 0.82rem; }
+    .v-when { color: var(--muted); font-size: 0.74rem; margin-left: 0.5rem; }
+    .v-title { display: block; margin-top: 0.15rem; }
+    .empty { color: var(--muted); text-align: center; margin-top: 3rem; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="back" href="/">&larr; back to feed</a>
+    {% if not cluster %}
+      <div class="empty">{{ error or "Event not found." }}</div>
+    {% else %}
+      <div class="event-head">
+        <div class="badge">Event · covered by {{ cluster.size }} source{{ '' if cluster.size == 1 else 's' }}</div>
+        <h1>{{ cluster.title }}</h1>
+        <div class="meta">
+          {% if cluster.first_seen == cluster.latest_seen %}
+            {{ cluster.first_seen }}
+          {% else %}
+            First seen {{ cluster.first_seen }} · latest {{ cluster.latest_seen }}
+          {% endif %}
+        </div>
+        {% if cluster.rep_url %}
+          <a class="rep-link" href="{{ cluster.rep_url }}" target="_blank" rel="noopener">Read the lead story &rarr;</a>
+        {% endif %}
+      </div>
+      {% if cluster.image %}<img class="event-img" src="{{ cluster.image }}" alt="" loading="lazy">{% endif %}
+
+      <div class="variants-title">{{ cluster.members|length }} variant{{ '' if cluster.members|length == 1 else 's' }} of this story</div>
+      <ul class="variants">
+        {% for m in cluster.members %}
+          <li class="variant">
+            <span class="v-outlet">{{ m.outlet or m.domain or "source" }}</span>
+            {% if m.when %}<span class="v-when">{{ m.when }}</span>{% endif %}
+            <a class="v-title" href="{{ m.url }}" target="_blank" rel="noopener">{{ m.title or m.url }}</a>
+          </li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+</body>
+</html>

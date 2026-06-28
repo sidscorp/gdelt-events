@@ -1,0 +1,70 @@
+/* base.css — shared design tokens, reset, typography, and dark mode for every
+   GDELT Monitor page. Page-specific rules live in static/css/<page>.css.
+   Dark mode is global: any page renders dark when localStorage 'gdelt-dark'=1
+   (restored by the inline script in base.html) toggles body.dark. */
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --text: #111;
+  --text-secondary: #555;
+  --text-tertiary: #888;
+  --border: #ddd;
+  --bg: #fffff8;
+  --bg-hover: #f5f5ef;
+  --accent: #333;
+  --tone-neg: #8b0000;
+  --tone-pos: #006400;
+  --tone-neutral: #888;
+  --tag-bg: #f0ede6;
+  --tag-border: #d4d0c8;
+  --accent-brand: #b4621a;
+  --accent-brand-2: #cf7d1f;
+  --accent-soft: rgba(180, 98, 26, 0.10);
+  --surface: #ffffff;
+  --surface-border: #e7e2d6;
+  --radius: 9px;
+  --radius-sm: 6px;
+  --shadow: 0 1px 2px rgba(40,30,15,0.05), 0 2px 8px rgba(40,30,15,0.05);
+  --shadow-hover: 0 2px 6px rgba(40,30,15,0.07), 0 8px 22px rgba(40,30,15,0.10);
+}
+
+body.dark {
+  --text: #e8e4df;
+  --text-secondary: #a8a29e;
+  --text-tertiary: #78716c;
+  --border: #3d3730;
+  --bg: #1a1714;
+  --bg-hover: #24201c;
+  --accent: #d4d0c8;
+  --tone-neg: #ef9a9a;
+  --tone-pos: #a5d6a7;
+  --tone-neutral: #78716c;
+  --tag-bg: #2a2520;
+  --tag-border: #3d3730;
+  --accent-brand: #e3a857;
+  --accent-brand-2: #f0bd72;
+  --accent-soft: rgba(227, 168, 87, 0.13);
+  --surface: #221e19;
+  --surface-border: #38322b;
+  --shadow: 0 1px 2px rgba(0,0,0,0.30), 0 2px 10px rgba(0,0,0,0.25);
+  --shadow-hover: 0 2px 8px rgba(0,0,0,0.40), 0 10px 26px rgba(0,0,0,0.35);
+}
+
+body {
+  font-family: 'Georgia', 'Times New Roman', serif;
+  color: var(--text);
+  background: var(--bg);
+  line-height: 1.6;
+  -webkit-text-size-adjust: 100%;
+}
+
+a { color: var(--accent-brand); }
+
+input, select, textarea, button { font-family: inherit; font-size: 1rem; }
+
+body.dark input, body.dark select, body.dark textarea {
+  background: var(--bg-hover);
+  color: var(--text);
+  border-color: var(--border);
+}

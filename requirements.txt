@@ -1,9 +1,12 @@
-requests
-duckdb
-flask
-flask-login
-werkzeug
-waitress
-pyahocorasick
-numpy
-faiss-cpu
+# Core runtime — pinned to what production runs (rainbow-boi .venv, Python 3.13)
+requests==2.33.1
+duckdb==1.5.1
+Flask==3.1.3
+Flask-Login==0.6.3
+Werkzeug==3.1.8
+waitress==3.0.2
+pyahocorasick==2.3.0
+numpy==2.4.4
+faiss-cpu==1.13.2
+pandas==3.0.2
+langfuse==4.6.1

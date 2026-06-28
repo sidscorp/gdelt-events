@@ -1,0 +1,6 @@
+/* pending.css — page-specific styles for the Account Pending page (tokens/reset in base.css). */
+body { max-width: 400px; margin: 80px auto; padding: 0 1rem; }
+h1 { font-size: 1.4rem; margin-bottom: 1rem; }
+p { font-size: 0.88rem; line-height: 1.6; margin-bottom: 0.8rem; }
+.muted { color: var(--text-tertiary); font-size: 0.78rem; }
+a { color: var(--text); }

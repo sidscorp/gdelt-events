@@ -14,7 +14,7 @@ import numpy as np
 
 log = logging.getLogger("semantic_search")
 
-BASE_DIR = Path(__file__).resolve().parent.parent / "data" / "embeddings"
+from _paths import EMBEDDINGS_DIR as BASE_DIR
 INDEX_PATH = BASE_DIR / "articles.faiss"
 URLS_TXT = BASE_DIR / "index_urls.txt"  # written by build_faiss_index.py, aligned with FAISS
 

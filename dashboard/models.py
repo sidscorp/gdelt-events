@@ -13,7 +13,7 @@ from pathlib import Path
 
 from werkzeug.security import generate_password_hash, check_password_hash
 
-USERS_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "users.db"
+from _paths import USERS_DB_PATH
 
 
 def get_user_db() -> sqlite3.Connection:
@@ -76,7 +76,26 @@ def init_user_db():
     """)
     # Migrate: add columns if missing (idempotent)
     _migrate_semantic_columns(con)
+    _migrate_briefing_columns(con)
+    _migrate_perf_table(con)
     con.close()
+
+
+def _migrate_perf_table(con):
+    """RUM samples (real-user front-end timings) posted by the client beacon."""
+    con.execute(
+        """
+        CREATE TABLE IF NOT EXISTS perf_samples (
+            id     INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts     TEXT DEFAULT (datetime('now')),
+            metric TEXT,
+            value  REAL,
+            view   TEXT,
+            hours  INTEGER
+        )
+        """
+    )
+    con.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +173,14 @@ def email_exists(email: str) -> bool:
 # ---------------------------------------------------------------------------
 # Pill operations
 # ---------------------------------------------------------------------------
+
+def _migrate_briefing_columns(con):
+    """Add the briefing citations column if it doesn't exist (for upgrades)."""
+    cols = {r[1] for r in con.execute("PRAGMA table_info(briefing_cache)").fetchall()}
+    if "sources_json" not in cols:
+        con.execute("ALTER TABLE briefing_cache ADD COLUMN sources_json TEXT")
+    con.commit()
+
 
 def _migrate_semantic_columns(con):
     """Add semantic pill columns if they don't exist (for upgrades)."""

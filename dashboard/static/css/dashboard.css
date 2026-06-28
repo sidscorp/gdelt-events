@@ -1,0 +1,888 @@
+  /* Tufte-inspired: high data-ink ratio, no decoration */
+  body.dark input, body.dark select, body.dark textarea {
+    background: var(--bg-hover);
+    color: var(--text);
+    border-color: var(--border);
+  }
+  /* Verified badge for contextual FDA matches */
+  .match-verified {
+    display: inline-block;
+    font-size: 0.62rem;
+    color: #2d6a2d;
+    background: #e8f5e8;
+    border: 1px solid #b8d8b8;
+    border-radius: 2px;
+    padding: 0 0.3em;
+    margin-left: 0.3em;
+    vertical-align: middle;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+  body.dark .match-verified {
+    color: #a5d6a7;
+    background: #1a2e1a;
+    border-color: #3a5e3a;
+  }
+
+  /* FDA Regulatory Events panel */
+  #fdaEventsPanel {
+    display: none;
+    border: 1px solid var(--border);
+    margin: 0.5rem 0;
+    background: var(--bg-hover);
+  }
+  .fda-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 0.5rem 0.8rem;
+    cursor: pointer;
+    user-select: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .fda-panel-title {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-tertiary);
+    font-weight: 600;
+  }
+  .fda-panel-toggle {
+    font-size: 0.68rem;
+    color: var(--text-tertiary);
+  }
+  #fdaEventsList {
+    padding: 0.3rem 0;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+  .fda-event-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.3rem 0.8rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.78rem;
+    line-height: 1.4;
+  }
+  .fda-event-row:last-child { border-bottom: none; }
+  .fda-event-badge {
+    flex-shrink: 0;
+    font-size: 0.6rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 0.1em 0.35em;
+    border-radius: 2px;
+    text-transform: uppercase;
+  }
+  .fda-badge-recall { background: #fde8e8; color: #8b0000; border: 1px solid #f5b8b8; }
+  .fda-badge-510k   { background: #e8f0fd; color: #1a3a7a; border: 1px solid #b8c8f5; }
+  .fda-badge-enforcement { background: #fff8e8; color: #7a4a00; border: 1px solid #f5d8a8; }
+  body.dark .fda-badge-recall { background: #3a1a1a; color: #ef9a9a; border-color: #6a2a2a; }
+  body.dark .fda-badge-510k   { background: #1a1a3a; color: #90b4ef; border-color: #2a2a6a; }
+  body.dark .fda-badge-enforcement { background: #3a2a1a; color: #f5c880; border-color: #6a4a1a; }
+  .fda-event-firm {
+    font-weight: 600;
+    color: var(--text);
+    flex-shrink: 0;
+    max-width: 200px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .fda-event-firm:hover { text-decoration: underline; }
+  .fda-event-desc {
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+  }
+  .fda-event-date {
+    flex-shrink: 0;
+    color: var(--text-tertiary);
+    font-size: 0.7rem;
+  }
+  /* source-tab styles removed — unified feed */
+  body.dark .view-pill { background: var(--bg); border-color: var(--border); color: var(--text); }
+  body.dark .view-pill.active { background: var(--text); color: var(--bg); }
+  body.dark .time-pill { border-color: var(--border); color: var(--text-secondary); }
+  body.dark .time-pill.active { background: var(--text); color: var(--bg); }
+
+  .theme-toggle {
+    cursor: pointer;
+    font-size: 0.78rem;
+    color: var(--text-tertiary);
+    background: none;
+    border: 1px solid var(--border);
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    font-family: inherit;
+  }
+  .theme-toggle:hover { color: var(--text); border-color: var(--text-secondary); }
+
+  body {
+    font-family: 'ET Book', Palatino, 'Palatino Linotype', 'Book Antiqua', Georgia, serif;
+    line-height: 1.5;
+    font-size: 15px;
+    max-width: 1300px;
+    margin: 0 auto;
+    padding: 1.5rem 1rem;
+  }
+
+  /* Header */
+  header {
+    border-bottom: 1px solid var(--text);
+    padding-bottom: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  header h1 {
+    font-size: 1.4rem;
+    font-weight: 400;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+  }
+
+  .header-stats {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    margin-top: 0.2rem;
+  }
+
+  .header-stats span { margin-right: 1.5rem; }
+
+  /* Filters */
+  .filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 1rem;
+    align-items: center;
+  }
+
+  .filters input, .filters select {
+    font-family: inherit;
+    font-size: 0.82rem;
+    padding: 0.3rem 0.5rem;
+    border: 1px solid var(--border);
+    background: #fff;
+    color: var(--text);
+    outline: none;
+  }
+
+  .filters input:focus, .filters select:focus {
+    border-color: var(--accent);
+  }
+
+  .filters input[type="text"] { width: 180px; }
+  .filters input[type="date"] { width: 130px; }
+  .filters select { cursor: pointer; }
+
+  .filter-label {
+    font-size: 0.72rem;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-left: 0.5rem;
+  }
+
+  .filter-label:first-child { margin-left: 0; }
+
+  /* All filters always visible in unified feed */
+  .filter-group { display: flex; align-items: center; }
+  .f-entity .filter-label::after {
+    content: " (GKG)";
+    opacity: 0.45;
+    font-size: 0.6rem;
+  }
+
+  .source-badge {
+    font-size: 0.6rem;
+    padding: 0.05rem 0.3rem;
+    border-radius: 2px;
+    margin-left: 0.3rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+  }
+  .source-badge.gal { background: #f0ede6; color: #888; }
+  .source-badge.gkg { background: #e8edf5; color: #5a7aaa; }
+  body.dark .source-badge.gal { background: #2a2520; color: #78716c; }
+  body.dark .source-badge.gkg { background: #1e2530; color: #7a9abf; }
+
+  .btn-clear {
+    font-family: inherit;
+    font-size: 0.78rem;
+    padding: 0.3rem 0.6rem;
+    border: none;
+    background: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    text-decoration: underline;
+  }
+
+  .btn-clear:hover { color: var(--text); }
+
+  .btn-more-filters {
+    font-family: inherit;
+    font-size: 0.78rem;
+    padding: 0.3rem 0.7rem;
+    border: 1px solid var(--border);
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  .btn-more-filters:hover { border-color: var(--text-secondary); color: var(--text); }
+  .btn-more-filters.active { background: var(--bg-hover); color: var(--text); }
+  .more-filters-dot { color: #4a7c59; font-size: 0.65rem; margin-left: 0.25rem; }
+  #moreFiltersDrawer {
+    border-top: 1px solid var(--border);
+    padding-top: 0.5rem;
+    margin-top: -0.5rem;
+    margin-bottom: 0.6rem;
+  }
+
+  /* Views bar — saved-filter presets above the time pills */
+  .views-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 0.8rem;
+    min-height: 0;
+  }
+  .view-pill {
+    font-family: inherit;
+    font-size: 0.82rem;
+    padding: 0.3rem 0.7rem;
+    border: 1px solid var(--text);
+    background: var(--bg);
+    color: var(--text);
+    cursor: pointer;
+    letter-spacing: 0.02em;
+  }
+  /* New pill modal */
+  .new-pill-btn {
+    font-family: inherit;
+    font-size: 0.78rem;
+    padding: 0.3rem 0.6rem;
+    border: 1px dashed var(--text-tertiary);
+    background: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    letter-spacing: 0.02em;
+  }
+  .new-pill-btn:hover { border-style: solid; color: var(--text); }
+  .pill-modal {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.3);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 200;
+  }
+  .pill-modal-content {
+    background: #fff; border: 1px solid var(--border);
+    padding: 1.5rem; max-width: 500px; width: 90%;
+    font-size: 0.85rem;
+  }
+  .pill-modal-content h3 { margin: 0 0 1rem; font-size: 1rem; }
+  .pill-modal-content label { display: block; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); margin-bottom: 0.2rem; margin-top: 0.8rem; }
+  .pill-modal-content input, .pill-modal-content textarea {
+    width: 100%; font-family: inherit; font-size: 0.85rem;
+    padding: 0.4rem; border: 1px solid var(--border); background: #fff;
+  }
+  .pill-modal-content textarea { height: 80px; resize: vertical; }
+  .pill-modal-content .hint { font-size: 0.72rem; color: var(--text-tertiary); margin-top: 0.2rem; }
+  .pill-modal-actions { margin-top: 1rem; display: flex; gap: 0.5rem; justify-content: flex-end; }
+  .pill-modal-actions button { font-family: inherit; font-size: 0.82rem; padding: 0.4rem 1rem; border: none; cursor: pointer; }
+  .pill-modal-actions .btn-create { background: var(--text); color: var(--bg); }
+  .pill-modal-actions .btn-cancel { background: none; color: var(--text-tertiary); border: 1px solid var(--border); }
+  .pill-badge-custom { font-size: 0.6rem; background: #e8e0f0; color: #6b4d8a; padding: 0.05rem 0.3rem; margin-left: 0.3rem; vertical-align: middle; }
+  .pill-delete-btn { font-size: 0.6rem; color: var(--text-tertiary); cursor: pointer; margin-left: 0.1rem; border: none; background: none; }
+  .pill-delete-btn:hover { color: #c33; }
+
+  .pill-info-btn {
+    font-family: inherit;
+    font-size: 0.68rem;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    border: 1px solid var(--text-tertiary);
+    background: none;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    margin-left: -0.2rem;
+    margin-right: 0.3rem;
+    line-height: 1;
+    padding: 0;
+  }
+  .pill-info-btn:hover { background: var(--text); color: var(--bg); border-color: var(--text); }
+  .pill-info-modal {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.3);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 200;
+  }
+  .pill-info-content {
+    background: #fff; border: 1px solid var(--border);
+    padding: 1.5rem; max-width: 600px; width: 90%;
+    max-height: 80vh; overflow-y: auto;
+    font-size: 0.82rem; line-height: 1.5;
+  }
+  .pill-info-content h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+  .pill-info-content .kw-list {
+    display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.5rem 0;
+  }
+  .pill-info-content .kw-tag {
+    font-size: 0.72rem; padding: 0.1rem 0.4rem;
+    background: var(--tag-bg); border: 1px solid var(--tag-border);
+  }
+  .pill-info-close {
+    float: right; background: none; border: none;
+    font-size: 1.2rem; cursor: pointer; color: var(--text-tertiary);
+  }
+  .view-pill:hover {
+    background: var(--text);
+    color: var(--bg);
+  }
+  .view-pill.active {
+    background: var(--text);
+    color: var(--bg);
+  }
+
+  /* Match-type profile toggle — shown next to the view pill when a
+     kind: fda_match view is active. Lets the user pick precision vs recall
+     without having to re-run the matcher. */
+  .match-profile {
+    display: none;
+    align-items: center;
+    gap: 0.3rem;
+    margin-left: 0.6rem;
+    padding-left: 0.6rem;
+    border-left: 1px solid var(--border);
+    font-size: 0.75rem;
+  }
+  .match-profile.visible { display: inline-flex; }
+  .match-profile-label {
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.66rem;
+    margin-right: 0.2rem;
+  }
+  .profile-seg {
+    font-family: inherit;
+    font-size: 0.76rem;
+    padding: 0.22rem 0.55rem;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  .profile-seg + .profile-seg { border-left: none; }
+  .profile-seg:hover { color: var(--text); }
+  .profile-seg.active {
+    background: var(--text);
+    color: var(--bg);
+    border-color: var(--text);
+  }
+
+  /* Source tabs — GAL / GKG / All */
+  /* source-tabs removed — unified feed */
+  .source-tabs-REMOVED {
+    display: flex;
+    gap: 0;
+    margin-bottom: 0.6rem;
+    border-bottom: 2px solid var(--text);
+  }
+  .source-tab {
+    font-family: inherit;
+    font-size: 0.85rem;
+    padding: 0.45rem 1.1rem;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-weight: 500;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.1rem;
+  }
+  .source-tab:hover { color: var(--text); }
+  .source-tab.active {
+    color: var(--text);
+    border-bottom-color: var(--text);
+    font-weight: 600;
+  }
+  .source-tab-count {
+    font-size: 0.68rem;
+    color: var(--text-tertiary);
+    font-weight: 400;
+    letter-spacing: 0.02em;
+  }
+  .source-tab.active .source-tab-count { color: var(--text-secondary); }
+
+  /* Time pills */
+  .time-pills {
+    display: flex;
+    gap: 0;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .time-pill {
+    font-family: inherit;
+    font-size: 0.78rem;
+    padding: 0.3rem 0.8rem;
+    border: none;
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+
+  .time-pill:hover { color: var(--text); }
+  .time-pill.active {
+    color: var(--text);
+    border-bottom-color: var(--text);
+  }
+
+  /* Active filters display */
+  .active-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+    margin-bottom: 0.8rem;
+    min-height: 0;
+  }
+
+  .active-filter {
+    font-size: 0.72rem;
+    padding: 0.15rem 0.5rem;
+    background: var(--tag-bg);
+    border: 1px solid var(--tag-border);
+    cursor: pointer;
+    color: var(--text-secondary);
+  }
+
+  .active-filter:hover {
+    text-decoration: line-through;
+    color: var(--tone-neg);
+  }
+
+  /* Results count */
+  .results-meta {
+    font-size: 0.78rem;
+    color: var(--text-tertiary);
+    margin-bottom: 0.6rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.4rem;
+  }
+
+  /* Article list */
+  .article-list { list-style: none; }
+
+  .article {
+    padding: 0.6rem 0;
+    border-bottom: 1px solid #eee;
+  }
+
+  .article:hover { background: var(--bg-hover); margin: 0 -0.5rem; padding: 0.6rem 0.5rem; }
+
+  .article-header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .article-source {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    flex-shrink: 0;
+  }
+
+  .article-time {
+    font-size: 0.72rem;
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+  }
+
+  .article-tone {
+    font-size: 0.72rem;
+    flex-shrink: 0;
+    font-weight: 600;
+  }
+
+  .tone-negative { color: var(--tone-neg); }
+  .tone-positive { color: var(--tone-pos); }
+  .tone-neutral { color: var(--tone-neutral); }
+
+  .src-badge {
+    font-size: 0.62rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 0 0.3rem;
+    border: 1px solid var(--border);
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+  }
+  .src-gal { border-color: #c0b070; color: #8a7030; }
+
+  .match-line {
+    margin: 0.2rem 0 0.1rem;
+  }
+  .match-badge {
+    font-size: 0.7rem;
+    padding: 0.08rem 0.4rem;
+    border: 1px solid #4a7c59;
+    background: #edf5ef;
+    color: #2d5a3d;
+    font-weight: 600;
+  }
+  .match-label {
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #6b8e7a;
+    font-weight: 500;
+    margin-right: 0.2rem;
+  }
+  .match-spec {
+    font-weight: 400;
+    font-style: italic;
+    color: #5c7866;
+  }
+
+  .article-title {
+    font-size: 0.95rem;
+    line-height: 1.35;
+    margin: 0.15rem 0;
+  }
+
+  .article-title a {
+    color: var(--text);
+    text-decoration: none;
+  }
+
+  .article-title a:hover { text-decoration: underline; }
+
+  .article-entities {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.25rem;
+  }
+
+  .entity-tag {
+    font-size: 0.68rem;
+    padding: 0.05rem 0.35rem;
+    background: var(--tag-bg);
+    border: 1px solid var(--tag-border);
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .entity-tag:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+
+  .entity-tag.person::before { content: ""; }
+  .entity-tag.org::before { content: ""; }
+  .entity-tag.location::before { content: ""; }
+  .entity-tag.theme { font-size: 0.64rem; color: var(--text-tertiary); border-style: dashed; }
+
+  /* Pagination */
+  .pagination {
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-top: 1.5rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .pagination button {
+    font-family: inherit;
+    font-size: 0.82rem;
+    padding: 0.3rem 0.8rem;
+    border: 1px solid var(--border);
+    background: #fff;
+    cursor: pointer;
+    color: var(--text);
+  }
+
+  .pagination button:disabled {
+    color: var(--text-tertiary);
+    cursor: default;
+  }
+
+  .pagination button:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
+
+  .page-info {
+    font-size: 0.78rem;
+    color: var(--text-tertiary);
+    align-self: center;
+  }
+
+  /* Loading */
+  .loading {
+    text-align: center;
+    padding: 3rem;
+    color: var(--text-tertiary);
+    font-style: italic;
+  }
+  .loading .spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: #4a7c59;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    vertical-align: -2px;
+    margin-right: 0.5rem;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .loading-elapsed {
+    display: block;
+    font-size: 0.72rem;
+    margin-top: 0.4rem;
+    font-style: normal;
+    color: var(--text-tertiary);
+  }
+  /* Top progress bar — indeterminate, shown while fetching */
+  #topProgress {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: transparent;
+    z-index: 100;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  #topProgress.active { opacity: 1; }
+  #topProgress::before {
+    content: '';
+    position: absolute;
+    height: 100%;
+    width: 30%;
+    background: #4a7c59;
+    animation: topbar 1.1s ease-in-out infinite;
+  }
+  @keyframes topbar {
+    0%   { left: -30%; width: 30%; }
+    50%  { left: 40%;  width: 40%; }
+    100% { left: 100%; width: 30%; }
+  }
+  /* Dim controls while fetching so it's obvious they're locked */
+  body.fetching .time-pill,
+  body.fetching .views-bar button,
+  body.fetching .filters input,
+  body.fetching .filters select {
+    opacity: 0.55;
+    cursor: wait;
+  }
+  body.fetching { cursor: progress; }
+
+  /* Sidebar suggestions (entity lists) */
+  .suggestions {
+    display: none;
+    position: absolute;
+    background: #fff;
+    border: 1px solid var(--border);
+    max-height: 200px;
+    overflow-y: auto;
+    z-index: 10;
+    width: 250px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  }
+
+  .suggestions.visible { display: block; }
+
+  .suggestion-item {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.78rem;
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+  }
+
+  .suggestion-item:hover { background: var(--bg-hover); }
+  .suggestion-count { color: var(--text-tertiary); font-size: 0.72rem; }
+
+  /* Section label — tiny uppercase hint for what each row does */
+  .section-label {
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-tertiary);
+    margin: 0.6rem 0 0.2rem 0;
+  }
+  .section-label:first-of-type { margin-top: 0.4rem; }
+
+  /* Footer */
+  footer {
+    margin-top: 2rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.72rem;
+    color: var(--text-tertiary);
+  }
+  /* ===================================================================== */
+  /* === Bolder modernization (layered over the Tufte base) ============== */
+  /* ===================================================================== */
+
+  /* Header: confident title + accent rule + stat chips */
+  header { border-bottom: 2px solid var(--accent-brand); padding-bottom: 0.7rem; }
+  header h1 { font-size: 1.75rem; letter-spacing: 0.03em; }
+  .header-stats { margin-top: 0.5rem; }
+  .header-stats span {
+    display: inline-block; margin-right: 0.45rem; padding: 0.14rem 0.6rem;
+    background: var(--bg-hover); border: 1px solid var(--border);
+    border-radius: 999px; font-size: 0.74rem; color: var(--text-secondary);
+  }
+
+  /* Curated-topic pills: tactile, accent active */
+  .view-pill {
+    border-radius: 999px !important; padding: 0.34rem 0.9rem !important;
+    border: 1px solid var(--border); transition: all 0.13s ease; font-weight: 500;
+  }
+  .view-pill:hover { border-color: var(--accent-brand); color: var(--text); background: var(--accent-soft); }
+  .view-pill.active, body.dark .view-pill.active {
+    background: var(--accent-brand); color: #fff; border-color: var(--accent-brand);
+  }
+  body.dark .view-pill.active { color: #1a1714; }
+
+  /* Time pills: accent active */
+  .time-pill { border-radius: var(--radius-sm); transition: all 0.13s ease; }
+  .time-pill.active, body.dark .time-pill.active {
+    background: var(--accent-soft); color: var(--accent-brand); border: 1px solid var(--accent-brand);
+  }
+  .time-pill:hover { color: var(--accent-brand); }
+
+  /* Feed cards: real surfaces with hover elevation */
+  .article {
+    background: var(--surface); border: 1px solid var(--surface-border);
+    border-radius: var(--radius); padding: 0.7rem 0.95rem; margin: 0 0 0.55rem;
+    box-shadow: var(--shadow);
+    transition: box-shadow 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
+  }
+  .article:hover {
+    background: var(--surface); margin: 0 0 0.55rem; padding: 0.7rem 0.95rem;
+    box-shadow: var(--shadow-hover); transform: translateY(-1px); border-color: var(--accent-brand);
+  }
+  .article-title a:hover { color: var(--accent-brand); text-decoration: none; }
+
+  /* Rollup "covered by N sources" -> prominent accent badge (the marquee feature) */
+  .rollup > button {
+    background: var(--accent-soft) !important; color: var(--accent-brand) !important;
+    border: 1px solid var(--accent-brand) !important; border-radius: 999px !important;
+    font-weight: 600 !important; padding: 0.12rem 0.6rem !important;
+  }
+  .rollup a { color: var(--accent-brand); }
+
+  /* AI Briefing: a real card */
+  .briefing-card {
+    border: 1px solid var(--surface-border); border-left: 3px solid var(--accent-brand);
+    border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow);
+    padding: 1.1rem 1.3rem; margin: 0.7rem 0;
+  }
+  .briefing-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.55rem; }
+  .briefing-label {
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.1em; font-weight: 700; color: var(--accent-brand);
+  }
+  .briefing-dismiss {
+    font-size: 0.68rem; color: var(--text-tertiary); background: none; border: none; cursor: pointer; font-family: inherit;
+  }
+  .briefing-dismiss:hover { color: var(--text); }
+  .briefing-body { font-size: 0.92rem; line-height: 1.72; color: var(--text); }
+  .briefing-body h4 {
+    font-size: 1.1rem !important; font-weight: 600 !important; margin: 0 0 0.55rem !important;
+    color: var(--text); letter-spacing: 0.01em;
+  }
+  .briefing-body ul { list-style: none; padding-left: 0; margin: 0.55rem 0; }
+  .briefing-body li { position: relative; padding-left: 1.15rem; margin: 0.5rem 0; }
+  .briefing-body li::before {
+    content: "▸"; position: absolute; left: 0; top: 0.02em; color: var(--accent-brand); font-size: 0.82rem;
+  }
+  .briefing-meta {
+    font-size: 0.7rem; color: var(--text-tertiary); margin-top: 0.8rem; padding-top: 0.55rem;
+    border-top: 1px solid var(--surface-border);
+  }
+
+  /* Citations: legible accent superscripts */
+  sup.cite { line-height: 0; white-space: nowrap; }
+  sup.cite a { color: var(--accent-brand); text-decoration: none; font-weight: 700; font-size: 0.62rem; padding: 0 1.5px; }
+  sup.cite a:hover { text-decoration: underline; }
+
+  /* Pagination + inputs */
+  .pagination button { border-radius: var(--radius-sm); transition: all 0.13s ease; }
+  .pagination button:hover:not(:disabled) { border-color: var(--accent-brand); color: var(--accent-brand); }
+  .filters input, .filters select { border-radius: var(--radius-sm); background: var(--surface); border: 1px solid var(--surface-border); }
+  .filters input:focus, .filters select:focus { border-color: var(--accent-brand); box-shadow: 0 0 0 2px var(--accent-soft); }
+
+  /* FDA panel: align to surface + accent */
+  #fdaEventsPanel { border: 1px solid var(--surface-border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
+/* Entity filters (person/org/place/theme) retired with the GKG view — GAL has no entities */
+.f-entity { display: none !important; }
+
+/* Auto-widen notice (shown when an empty window steps out to a wider one) */
+.feed-notice {
+  list-style: none; padding: 0.5rem 0.7rem; margin: 0 0 0.5rem;
+  font-size: 0.8rem; color: var(--text-secondary);
+  background: var(--accent-soft, rgba(180,98,26,0.08));
+  border-left: 3px solid var(--accent-brand); border-radius: var(--radius-sm, 6px);
+}
+
+/* GAL reading card: thumbnail + summary */
+.article-row { display: flex; gap: 0.8rem; align-items: flex-start; }
+.article-body { flex: 1 1 auto; min-width: 0; }
+.article-thumb { flex: 0 0 auto; }
+.article-thumb img {
+  width: 120px; height: 84px; object-fit: cover; display: block;
+  border-radius: var(--radius-sm, 6px); background: var(--surface-border, #eee);
+}
+.article-desc {
+  font-size: 0.84rem; color: var(--text-secondary); line-height: 1.45;
+  margin: 0.3rem 0 0.15rem;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+@media (max-width: 560px) {
+  .article-thumb img { width: 84px; height: 62px; }
+  .article-desc { -webkit-line-clamp: 4; }
+}
+
+/* English-only toggle (sits in the time-pill row) */
+.lang-toggle {
+  margin-left: 0.5rem; font-size: 0.76rem; padding: 0.3rem 0.7rem;
+  border: 1px solid var(--surface-border, var(--border));
+  border-radius: var(--radius-sm, 6px); background: var(--surface, var(--bg));
+  color: var(--text-secondary); cursor: pointer; transition: all 0.13s ease;
+}
+.lang-toggle:hover { border-color: var(--accent-brand); color: var(--text); }
+.lang-toggle.active { background: var(--accent-brand); border-color: var(--accent-brand); color: #fff; }
+body.dark .lang-toggle.active { color: #1a1714; }
+
+/* Fast, styled hover tooltip for view pills (replaces the slow native title) */
+.pill-tip {
+  position: fixed; z-index: 9999; max-width: 320px;
+  background: var(--surface, #fff); color: var(--text);
+  border: 1px solid var(--surface-border, var(--border));
+  border-radius: var(--radius-sm, 6px); box-shadow: var(--shadow, 0 4px 14px rgba(0,0,0,0.14));
+  padding: 0.5rem 0.65rem; font-size: 0.78rem; line-height: 1.38;
+  pointer-events: none; opacity: 0; transform: translateY(-3px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+.pill-tip.show { opacity: 1; transform: translateY(0); }

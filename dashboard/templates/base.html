@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="manifest" href="/static/manifest.json">
+<meta name="theme-color" content="#b4621a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="GDELT">
+<link rel="apple-touch-icon" href="/static/icon-192.png">
+<title>{% block title %}GDELT Monitor{% endblock %}</title>
+<link rel="stylesheet" href="/static/css/base.css">
+{% block page_css %}{% endblock %}
+</head>
+<body>
+<script>
+  // Restore the global dark-mode preference before content paints (no flash).
+  (function () {
+    try { if (localStorage.getItem('gdelt-dark') === '1') document.body.classList.add('dark'); }
+    catch (e) {}
+  })();
+</script>
+{% block content %}{% endblock %}
+{% block scripts %}{% endblock %}
+</body>
+</html>

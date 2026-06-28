@@ -1,31 +1,7 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Account — GDELT Monitor</title>
-<style>
-  :root { --text: #1a1a1a; --text-secondary: #555; --text-tertiary: #888; --border: #ccc; --bg: #fafaf8; }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Georgia', 'Times New Roman', serif; color: var(--text); background: var(--bg); max-width: 450px; margin: 60px auto; padding: 0 1.5rem; }
-  h1 { font-size: 1.4rem; margin-bottom: 1.5rem; }
-  h2 { font-size: 1rem; margin-top: 2rem; margin-bottom: 0.6rem; padding-top: 1rem; border-top: 1px solid #eee; }
-  h2:first-of-type { border-top: none; padding-top: 0; }
-  form { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 1rem; }
-  label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); }
-  input { font-family: inherit; font-size: 0.88rem; padding: 0.45rem; border: 1px solid var(--border); background: #fff; }
-  input:focus { outline: none; border-color: var(--text); }
-  button { font-family: inherit; font-size: 0.82rem; padding: 0.45rem 1rem; background: var(--text); color: var(--bg); border: none; cursor: pointer; align-self: flex-start; }
-  button:hover { opacity: 0.85; }
-  .flash { font-size: 0.82rem; padding: 0.5rem; margin-bottom: 1rem; }
-  .flash.error { color: #a33; background: #fde8e8; }
-  .flash.success { color: #2d7a3a; background: #edf5ef; }
-  .info { font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 0.5rem; }
-  .links { margin-top: 2rem; font-size: 0.78rem; }
-  .links a { color: var(--text-secondary); text-decoration: none; }
-</style>
-</head>
-<body>
+{% extends "base.html" %}
+{% block title %}Account — GDELT Monitor{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/account.css">{% endblock %}
+{% block content %}
 <h1>Account Settings</h1>
 
 {% with messages = get_flashed_messages(with_categories=true) %}
@@ -59,5 +35,4 @@
 <div class="links">
   <a href="/">Dashboard</a> · <a href="/portal">My Pills</a> · <a href="/logout">Logout</a>
 </div>
-</body>
-</html>
+{% endblock %}

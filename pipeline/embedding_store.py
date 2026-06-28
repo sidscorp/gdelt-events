@@ -17,6 +17,7 @@ this store on first use.
 """
 
 import logging
+import os
 import sqlite3
 import struct
 import sys
@@ -28,7 +29,9 @@ import numpy as np
 
 log = logging.getLogger("embedding_store")
 
-BASE_DIR = Path(__file__).resolve().parent.parent / "data" / "embeddings"
+# Honors GDELT_DATA_DIR (isolated dev instance); defaults to <repo>/data.
+_DATA_DIR = Path(os.environ.get("GDELT_DATA_DIR") or (Path(__file__).resolve().parent.parent / "data"))
+BASE_DIR = _DATA_DIR / "embeddings"
 MANIFEST_DB = BASE_DIR / "manifest.db"
 VECTORS_BIN = BASE_DIR / "vectors.bin"
 FAISS_INDEX = BASE_DIR / "articles.faiss"

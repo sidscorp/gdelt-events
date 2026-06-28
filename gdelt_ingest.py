@@ -205,7 +205,18 @@ def run_ingest(force_prune: bool = False, prune_days: int | None = None) -> None
             log.exception("Tagger failed (non-fatal)")
 
 
-        # Prune: daily or forced
+        # FDA regulatory events — polls OpenFDA API every 6 hours.
+        # Non-fatal: dashboard view shows cached events if this fails.
+        now_for_fda = datetime.now()
+        if now_for_fda.hour % 6 == 0:
+            try:
+                from pipeline.fda_events import ingest_fda_events
+                fda_ev_summary = ingest_fda_events()
+                log.info("FDA events: %s", fda_ev_summary)
+            except Exception:
+                log.exception("FDA events ingest failed (non-fatal)")
+
+                # Prune: daily or forced
         now = datetime.now(tz=None)
         should_prune = force_prune or now.hour == 0 and now.minute < 15
         if should_prune:

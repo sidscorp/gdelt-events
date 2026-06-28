@@ -1,27 +1,7 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Login — GDELT Monitor</title>
-<style>
-  :root { --text: #1a1a1a; --text-secondary: #555; --text-tertiary: #888; --border: #ccc; --bg: #fafaf8; --accent: #333; }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Georgia', 'Times New Roman', serif; color: var(--text); background: var(--bg); max-width: 400px; margin: 80px auto; padding: 0 1rem; }
-  h1 { font-size: 1.4rem; margin-bottom: 0.3rem; }
-  .subtitle { font-size: 0.82rem; color: var(--text-tertiary); margin-bottom: 2rem; }
-  form { display: flex; flex-direction: column; gap: 0.8rem; }
-  label { font-size: 0.78rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.05em; }
-  input { font-family: inherit; font-size: 0.9rem; padding: 0.5rem; border: 1px solid var(--border); background: #fff; }
-  input:focus { outline: none; border-color: var(--accent); }
-  button { font-family: inherit; font-size: 0.85rem; padding: 0.55rem 1.2rem; background: var(--text); color: var(--bg); border: none; cursor: pointer; }
-  button:hover { opacity: 0.85; }
-  .flash { font-size: 0.82rem; color: #a33; margin-bottom: 1rem; }
-  .links { margin-top: 1.5rem; font-size: 0.78rem; color: var(--text-tertiary); }
-  .links a { color: var(--text-secondary); }
-</style>
-</head>
-<body>
+{% extends "base.html" %}
+{% block title %}Login — GDELT Monitor{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/login.css">{% endblock %}
+{% block content %}
 <h1>GDELT Monitor</h1>
 <p class="subtitle">Sign in to create custom monitoring pills</p>
 
@@ -43,5 +23,4 @@
   <p>No account? <a href="/register">Register</a></p>
   <p><a href="/">Back to dashboard</a></p>
 </div>
-</body>
-</html>
+{% endblock %}

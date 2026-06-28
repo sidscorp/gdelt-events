@@ -1,23 +1,9 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Account Pending — GDELT Monitor</title>
-<style>
-  :root { --text: #1a1a1a; --text-tertiary: #888; --bg: #fafaf8; }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: 'Georgia', 'Times New Roman', serif; color: var(--text); background: var(--bg); max-width: 400px; margin: 80px auto; padding: 0 1rem; }
-  h1 { font-size: 1.4rem; margin-bottom: 1rem; }
-  p { font-size: 0.88rem; line-height: 1.6; margin-bottom: 0.8rem; }
-  .muted { color: var(--text-tertiary); font-size: 0.78rem; }
-  a { color: var(--text); }
-</style>
-</head>
-<body>
+{% extends "base.html" %}
+{% block title %}Account Pending — GDELT Monitor{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/pending.css">{% endblock %}
+{% block content %}
 <h1>Account Pending</h1>
 <p>Your registration has been received. Your account will be reviewed and activated shortly.</p>
 <p>Once approved, you'll be able to sign in and create custom monitoring pills.</p>
 <p class="muted">In the meantime, the <a href="/">dashboard</a> is fully accessible without an account.</p>
-</body>
-</html>
+{% endblock %}

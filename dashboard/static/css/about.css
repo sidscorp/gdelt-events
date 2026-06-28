@@ -1,0 +1,12 @@
+/* about.css — page-specific styles for the About page (tokens/reset in base.css). */
+body { max-width: 640px; margin: 60px auto; padding: 0 1.5rem; line-height: 1.7; }
+h1 { font-size: 1.6rem; margin-bottom: 0.3rem; }
+h2 { font-size: 1.1rem; margin-top: 2rem; margin-bottom: 0.5rem; color: var(--text); }
+p { font-size: 0.88rem; margin-bottom: 1rem; }
+.subtitle { font-size: 0.82rem; color: var(--text-tertiary); margin-bottom: 2rem; }
+.tech-list { list-style: none; padding: 0; }
+.tech-list li { font-size: 0.82rem; padding: 0.3rem 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; }
+.tech-list li span:first-child { font-weight: 600; }
+.tech-list li span:last-child { color: var(--text-secondary); }
+a { color: var(--text); }
+footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); font-size: 0.75rem; color: var(--text-tertiary); }

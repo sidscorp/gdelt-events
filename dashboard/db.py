@@ -8,10 +8,20 @@ service modules (briefing, articles) can share it without importing the app.
 
 import threading
 import time
+from datetime import datetime, timedelta
 
 import duckdb
 
 from _paths import DB_PATH
+
+
+def _hours_cutoff(hours):
+    """Convert an hours-back window into a YYYYMMDDHHMMSS integer cutoff
+    (the GDELT date format), or None for an unbounded window. Shared by the
+    article feed queries (app.py) and the briefing event fetch (briefing.py)."""
+    if not hours:
+        return None
+    return int((datetime.utcnow() - timedelta(hours=hours)).strftime("%Y%m%d%H%M%S"))
 
 # Per-connection bounds. Each per-request DuckDB connection gets a tight
 # memory limit so a runaway query can't balloon the waitress process to many

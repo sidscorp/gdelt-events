@@ -1812,6 +1812,43 @@ def _get_openrouter_key():
     return None
 
 
+# --- Langfuse observability (optional; fully no-op if unconfigured) ---
+# Keys live in <data>/.langfuse_key (gitignored), env-style:
+#   LANGFUSE_PUBLIC_KEY=pk-lf-...
+#   LANGFUSE_SECRET_KEY=sk-lf-...
+#   LANGFUSE_HOST=https://langfuse.snambiar.com
+LANGFUSE_KEY_PATH = _OPENROUTER_KEY_PATH.parent / ".langfuse_key"
+_langfuse = None
+_langfuse_checked = False
+
+
+def _get_langfuse():
+    """Lazy-init the Langfuse client. Returns None (and never raises) when
+    credentials are absent or the SDK fails to initialize."""
+    global _langfuse, _langfuse_checked
+    if _langfuse_checked:
+        return _langfuse
+    _langfuse_checked = True
+    try:
+        import os
+        if LANGFUSE_KEY_PATH.exists():
+            for line in LANGFUSE_KEY_PATH.read_text().splitlines():
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+        from langfuse import Langfuse
+        lf = Langfuse()
+        if getattr(lf, "_tracing_enabled", False):
+            _langfuse = lf
+            req_log.info("Langfuse tracing enabled (host=%s)", os.environ.get("LANGFUSE_HOST"))
+        else:
+            req_log.info("Langfuse tracing disabled (no credentials)")
+    except Exception:
+        req_log.debug("Langfuse init failed", exc_info=True)
+    return _langfuse
+
+
 def _build_briefing_prompt(sources: list[dict], view_name: str, view_desc: str,
                             hours: int) -> str:
     """Build a time-aware, context-rich briefing prompt with numbered sources
@@ -1875,7 +1912,11 @@ def _build_briefing_prompt(sources: list[dict], view_name: str, view_desc: str,
 
 
 def _generate_briefing_stream(sources, view_name, view_desc, hours):
-    """Stream briefing tokens from OpenRouter as SSE."""
+    """Stream briefing tokens from OpenRouter as SSE.
+
+    When Langfuse is configured, the full generation (model, token usage, cost,
+    latency, view/hours) is logged once the stream completes."""
+    import time
     from urllib.request import Request, urlopen
 
     key = _get_openrouter_key()
@@ -1889,6 +1930,7 @@ def _generate_briefing_stream(sources, view_name, view_desc, hours):
         "max_tokens": 2000,
         "temperature": 0.3,
         "stream": True,
+        "usage": {"include": True},  # OpenRouter: emit token usage + cost in the final chunk
     }).encode()
 
     req = Request(
@@ -1899,24 +1941,63 @@ def _generate_briefing_stream(sources, view_name, view_desc, hours):
             "Authorization": f"Bearer {key}",
         },
     )
-    with urlopen(req, timeout=60) as resp:
-        for line in resp:
-            # 'replace' so a chunk-boundary split can never crash (and truncate)
-            # the stream; malformed events are skipped by the json guard below.
-            line = line.decode("utf-8", "replace").strip()
-            if not line or not line.startswith("data: "):
-                continue
-            data_str = line[6:]
-            if data_str == "[DONE]":
-                break
+
+    lf = _get_langfuse()
+    t0 = time.monotonic()
+    collected = []
+    usage = None
+    try:
+        with urlopen(req, timeout=60) as resp:
+            for line in resp:
+                # 'replace' so a chunk-boundary split can never crash (and truncate)
+                # the stream; malformed events are skipped by the json guard below.
+                line = line.decode("utf-8", "replace").strip()
+                if not line or not line.startswith("data: "):
+                    continue
+                data_str = line[6:]
+                if data_str == "[DONE]":
+                    break
+                try:
+                    chunk = json.loads(data_str)
+                    if chunk.get("usage"):
+                        usage = chunk["usage"]
+                    delta = chunk.get("choices", [{}])[0].get("delta", {})
+                    content = delta.get("content", "")
+                    if content:
+                        collected.append(content)
+                        yield content
+                except (json.JSONDecodeError, IndexError, KeyError):
+                    continue
+    finally:
+        if lf:
             try:
-                chunk = json.loads(data_str)
-                delta = chunk.get("choices", [{}])[0].get("delta", {})
-                content = delta.get("content", "")
-                if content:
-                    yield content
-            except (json.JSONDecodeError, IndexError, KeyError):
-                continue
+                meta = {
+                    "view": view_name,
+                    "hours": hours,
+                    "n_sources": len(sources),
+                    "latency_s": round(time.monotonic() - t0, 2),
+                }
+                with lf.start_as_current_observation(
+                    name="gdelt-briefing",
+                    as_type="generation",
+                    model=BRIEFING_MODEL,
+                    input=f"[{view_name} / {hours}h] {len(sources)} de-duplicated sources",
+                    output="".join(collected),
+                    metadata=meta,
+                ) as gen:
+                    if usage:
+                        try:
+                            gen.update(usage_details={
+                                "input": usage.get("prompt_tokens"),
+                                "output": usage.get("completion_tokens"),
+                                "total": usage.get("total_tokens"),
+                            })
+                            if usage.get("cost") is not None:
+                                gen.update(cost_details={"total": usage.get("cost")})
+                        except Exception:
+                            pass
+            except Exception:
+                req_log.debug("Langfuse briefing trace failed", exc_info=True)
 
 
 def _generate_briefing(sources, view_name, view_desc, hours):

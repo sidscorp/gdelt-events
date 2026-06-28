@@ -36,8 +36,12 @@
   <li><strong>Semiconductor & Chip Geopolitics</strong> — monitors US-China trade restrictions, fab capacity, and chipmaker activity</li>
 </ul>
 
+<p>Because a major story gets reported by hundreds of outlets at once, near-duplicate articles about the same event are rolled up into a single event card — each with a shareable permalink — so the feed shows distinct stories rather than the same headline forty times. And for any topic or time window, an on-demand AI briefing summarizes what's actually happening across the matched coverage, with citations back to the source articles.</p>
+
 <h2>How it works</h2>
 <p>Articles are scanned using Aho-Corasick automata — a trie-based algorithm that finds all occurrences of thousands of patterns in a single linear pass. Matches are materialized into indexed cache tables so the dashboard can serve results in under a second. The system maintains a rolling 60-day window and prunes older data to keep storage bounded. New articles are classified every 15 minutes.</p>
+
+<p>Alongside keyword matching, each English article is embedded with a local neural model (nomic-embed-text via Ollama) and indexed in a FAISS vector store. A leader-clustering pass groups articles whose embeddings are near-duplicates into persistent event clusters — this is what powers the rolled-up event cards and their permalinks. The AI briefings are generated on demand from the top events in a view by Google's Gemini 2.5 Flash (via OpenRouter), streamed token-by-token and cached so repeat views load instantly.</p>
 
 <h2>The tech stack</h2>
 <ul class="tech-list">

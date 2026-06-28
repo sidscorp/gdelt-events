@@ -1,8 +1,11 @@
 """Summarize RUM samples (real user front-end timings) as p50/p75/p95 per metric.
 Usage: python perf_summary.py [hours_back]"""
-import sqlite3, sys
+import os, sqlite3, sys
+from pathlib import Path
 from collections import defaultdict
-DB = r'C:\Users\siddh\Code_Library\gdelt-events\data\users.db'
+# Mirror dashboard/_paths.py: honor GDELT_DATA_DIR (dev instance) else <repo>/data.
+DATA_DIR = Path(os.environ.get("GDELT_DATA_DIR") or (Path(__file__).resolve().parent.parent / "data"))
+DB = str(DATA_DIR / "users.db")
 hours = int(sys.argv[1]) if len(sys.argv) > 1 else 24
 def pct(s, p):
     if not s: return 0

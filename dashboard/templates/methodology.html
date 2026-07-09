@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Methodology — GDELT Monitor{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/about.css">{% endblock %}
+{% block content %}
+
+<h1>Methodology</h1>
+<p class="subtitle">Exactly how everything on this dashboard is selected, ranked, and written — nothing hidden.</p>
+
+<h2>The data</h2>
+<p>Every 15 minutes the pipeline ingests the newest batch from the <a href="https://www.gdeltproject.org/">GDELT Project</a>'s Global Article List (~44,000 outlets worldwide). Articles are kept for a rolling 60 days. GDELT's crawl runs roughly 1–2 hours behind real-time publication, so brand-new stories first appear as single articles and accumulate their "covered by N sources" counts as syndication is crawled.</p>
+
+<h2>Event cards ("covered by N sources")</h2>
+<p>Every English article is embedded with a local neural model (nomic-embed-text, running on our own GPU). A clustering pass groups near-duplicate articles about the same event, so the feed shows one card per <em>event</em> instead of the same headline dozens of times. The card links every member article.</p>
+
+<h2>How the feed is ordered (Importance sort)</h2>
+<p>The default "Importance" ordering ranks each event in your selected time window by a composite score:</p>
+<ul style="font-size:0.88rem; margin: 0 0 1rem 1.2rem;">
+  <li><strong>Coverage (weight 0.5)</strong> — log(1 + number of sources covering the event). More outlets = more important.</li>
+  <li><strong>Recency (weight 0.3)</strong> — exponential decay with a 12-hour half-life-style constant: a 12-hour-old event keeps ~37% of its recency weight.</li>
+  <li><strong>Velocity (weight 0.2)</strong> — sources per hour since the event first appeared. Rewards stories breaking fast.</li>
+</ul>
+<p>Each component is normalized within the current window's candidates, then combined. "Newest"/"Oldest" bypass this entirely and sort by crawl time. There is no editorial input and no personalization — every visitor sees the same ranking.</p>
+
+<h2>How topic pills decide what belongs (since July 2026)</h2>
+<p>Each curated topic pill works in two stages:</p>
+<ol style="font-size:0.88rem; margin: 0 0 1rem 1.2rem;">
+  <li><strong>Nomination (recall)</strong> — an article becomes a <em>candidate</em> for a pill if it matches the pill's keyword list, appears in the FDA-registered manufacturer name index (Medical Device Companies only), or its embedding is semantically close to the pill's topic description.</li>
+  <li><strong>Judgment (precision)</strong> — every candidate is then read by an LLM judge (<code>gpt-oss-120b</code>, an open-weights model, called via our self-hosted gateway) which answers one question: <em>does this article actually belong to this topic?</em> Only judge-approved articles get in. For the noisiest topics (Supply Chain, Medical Device Companies, AI &amp; Defense, OSS Vulnerabilities) borderline verdicts are rejected too.</li>
+</ol>
+<p>This replaced pure keyword matching in July 2026 after a blind LLM audit measured how often each pill's articles were actually on-topic: Supply Chain scored 25% and Medical Device Companies 11% under keywords alone; after judge-gating, every pill measures roughly 75–94%. Every article's inclusion reason is stored and shown as a badge on its card in pill views (judge verdict + semantic similarity, or the matched keyword for non-English articles, which skip the judge).</p>
+<p>Custom pills (for signed-in users) use pure semantic matching against your written description at the strictness you choose — no LLM judge, so expect a bit more noise than the curated pills.</p>
+
+<h2>How the AI briefing is written</h2>
+<p>When you open a briefing for a view + time window:</p>
+<ol style="font-size:0.88rem; margin: 0 0 1rem 1.2rem;">
+  <li>The system takes the <strong>top 50 events by the same Importance score as the feed</strong> — the briefing summarizes exactly what the feed shows.</li>
+  <li>A prompt is built containing: the 50 numbered events (title + summary + outlet + source count, explicitly marked as importance-ranked), the titles the <em>previous</em> briefing covered (so the model writes progressions instead of re-explaining), any ongoing story threads it has been tracking, and a hard rule that the top-5 events must be covered.</li>
+  <li>The prompt is sent to <code>GLM-4.7</code> on Cerebras (a fast open-weights model via our self-hosted gateway). Citations like [3] link back to the exact numbered event.</li>
+  <li>The result is cached for 45 minutes per view/window — the "cached" label and timestamp are shown under each briefing.</li>
+</ol>
+<p><strong>Click the ⓘ on any briefing</strong> to see everything that generation used: the model, the full ranked source list, the continuity context, and the <em>verbatim prompt</em>.</p>
+
+<h2>What the AI does <em>not</em> do</h2>
+<ul style="font-size:0.88rem; margin: 0 0 1rem 1.2rem;">
+  <li>No model chooses which articles enter the database or the global feed — that's coverage math only.</li>
+  <li>Briefings can only cite the numbered events they were given; they are instructed never to invent numbers or URLs.</li>
+  <li>No personalization, tracking-based ranking, or engagement optimization anywhere.</li>
+</ul>
+
+<p style="margin-top:1.5rem;"><a href="/">← Back to the dashboard</a> · <a href="/about">About the project</a></p>
+
+{% endblock %}

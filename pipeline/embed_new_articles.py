@@ -144,6 +144,7 @@ def main():
 
     if not missing:
         log.info("Nothing to embed.")
+        _run_pill_scorer()
         return
 
     t0 = time.time()
@@ -154,6 +155,26 @@ def main():
 
     s = embedding_store.stats()
     log.info("Store now has %d active vectors", s["active"])
+
+    _run_pill_scorer()
+
+
+def _run_pill_scorer():
+    """Score fresh vectors against all pill queries (hybrid pill membership).
+    Chained here because vectors are guaranteed current at this point.
+    Never lets a scorer failure break embedding."""
+    try:
+        try:
+            from . import pill_scorer
+        except ImportError:
+            repo = str(Path(__file__).resolve().parent.parent)
+            if repo not in sys.path:
+                sys.path.insert(0, repo)
+            from pipeline import pill_scorer
+        result = pill_scorer.score_new()
+        log.info("pill_scorer: %s", result)
+    except Exception:
+        log.exception("pill_scorer failed (non-fatal)")
 
 
 if __name__ == "__main__":

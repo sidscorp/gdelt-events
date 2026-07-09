@@ -10,6 +10,7 @@ speed for a cleanup step at the end.
 import gzip
 import json
 import logging
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import duckdb
@@ -19,6 +20,25 @@ from .config import DB_PATH
 from .loader import BATCH_COMMIT_SIZE, _open_connection
 
 log = logging.getLogger(__name__)
+
+# gal_recent: rolling ~8-day mirror of gal that the dashboard's window queries
+# use (routing threshold there is 7 days — see dashboard/articles.py RECENT_HOURS;
+# the extra day keeps the slice a strict superset). Built once by
+# pipeline/build_gal_recent.py; mirrored inserts + pruning happen here.
+GAL_RECENT_KEEP_DAYS = 8
+_gal_recent_exists = None
+
+
+def _has_gal_recent(con) -> bool:
+    global _gal_recent_exists
+    if _gal_recent_exists is None:
+        try:
+            _gal_recent_exists = bool(con.execute(
+                "SELECT 1 FROM information_schema.tables WHERE table_name = 'gal_recent'"
+            ).fetchone())
+        except Exception:
+            _gal_recent_exists = False
+    return _gal_recent_exists
 
 
 GAL_COLUMNS = [
@@ -110,6 +130,15 @@ def load_gal_file(con: duckdb.DuckDBPyConnection, gal_path: Path) -> int:
             "outlet_name, outlet_logo, outlet_twitter, title, image, "
             "description, language, author FROM gal_batch"
         )
+        if _has_gal_recent(con):
+            con.execute(
+                "INSERT INTO gal_recent (url, crawled_at, published_at, domain, "
+                "outlet_name, outlet_logo, outlet_twitter, title, image, "
+                "description, language, author) "
+                "SELECT url, crawled_at, published_at, domain, "
+                "outlet_name, outlet_logo, outlet_twitter, title, image, "
+                "description, language, author FROM gal_batch"
+            )
         con.unregister("gal_batch")
 
     con.execute(
@@ -155,6 +184,13 @@ def load_gal_batch(
                 )
                 con = _open_connection(db_path)
     finally:
+        try:
+            if summary["gal"] and _has_gal_recent(con):
+                cutoff = int((datetime.utcnow() - timedelta(days=GAL_RECENT_KEEP_DAYS))
+                             .strftime("%Y%m%d%H%M%S"))
+                con.execute("DELETE FROM gal_recent WHERE crawled_at < ?", [cutoff])
+        except Exception:
+            log.exception("gal_recent prune failed (non-fatal)")
         try:
             con.execute("CHECKPOINT")
             con.close()

@@ -41,6 +41,16 @@ let _briefingAbort = null;
 async function fetchBriefing() {
   const view = (typeof state !== 'undefined' && state.view) || '';
   const hours = (typeof state !== 'undefined' && state.hours) || 24;
+  const q = (typeof state !== 'undefined' && state.q) ? String(state.q).trim() : '';
+
+  // The briefing is a feed-level summary; it is not meaningful while a search
+  // query is active. Hide the panel and force regeneration once search clears.
+  if (q) {
+    const p = document.getElementById('briefingPanel');
+    if (p) p.style.display = 'none';
+    _briefingView = null;
+    return;
+  }
 
   if (_briefingView !== null && view === _briefingView && hours === _briefingHours) return;
   _briefingView = view;
@@ -53,11 +63,21 @@ async function fetchBriefing() {
   const textEl = document.getElementById('briefingText');
   const metaEl = document.getElementById('briefingMeta');
 
-  // Keep any existing (e.g. restored-from-snapshot) briefing visible until the
-  // new one arrives — the first streamed token replaces it. Avoids a blank flash.
-  const hadContent = textEl.textContent.trim().length > 0;
-  if (!hadContent) textEl.textContent = '';
-  metaEl.textContent = hadContent ? 'Updating…' : 'Generating briefing...';
+  // Keep existing text visible ONLY if it belongs to this view/window (boot
+  // restore and snapshot paints stamp textEl.dataset.key). Otherwise show a
+  // shimmer skeleton — never another view's briefing posing as current.
+  const wantKey = `${view}|${hours}`;
+  const keepText = textEl.dataset.key === wantKey && textEl.textContent.trim().length > 0;
+  if (!keepText) {
+    textEl.innerHTML =
+      '<div class="brief-skel" aria-hidden="true">' +
+        '<div class="skel-block skel-line w45"></div>' +
+        '<div class="skel-block skel-line thin w95"></div>' +
+        '<div class="skel-block skel-line thin w88"></div>' +
+        '<div class="skel-block skel-line thin w60"></div>' +
+      '</div>';
+  }
+  metaEl.textContent = keepText ? 'Updating…' : 'Generating briefing…';
   panel.style.display = '';
   const briefStart = performance.now();
   let briefFirstMarked = false;
@@ -99,6 +119,7 @@ async function fetchBriefing() {
           if (!briefFirstMarked && window.perfMark) { briefFirstMarked = true; window.perfMark('briefing_first', performance.now() - briefStart); }
           fullText += data.text;
           textEl.innerHTML = linkifyCitations(renderMd(fullText), sourcesMap);
+          textEl.dataset.key = wantKey; // this content now belongs to this view/window
         }
         if (data.article_count) articleCount = data.article_count;
         if (data.done) {

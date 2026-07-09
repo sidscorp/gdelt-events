@@ -153,6 +153,27 @@
       "max_latency_s": 2.5,
       "response_shape": {"source": "gal"},
       "description": "Contract: API response must echo the source field."
+    },
+    {
+      "id": "importance_global_24h",
+      "params": {"hours": 24, "order": "importance"},
+      "min_results": 10,
+      "max_latency_s": 3.0,
+      "description": "Default Importance sort — window's ranked events (deduped), so a bounded but non-trivial set."
+    },
+    {
+      "id": "importance_supply_chain_24h",
+      "params": {"view": "supply-chain-alerts", "hours": 24, "order": "importance"},
+      "min_results": 5,
+      "max_latency_s": 3.0,
+      "description": "Importance sort on a pill — same ranked set the AI briefing summarizes."
+    },
+    {
+      "id": "date_global_24h_regression",
+      "params": {"hours": 24, "order": "date"},
+      "min_results": 50,
+      "max_latency_s": 3.0,
+      "description": "Regression: the classic reverse-chronological feed must still work under order=date."
     }
   ]
 }

@@ -15,7 +15,7 @@ from parsers import (
     parse_enhanced_list, parse_locations, format_timestamp, time_ago,
 )
 from articles import (
-    _api_articles_inner, _feed_cache, _feed_cache_key,
+    _api_articles_inner, _feed_cache, _feed_cache_key, _data_version,
     _FEED_TTL_S, _FEED_CACHE_MAX, _parse_date_filters, GAL_COLS,
 )
 
@@ -277,15 +277,17 @@ def api_articles():
         except Exception: pass
 
 
-_stats_cache = {"at": 0.0, "data": None}
-_STATS_TTL_S = 300  # full-table count(distinct) over 25M rows — fine to cache 5 min
+_stats_cache = {"at": 0.0, "data": None, "version": None}
+_STATS_TTL_S = 1800  # fallback only — data_version is the real invalidator (see _feed_cache_key)
 
 
 @bp.route("/api/stats")
 def api_stats():
     """Quick stats for the header."""
     now = time.time()
-    if _stats_cache["data"] and now - _stats_cache["at"] < _STATS_TTL_S:
+    version = _data_version()
+    if (_stats_cache["data"] and _stats_cache["version"] == version
+            and now - _stats_cache["at"] < _STATS_TTL_S):
         return jsonify(_stats_cache["data"])
     con = get_db()
     if con is None:
@@ -331,6 +333,7 @@ def api_stats():
     }
     _stats_cache["at"] = now
     _stats_cache["data"] = data
+    _stats_cache["version"] = version
     return jsonify(data)
 
 

@@ -73,6 +73,13 @@ def init_user_db():
             article_count INTEGER,
             generated_at TEXT DEFAULT (datetime('now'))
         );
+
+
+        CREATE TABLE IF NOT EXISTS briefing_threads (
+            cache_key TEXT PRIMARY KEY,
+            threads_json TEXT,
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
     """)
     # Migrate: add columns if missing (idempotent)
     _migrate_semantic_columns(con)
@@ -179,6 +186,10 @@ def _migrate_briefing_columns(con):
     cols = {r[1] for r in con.execute("PRAGMA table_info(briefing_cache)").fetchall()}
     if "sources_json" not in cols:
         con.execute("ALTER TABLE briefing_cache ADD COLUMN sources_json TEXT")
+    if "meta_json" not in cols:
+        # Transparency: verbatim prompt + model + inputs of the cached briefing
+        # (served by GET /api/briefing_meta, shown in the briefing (i) modal).
+        con.execute("ALTER TABLE briefing_cache ADD COLUMN meta_json TEXT")
     con.commit()
 
 

@@ -32,6 +32,9 @@ def prune_database(con: duckdb.DuckDBPyConnection, retention_days: int | None = 
         ("gkg", "V1DATE"),
         ("gal", "crawled_at"),
         ("fda_match_cache", "crawled_at"),
+        # Pill memberships (curated + custom) follow the same retention so
+        # custom pills can't accumulate unboundedly on a self-hosted box.
+        ("article_tags", "crawled_at"),
     ]:
         before = con.execute(f"SELECT count(*) FROM {table}").fetchone()[0]
         con.execute(f"DELETE FROM {table} WHERE \"{col}\" < ?", [cutoff])

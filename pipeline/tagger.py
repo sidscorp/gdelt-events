@@ -24,10 +24,42 @@ _WORD_RE = re.compile(r"\w")
 
 # ---------------------------------------------------------------------------
 # Category definitions — add a new pill by appending here
+#
+# Fields per category:
+#   keywords              recall candidates (word-bounded Aho-Corasick scan)
+#   gkg_theme_prefixes    GKG theme candidates
+#   scan_description      scan GAL descriptions too
+#   description           semantic query for the pill scorer (pill_scorer.py):
+#                         embedded once; article vectors are cosine-scored
+#                         against it. Membership rule: sem >= sem_hi, OR
+#                         keyword hit AND sem >= sem_lo. Articles without a
+#                         vector (non-English) keep keyword-only tagging.
+#   neg_description       optional anti-query; articles scoring higher against
+#                         this than against `description` are rejected.
+#   sem_hi / sem_lo       thresholds for the membership rule.
+#   semantic_only         no keyword candidates — membership purely by sem_hi.
 # ---------------------------------------------------------------------------
+
+SEM_HI_DEFAULT = 0.62
+SEM_LO_DEFAULT = 0.48
 
 CATEGORIES: dict[str, dict] = {
     "supply_chain": {
+        "description": (
+            "Events that disrupt the production, sourcing, manufacture, or "
+            "transport of goods: factory fires and closures, port and shipping "
+            "disruptions, logistics failures, export controls, tariffs and trade "
+            "restrictions, industrial shortages, product recalls — stories where "
+            "the impact on supply chains, manufacturing, or trade flows is part "
+            "of the story itself."
+        ),
+        "neg_description": (
+            "General news about wars, weather, disasters, or politics with no "
+            "stated connection to goods, manufacturing, logistics, or trade."
+        ),
+        # Fuzziest intent + noisiest candidates: only 'relevant' verdicts get
+        # in ('borderline' admits too much disaster/geopolitics adjacency).
+        "judge_strict": True,
         "keywords": [
             "recall", "shortage", "disruption", "supply chain", "supply-chain",
             "factory fire", "plant fire", "plant closure", "plant shutdown",
@@ -52,6 +84,12 @@ CATEGORIES: dict[str, dict] = {
         "scan_description": True,
     },
     "medical_devices": {
+        "description": (
+            "News about medical devices and the medical device industry: "
+            "implants, scanners, surgical tools, diagnostics, device makers' "
+            "products, regulatory clearances and recalls, clinical use of "
+            "devices."
+        ),
         "keywords": [
             "pacemaker", "defibrillator", "cardiac implant", "heart valve",
             "stent", "catheter", "angioplasty", "bypass graft",
@@ -80,6 +118,12 @@ CATEGORIES: dict[str, dict] = {
         "scan_description": True,
     },
     "semiconductors": {
+        "description": (
+            "Semiconductor industry news: chipmakers and foundries, fab "
+            "construction, chip supply and shortages, export controls on chips, "
+            "process-node and packaging advances, semiconductor policy and "
+            "subsidies."
+        ),
         "keywords": [
             "semiconductor", "semiconductors", "chipmaker", "chipmakers",
             "chip shortage", "chip export", "chip ban",
@@ -100,6 +144,11 @@ CATEGORIES: dict[str, dict] = {
         "scan_description": True,
     },
     "ai_general": {
+        "description": (
+            "Artificial intelligence news: model releases, AI companies and "
+            "startups, research breakthroughs, AI investment and adoption, "
+            "the AI industry broadly."
+        ),
         "keywords": [
             "artificial intelligence", "machine learning", "deep learning",
             "neural network", "large language model", "llm",
@@ -120,6 +169,12 @@ CATEGORIES: dict[str, dict] = {
         "scan_description": True,
     },
     "ai_defense": {
+        "judge_strict": True,
+        "description": (
+            "Military and defense applications of artificial intelligence: "
+            "autonomous weapons, defense AI contracts and companies, military "
+            "AI policy, AI in warfare and national security."
+        ),
         "keywords": [
             "autonomous weapon", "military ai", "defense ai", "ai warfare",
             "lethal autonomous", "drone warfare", "killer robot",
@@ -135,6 +190,11 @@ CATEGORIES: dict[str, dict] = {
         "scan_description": True,
     },
     "ai_regulation": {
+        "description": (
+            "AI governance and regulation: legislation, executive orders, "
+            "safety frameworks and institutes, standards, compliance "
+            "requirements, court cases and copyright disputes about AI."
+        ),
         "keywords": [
             "ai regulation", "ai policy", "ai governance", "ai legislation",
             "ai act", "eu ai act", "ai executive order",
@@ -149,6 +209,11 @@ CATEGORIES: dict[str, dict] = {
         "scan_description": True,
     },
     "ai_sector_impact": {
+        "description": (
+            "Artificial intelligence applied in specific industries — "
+            "healthcare, finance, education, manufacturing, agriculture, law, "
+            "creative work: sector-specific AI products, adoption, and impact."
+        ),
         "keywords": [
             "ai in healthcare", "ai drug discovery", "ai diagnosis",
             "ai radiology", "ai pathology",
@@ -171,6 +236,12 @@ CATEGORIES: dict[str, dict] = {
         "scan_description": True,
     },
     "oss_vulnerabilities": {
+        "judge_strict": True,
+        "description": (
+            "Security vulnerabilities and exploits in open source software and "
+            "package ecosystems: CVEs, malicious packages, software supply "
+            "chain attacks, security advisories and patches."
+        ),
         "keywords": [
             "CVE-20", "CVSS score", "NVD vulnerability", "NVD database",
             "open source vulnerability", "open source exploit", "oss vulnerability", "oss exploit",
@@ -197,6 +268,11 @@ CATEGORIES: dict[str, dict] = {
         "scan_description": True,
     },
     "cyber_attacks": {
+        "description": (
+            "Cyberattack incidents and campaigns: data breaches, ransomware, "
+            "nation-state cyber operations, hacking groups, and major "
+            "cybersecurity incidents."
+        ),
         "keywords": [
             "cyberattack", "cyber attack", "cyber-attack",
             "data breach", "security breach", "massive breach",
@@ -218,6 +294,84 @@ CATEGORIES: dict[str, dict] = {
             "dark web marketplace", "darknet marketplace",
         ],
         "gkg_theme_prefixes": ["CYBER_ATTACK"],
+        "scan_description": True,
+    },
+    "geopolitics_conflict": {
+        "description": (
+            "Geopolitics and armed conflict: wars and military operations, "
+            "ceasefires and peace talks, sanctions, coups, interstate tensions, "
+            "major diplomacy, defense alliances and arms transfers."
+        ),
+        "keywords": [
+            "ceasefire", "cease-fire", "airstrike", "air strike", "missile strike",
+            "drone strike", "invasion", "military offensive", "military operation",
+            "artillery", "mobilization", "peace talks", "peace deal", "armistice",
+            "coup", "martial law", "sanctions", "arms deal", "arms transfer",
+            "nato", "security council", "military exercise", "border clash",
+            "territorial dispute", "annexation", "insurgency", "militia",
+            "war crimes", "prisoner exchange", "no-fly zone",
+        ],
+        "gkg_theme_prefixes": [],
+        "scan_description": True,
+    },
+    "energy_climate": {
+        "description": (
+            "Energy and climate: oil and gas markets, OPEC, LNG, electricity "
+            "grids and blackouts, renewables, nuclear power, energy prices and "
+            "security, climate policy and emissions targets, and extreme "
+            "weather framed by its energy or infrastructure impact."
+        ),
+        "keywords": [
+            "oil prices", "crude oil", "opec", "natural gas", "lng",
+            "power grid", "blackout", "power outage", "electricity prices",
+            "renewable energy", "solar power", "wind power", "wind farm",
+            "nuclear plant", "nuclear power", "nuclear reactor",
+            "coal plant", "energy crisis", "energy security",
+            "carbon emissions", "emissions target", "net zero", "net-zero",
+            "climate policy", "climate summit", "climate agreement",
+            "heatwave", "heat wave", "drought", "grid operator",
+            "energy transition", "battery storage", "hydrogen energy",
+        ],
+        "gkg_theme_prefixes": [],
+        "scan_description": True,
+    },
+    "public_health": {
+        "description": (
+            "Public health: disease outbreaks, epidemics, vaccines and drug "
+            "approvals, health agencies and policy, hospital systems, and "
+            "population health threats."
+        ),
+        "keywords": [
+            "outbreak", "epidemic", "pandemic", "vaccine", "vaccination",
+            "drug approval", "fda approval", "clinical trial",
+            "cdc", "world health organization", "public health",
+            "measles", "cholera", "bird flu", "h5n1", "avian influenza",
+            "mpox", "dengue", "malaria", "tuberculosis", "polio",
+            "hospital capacity", "health ministry", "health emergency",
+            "disease surveillance", "quarantine", "antimicrobial resistance",
+        ],
+        "gkg_theme_prefixes": [],
+        "scan_description": True,
+    },
+    # FDA-registered device makers acting AS device companies. Candidates come
+    # from fda_match_cache (name matches), NOT keywords — pill_scorer.py
+    # special-cases candidate_source and applies the semantic gate + anti-query.
+    "meddev_companies": {
+        "judge_strict": True,
+        "description": (
+            "News about medical device manufacturers acting as medical device "
+            "companies: product launches and clearances, device recalls, "
+            "clinical trials, FDA regulatory actions, medtech industry deals "
+            "and partnerships."
+        ),
+        "neg_description": (
+            "Routine stock-market coverage: shares bought or sold by funds, "
+            "13F filings, analyst ratings and price targets, shareholder "
+            "lawsuits, dividend announcements, earnings-preview boilerplate."
+        ),
+        "keywords": [],
+        "candidate_source": "fda_match_cache",
+        "gkg_theme_prefixes": [],
         "scan_description": True,
     },
 }
@@ -455,14 +609,24 @@ def _load_all_categories() -> dict[str, dict]:
         import sqlite3
         udb = sqlite3.connect(str(USERS_DB_PATH))
         udb.row_factory = sqlite3.Row
+        # Keyword pills only — semantic pills have NULL/empty keywords_json and
+        # are maintained by pill_scorer.py, not the keyword automaton. Per-row
+        # guard so one malformed pill can't take down all custom pills.
         for row in udb.execute(
-            "SELECT id, keywords_json, scan_description FROM custom_pills"
+            "SELECT id, keywords_json, scan_description FROM custom_pills "
+            "WHERE COALESCE(pill_type, 'keyword') = 'keyword'"
         ).fetchall():
-            cats[f"custom_{row['id']}"] = {
-                "keywords": _json.loads(row["keywords_json"]),
-                "gkg_theme_prefixes": [],
-                "scan_description": bool(row["scan_description"]),
-            }
+            try:
+                keywords = _json.loads(row["keywords_json"] or "[]")
+                if not keywords:
+                    continue
+                cats[f"custom_{row['id']}"] = {
+                    "keywords": keywords,
+                    "gkg_theme_prefixes": [],
+                    "scan_description": bool(row["scan_description"]),
+                }
+            except Exception:
+                log.warning("skipping malformed custom pill %s", row["id"])
         udb.close()
     except Exception as e:
         log.warning("failed to load custom pills: %s", e)

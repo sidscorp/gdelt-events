@@ -21,7 +21,7 @@
 <h2>How it works</h2>
 <p>Articles are scanned using Aho-Corasick automata — a trie-based algorithm that finds all occurrences of thousands of patterns in a single linear pass. Matches are materialized into indexed cache tables so the dashboard can serve results in under a second. The system maintains a rolling 60-day window and prunes older data to keep storage bounded. New articles are classified every 15 minutes.</p>
 
-<p>Alongside keyword matching, each English article is embedded with a local neural model (nomic-embed-text via Ollama) and indexed in a FAISS vector store. A leader-clustering pass groups articles whose embeddings are near-duplicates into persistent event clusters — this is what powers the rolled-up event cards and their permalinks. The AI briefings are generated on demand from the top events in a view by Google's Gemini 2.5 Flash (via OpenRouter), streamed token-by-token and cached so repeat views load instantly.</p>
+<p>Alongside keyword matching, each English article is embedded with a local neural model (nomic-embed-text via Ollama) and indexed in a FAISS vector store. A leader-clustering pass groups articles whose embeddings are near-duplicates into persistent event clusters — this is what powers the rolled-up event cards and their permalinks. The AI briefings are generated on demand from the top events in a view by GLM-4.7 on Cerebras (via a self-hosted LLM gateway), streamed token-by-token and cached so repeat views load instantly. Topic pills are precision-gated by an LLM judge — see the <a href="/methodology">methodology page</a> for the full logic behind everything displayed.</p>
 
 <h2>The tech stack</h2>
 <ul class="tech-list">

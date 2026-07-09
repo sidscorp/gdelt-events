@@ -31,6 +31,11 @@ def api_pills_create():
     if not name or len(name) > 100:
         return jsonify({"error": "Name required (max 100 chars)"}), 400
 
+    # Self-hosting guardrail: bounded pills per user (each pill = one query
+    # vector + ~100B per tagged article; the cap keeps worst-case trivial).
+    if len(get_user_pills(current_user.id)) >= 10:
+        return jsonify({"error": "Pill limit reached (10 per user) — delete one first"}), 400
+
     if pill_type == "semantic":
         description = (data.get("description") or "").strip()
         if not description or len(description) < 10:
@@ -39,14 +44,15 @@ def api_pills_create():
             return jsonify({"error": "Description max 2000 characters"}), 400
         threshold = data.get("similarity_threshold", 0.55)
         try:
-            threshold = max(0.3, min(0.8, float(threshold)))
+            # 0.45 floor: below that nomic cosine matches are topic soup.
+            threshold = max(0.45, min(0.8, float(threshold)))
         except (TypeError, ValueError):
             threshold = 0.55
-        scan_days = data.get("scan_days", 7)
+        scan_days = data.get("scan_days", 60)
         try:
             scan_days = max(1, min(60, int(scan_days)))
         except (TypeError, ValueError):
-            scan_days = 7
+            scan_days = 60
 
         # Embed the description via rainbow-boi
         import sys, struct

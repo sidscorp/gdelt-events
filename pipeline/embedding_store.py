@@ -190,6 +190,31 @@ def get_active_vectors_and_urls():
     return vectors, urls
 
 
+def iter_active_chunks(chunk_rows: int = 200_000, min_row_index: int = 0):
+    """Yield (urls, vectors, max_row_index) for ACTIVE embeddings with
+    row_index >= min_row_index, in row_index order, memory-bounded.
+    Used by pill_scorer.py (incremental + backfill scoring)."""
+    con = _conn()
+    rows = con.execute(
+        "SELECT url, row_index FROM embeddings "
+        "WHERE status='active' AND row_index >= ? ORDER BY row_index",
+        (min_row_index,),
+    ).fetchall()
+    con.close()
+    if not rows:
+        return
+    with open(VECTORS_BIN, "rb") as f:
+        for i in range(0, len(rows), chunk_rows):
+            chunk = rows[i:i + chunk_rows]
+            vectors = np.zeros((len(chunk), EMBED_DIM), dtype="float32")
+            urls = []
+            for j, row in enumerate(chunk):
+                urls.append(row["url"])
+                f.seek(row["row_index"] * ROW_BYTES)
+                vectors[j] = np.frombuffer(f.read(ROW_BYTES), dtype="float32")
+            yield urls, vectors, chunk[-1]["row_index"]
+
+
 def get_vector_at(row_index: int) -> np.ndarray | None:
     """Read a single vector by row index."""
     if row_index < 0 or row_index >= total_rows():

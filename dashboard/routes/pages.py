@@ -88,3 +88,9 @@ def event_detail(cluster_id):
 @bp.route("/about")
 def about():
     return render_template("about.html")
+
+
+@bp.route("/methodology")
+def methodology():
+    """Transparency: the logic behind everything the dashboard displays."""
+    return render_template("methodology.html")

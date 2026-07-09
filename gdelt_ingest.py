@@ -16,6 +16,7 @@ import logging
 import os
 import shutil
 import sys
+import time
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -160,6 +161,7 @@ def run_ingest(force_prune: bool = False, prune_days: int | None = None) -> None
 
         new_files = download_batch(entries)
         log.info("Downloaded %d new files", len(new_files))
+        data_changed = False
 
         # Load only the newly-downloaded files. The `_ingest_log` table is the
         # source of truth for what has been loaded — no need to scan the whole
@@ -170,6 +172,7 @@ def run_ingest(force_prune: bool = False, prune_days: int | None = None) -> None
                 "Loaded — events: %d, mentions: %d, gkg: %d, errors: %d",
                 summary["events"], summary["mentions"], summary["gkg"], summary["errors"],
             )
+            data_changed = True
 
         # GAL (Global Article List) — broader coverage, no NER. Non-fatal.
         try:
@@ -184,6 +187,8 @@ def run_ingest(force_prune: bool = False, prune_days: int | None = None) -> None
                     gal_summary["gal"], gal_summary["files"],
                     gal_summary["skipped"], gal_summary["errors"],
                 )
+                if gal_summary["gal"]:
+                    data_changed = True
         except Exception:
             log.exception("GAL ingest failed (non-fatal)")
 
@@ -204,6 +209,14 @@ def run_ingest(force_prune: bool = False, prune_days: int | None = None) -> None
         except Exception:
             log.exception("Tagger failed (non-fatal)")
 
+        # Bump the data-version marker AFTER new rows are loaded and tagged, so
+        # the dashboard's cache invalidation (articles.py::_feed_cache_key) only
+        # sees a new version once the data behind it is actually query-ready.
+        if data_changed:
+            try:
+                (DATA_DIR / "data_version.txt").write_text(str(int(time.time())))
+            except Exception:
+                log.exception("Failed to write data_version.txt (non-fatal)")
 
         # FDA regulatory events — polls OpenFDA API every 6 hours.
         # Non-fatal: dashboard view shows cached events if this fails.

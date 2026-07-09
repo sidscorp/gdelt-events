@@ -59,36 +59,80 @@ VIEWS = [
         "id": "fda-medical-devices",
         "name": "Medical Device Companies",
         "description": (
-            "Articles mentioning FDA-registered medical device manufacturers. "
-            "Verified = company name confirmed alongside device context in description. "
-            "Strict = legal names only. Broad = includes abbreviated names."
+            "FDA-registered device manufacturers acting as device companies: "
+            "product launches, clearances, recalls, trials, medtech deals. "
+            "Name matches are semantically gated to filter out stock-market "
+            "noise and incidental mentions."
         ),
-        "kind": "fda_match",
+        "kind": "tag_match",
+        "tag_category": "meddev_companies",
         "default_hours": 24,
-        "default_match_types": ["legal", "contextual"],
-        "available_match_types": [
-            {
-                "id": "verified",
-                "label": "Verified",
-                "description": (
-                    "Company name + medical device keyword confirmed in article description. "
-                    "Highest precision -- filters out incidental name matches."
-                ),
-                "match_types": ["legal", "contextual"],
-            },
-            {
-                "id": "legal",
-                "label": "Strict",
-                "description": "Full legal names only. High precision.",
-                "match_types": ["legal"],
-            },
-            {
-                "id": "broad",
-                "label": "Broad",
-                "description": "Includes base names (Pfizer, Stryker, ...). High recall, more noise.",
-                "match_types": ["legal", "stripped"],
-            },
-        ],
+    },
+    {
+        "id": "geopolitics-conflict",
+        "name": "Geopolitics & Conflict",
+        "description": (
+            "Wars and military operations, ceasefires, sanctions, coups, "
+            "interstate tensions, and major diplomacy."
+        ),
+        "kind": "tag_match",
+        "tag_category": "geopolitics_conflict",
+        "default_hours": 24,
+    },
+    {
+        "id": "energy-climate",
+        "name": "Energy & Climate",
+        "description": (
+            "Oil and gas markets, power grids, renewables, nuclear, energy "
+            "security, climate policy, and extreme weather's energy impact."
+        ),
+        "kind": "tag_match",
+        "tag_category": "energy_climate",
+        "default_hours": 24,
+    },
+    {
+        "id": "public-health",
+        "name": "Public Health",
+        "description": (
+            "Disease outbreaks, vaccines and drug approvals, health agencies "
+            "and policy, hospital systems."
+        ),
+        "kind": "tag_match",
+        "tag_category": "public_health",
+        "default_hours": 24,
+    },
+    {
+        "id": "ai-defense",
+        "name": "AI & Defense",
+        "description": (
+            "Military and defense applications of AI: autonomous weapons, "
+            "defense AI contracts, military AI policy, AI in warfare."
+        ),
+        "kind": "tag_match",
+        "tag_category": "ai_defense",
+        "default_hours": 24,
+    },
+    {
+        "id": "ai-sector-impact",
+        "name": "AI in Industry",
+        "description": (
+            "AI applied in specific industries — healthcare, finance, "
+            "education, manufacturing, agriculture, law, creative work."
+        ),
+        "kind": "tag_match",
+        "tag_category": "ai_sector_impact",
+        "default_hours": 24,
+    },
+    {
+        "id": "semiconductors",
+        "name": "Semiconductors",
+        "description": (
+            "Chipmakers and foundries, fabs, chip supply, export controls, "
+            "process advances, and semiconductor policy."
+        ),
+        "kind": "tag_match",
+        "tag_category": "semiconductors",
+        "default_hours": 24,
     },
     {
         "id": "oss-vulnerabilities",

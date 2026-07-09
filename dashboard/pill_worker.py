@@ -203,18 +203,20 @@ def _is_cancelled(pill_id):
     return row["status"] not in ("queued", "running")
 
 
-def _run_semantic_backfill(pill_id, description_embedding_blob, threshold, scan_days=7):
-    """Backfill a semantic pill by batch-embedding articles and comparing.
+def _run_semantic_backfill(pill_id, description_embedding_blob, threshold, scan_days=60):
+    """Backfill a semantic pill from the EMBEDDING STORE (pre-computed vectors,
+    numpy dot products) instead of re-embedding every article via Ollama —
+    minutes instead of hours, and covers the store's full 60-day window.
 
     Uses a single write connection (same as keyword pills) — DuckDB within
-    one process allows concurrent read+write connections. The dashboard's
-    per-request read connections co-exist with the worker's write connection.
-    Cursor-based pagination avoids OFFSET on the 25M-row GAL table.
+    one process allows concurrent read+write connections.
     """
-    from embedder import embed_texts, cosine_similarities_bulk
+    import numpy as np
+    import embedding_store
 
     category = f"custom_{pill_id}"
-    query_vec = _unpack_embedding(description_embedding_blob)
+    qvec = np.asarray(_unpack_embedding(description_embedding_blob), dtype="float32")
+    qvec = qvec / (np.linalg.norm(qvec) or 1.0)
     t0 = time.time()
 
     _update_job(pill_id, status="running", started_at=time.strftime("%Y-%m-%d %H:%M:%S"))
@@ -229,87 +231,61 @@ def _run_semantic_backfill(pill_id, description_embedding_blob, threshold, scan_
     try:
         con.execute("DELETE FROM article_tags WHERE category = ?", [category])
 
-        # Calculate crawled_at cutoff from scan_days
         from datetime import datetime, timedelta
-        cutoff_dt = datetime.utcnow() - timedelta(days=scan_days)
-        cutoff_ts = int(cutoff_dt.strftime("%Y%m%d%H%M%S"))
-
-        # Estimate rows in scope for progress tracking
-        est_rows = con.execute(
-            "SELECT count(*) FROM gal WHERE language = 'en' AND crawled_at > ?",
-            [cutoff_ts],
-        ).fetchone()[0] or _ESTIMATED_GAL_EN
-        log.info("semantic pill %s: scan_days=%d cutoff=%d est_rows=%d",
-                 pill_id, scan_days, cutoff_ts, est_rows)
+        cutoff_ts = int((datetime.utcnow() - timedelta(days=scan_days))
+                        .strftime("%Y%m%d%H%M%S"))
+        est_rows = embedding_store.active_count() or 1
+        log.info("semantic pill %s: store-backed, scan_days=%d threshold=%.2f est_rows=%d",
+                 pill_id, scan_days, threshold, est_rows)
 
         scanned = matched = 0
-        embed_errors = 0
-        cursor_ts = cutoff_ts
-
-        while True:
+        for urls, vectors, _last_row in embedding_store.iter_active_chunks(chunk_rows=100_000):
             if _is_cancelled(pill_id):
                 log.info("semantic pill %s: cancelled at %d rows", pill_id, scanned)
                 break
+            norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+            norms[norms == 0] = 1.0
+            scores = (vectors / norms) @ qvec
+            hit_idx = np.nonzero(scores >= threshold)[0]
+            scanned += len(urls)
 
-            chunk = con.execute(
-                "SELECT url, crawled_at, title, description FROM gal "
-                "WHERE language = 'en' AND crawled_at > ? "
-                "ORDER BY crawled_at LIMIT ?",
-                [cursor_ts, SEMANTIC_CHUNK],
-            ).fetchall()
-            if not chunk:
-                break
+            if len(hit_idx):
+                hit_urls = [urls[i] for i in hit_idx]
+                hit_score = {urls[i]: float(scores[i]) for i in hit_idx}
+                # crawled_at lookup (gal_recent first, then gal), scan_days-filtered
+                crawled: dict[str, int] = {}
+                for tbl in ("gal_recent", "gal"):
+                    missing = [u for u in hit_urls if u not in crawled]
+                    if not missing:
+                        break
+                    for j in range(0, len(missing), 400):
+                        part = missing[j:j + 400]
+                        ph = ",".join(["?"] * len(part))
+                        try:
+                            for u, ts in con.execute(
+                                f"SELECT url, max(crawled_at) FROM {tbl} "
+                                f"WHERE url IN ({ph}) GROUP BY url", part,
+                            ).fetchall():
+                                crawled[u] = ts
+                        except Exception:
+                            break  # gal_recent may be absent
+                tags = [
+                    (u, "gal", category, "semantic", f"{hit_score[u]:.3f}", crawled[u])
+                    for u in hit_urls
+                    if crawled.get(u) and crawled[u] >= cutoff_ts
+                ]
+                if tags:
+                    matched += len(tags)
+                    con.executemany(
+                        "INSERT INTO article_tags "
+                        "(article_id, source_type, category, matched_via, "
+                        "matched_detail, crawled_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        tags,
+                    )
 
-            cursor_ts = chunk[-1][1]
-
-            texts = []
-            rows_data = []
-            for url, crawled_at, title, description in chunk:
-                scanned += 1
-                text = (title or "")
-                if description:
-                    text += " " + description
-                text = text.strip()
-                if text:
-                    texts.append(text[:512])
-                    rows_data.append((url, crawled_at))
-
-            if texts:
-                try:
-                    doc_vecs = embed_texts(texts)
-                    scores = cosine_similarities_bulk(query_vec, doc_vecs)
-
-                    tags = []
-                    for idx, score in enumerate(scores):
-                        if score >= threshold:
-                            matched += 1
-                            url, crawled_at = rows_data[idx]
-                            tags.append((
-                                url, "gal", category, "semantic",
-                                f"{score:.3f}", crawled_at,
-                            ))
-
-                    if tags:
-                        con.executemany(
-                            "INSERT INTO article_tags "
-                            "(article_id, source_type, category, matched_via, "
-                            "matched_detail, crawled_at) "
-                            "VALUES (?, ?, ?, ?, ?, ?)",
-                            tags,
-                        )
-                except Exception as e:
-                    embed_errors += 1
-                    log.warning("embed error at cursor %s: %s", cursor_ts, e)
-                    if embed_errors > 10:
-                        raise RuntimeError(
-                            f"Too many embedding errors ({embed_errors}), aborting"
-                        )
-
-            pct = min(99, int(scanned / max(est_rows, 1) * 100))
+            pct = min(99, int(scanned / est_rows * 100))
             _update_job(pill_id, progress_pct=pct, rows_scanned=scanned, rows_matched=matched)
-
-            if len(chunk) < SEMANTIC_CHUNK:
-                break
 
         # Set watermark
         max_ts = con.execute(

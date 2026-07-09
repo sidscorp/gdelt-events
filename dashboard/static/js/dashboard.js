@@ -8,7 +8,8 @@ const state = {
   view: '',
   source: 'gal', // 'gal' | 'gkg' | 'all'
   match_types: ['legal'], // ['legal'] = Strict, ['legal','stripped'] = Broad
-  sort: 'newest', // 'newest' | 'oldest'
+  order: 'importance', // 'importance' (default, event-ranked) | 'date'
+  sort: 'newest', // date-direction when order==='date': 'newest' | 'oldest'
   en_only: true, // English-only by default; ?en_only=0 to include all languages
 };
 
@@ -59,6 +60,16 @@ if (_urlParams.get('view')) {
 if (_urlParams.get('en_only') === '0') {
   state.en_only = false;
 }
+if (_urlParams.get('order') === 'date') {
+  state.order = 'date';
+  const _s = _urlParams.get('sort');
+  if (_s === 'oldest' || _s === 'newest') state.sort = _s;
+}
+// Reflect the resolved order/direction in the Sort dropdown.
+(function syncSortSelect() {
+  const sel = document.getElementById('sortSelect');
+  if (sel) sel.value = state.order === 'date' ? state.sort : 'importance';
+})();
 
 // Time pills
 document.getElementById('timePills').addEventListener('click', (e) => {
@@ -71,8 +82,16 @@ document.getElementById('timePills').addEventListener('click', (e) => {
   state.date_to = '';
   document.getElementById('dateFrom').value = '';
   document.getElementById('dateTo').value = '';
+  window.scrollTo({ top: 0 }); // make the transition visible
   fetchArticles();
 });
+
+// Hover-prefetch: warm the snapshot for a time pill before the click lands
+// (current view, hovered hours). ~200-400ms head start on a real click.
+document.getElementById('timePills').addEventListener('pointerenter', (e) => {
+  const el = e.target.closest && e.target.closest('.time-pill');
+  if (el && el.dataset.hours) prefetchCombo(state.view, el.dataset.hours);
+}, true);
 
 // English-only toggle (default on)
 const _enBtn = document.getElementById('enOnlyToggle');
@@ -121,11 +140,21 @@ Object.entries(FILTER_INPUT_MAP).forEach(([id, field]) => {
   const el = document.getElementById(id);
   if (!el) return;
   el.addEventListener('input', (e) => {
-    state[field] = e.target.value;
+    const val = e.target.value;
+    // Free-text search hits an ILIKE scan server-side — a 1-2 char prefix is
+    // never useful and just burns a ~2s query on every keystroke. Wait for a
+    // real prefix (or a full clear) and give it a bit longer to settle.
+    if (field === 'q' && val.trim().length > 0 && val.trim().length < 3) {
+      clearTimeout(debounceTimer);
+      state[field] = val;
+      updateMoreFiltersDot();
+      return; // don't fetch yet — wait for >=3 chars or a clear
+    }
+    state[field] = val;
     state.page = 1;
     updateMoreFiltersDot();
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(fetchArticles, 300);
+    debounceTimer = setTimeout(fetchArticles, field === 'q' ? 450 : 300);
   });
 });
 document.getElementById('languageSelect').addEventListener('change', (e) => {
@@ -134,8 +163,15 @@ document.getElementById('languageSelect').addEventListener('change', (e) => {
   fetchArticles();
 });
 document.getElementById('sortSelect').addEventListener('change', (e) => {
-  state.sort = e.target.value;
+  const v = e.target.value;
+  if (v === 'importance') {
+    state.order = 'importance';
+  } else {
+    state.order = 'date';
+    state.sort = v; // 'newest' | 'oldest'
+  }
   state.page = 1;
+  if (typeof updateUrl === 'function') updateUrl();
   fetchArticles();
 });
 
@@ -158,6 +194,13 @@ function updateUrl() {
     p.delete('match_types');
   }
   if (state.en_only) p.delete('en_only'); else p.set('en_only', '0');
+  // Importance is the default → keep the URL clean; persist only explicit date order.
+  if (state.order === 'date') {
+    p.set('order', 'date');
+    if (state.sort && state.sort !== 'newest') p.set('sort', state.sort); else p.delete('sort');
+  } else {
+    p.delete('order'); p.delete('sort');
+  }
   history.replaceState(null, '', location.pathname + '?' + p.toString());
 }
 
@@ -371,6 +414,21 @@ function renderArticle(a) {
     matchBadge = `<span class="match-badge" title="Matched FDA-registered company: ${esc(a.matched_name)}${a.matched_specialty ? ' — medical specialty: ' + esc(a.matched_specialty) : ''}"><span class="match-label">FDA co.</span> ${esc(a.matched_name)}${specSuffix}${verifiedBadge}</span>`;
   }
 
+  // Transparency: why this article is in the current pill (from article_tags).
+  let whyBadge = '';
+  if (a.inclusion && a.inclusion.via) {
+    const via = a.inclusion.via;
+    const detail = a.inclusion.detail || '';
+    if (via === 'judge') {
+      const [verdict, sim] = detail.split('|');
+      whyBadge = `<span class="why-badge" title="An LLM judge (gpt-oss-120b) read this article and judged it ${esc(verdict || 'relevant')} to this topic${sim ? ' (semantic similarity ' + esc(sim) + ')' : ''}. See /methodology.">&#10003; AI-judged: ${esc(verdict || 'relevant')}</span>`;
+    } else if (via === 'semantic') {
+      whyBadge = `<span class="why-badge" title="Matched this pill's description by meaning (cosine similarity ${esc(detail)}). See /methodology.">semantic match ${esc(detail)}</span>`;
+    } else {
+      whyBadge = `<span class="why-badge" title="Matched via ${esc(via)}: '${esc(detail)}'. Newly-ingested articles are AI-judged within ~15 minutes; non-English articles keep keyword matching. See /methodology.">${esc(via)}: ${esc(detail)}</span>`;
+    }
+  }
+
   let rollupHtml = '';
   if (a.variant_count && a.variant_count > 1) {
     const vid = 'var_' + (a.cluster_id || Math.random().toString(36).slice(2));
@@ -406,7 +464,7 @@ function renderArticle(a) {
         </div>
         <div class="article-title"><a href="${a.url}" target="_blank" rel="noopener">${esc(title)}</a></div>
         ${descHtml}
-        ${matchBadge ? `<div class="match-line">${matchBadge}</div>` : ''}
+        ${matchBadge || whyBadge ? `<div class="match-line">${matchBadge}${whyBadge}</div>` : ''}
         ${rollupHtml}
       </div>
     </div>
@@ -437,11 +495,14 @@ function goPage(p) {
 
 // Instant-paint: persist the last clean (unfiltered, page-1) feed + briefing to
 // localStorage so the app shows content the instant it opens, then refreshes.
-function _snapKey() {
+function _snapKey(overrides) {
+  const view = (overrides && overrides.view !== undefined) ? overrides.view : state.view;
+  const hours = (overrides && overrides.hours !== undefined) ? overrides.hours : state.hours;
   const hasFilters = state.q || state.person || state.org || state.location ||
     state.theme || state.domain || state.outlet || state.date_from || state.date_to || state.page > 1;
   if (hasFilters) return null;
-  return `snap:${state.view}|${state.hours}|${state.en_only ? 1 : 0}`;
+  const ord = state.order === 'date' ? 'date-' + state.sort : 'importance';
+  return `snap:${view}|${hours}|${state.en_only ? 1 : 0}|${ord}`;
 }
 function saveSnapshot() {
   const k = _snapKey(); if (!k) return;
@@ -462,42 +523,215 @@ function restoreSnapshot() {
     const raw = localStorage.getItem(k); if (!raw) return false;
     const s = JSON.parse(raw);
     if (!s.feed || Date.now() - s.ts > 6 * 3600 * 1000) return false; // skip if stale (>6h)
-    document.getElementById('articleList').innerHTML = s.feed;
+    const list = document.getElementById('articleList');
+    list.innerHTML = s.feed;
+    list.classList.remove('is-stale');
+    list.dataset.snapKey = k;
     if (s.briefingShown && s.briefing) {
       document.getElementById('briefingPanel').style.display = '';
-      document.getElementById('briefingText').innerHTML = s.briefing;
+      const bt = document.getElementById('briefingText');
+      bt.innerHTML = s.briefing;
+      bt.dataset.key = `${state.view}|${state.hours}`; // lets fetchBriefing keep it visible
       document.getElementById('briefingMeta').textContent = s.briefingMeta || '';
     }
     return true;
   } catch (e) { return false; }
 }
 
+// Prefetch (view,hours) combos into the snapshot store WITHOUT touching the
+// DOM, so hovering a pill (or idling on page load) can make the eventual
+// click instant-paint. Never overwrites an already-fresh (<6h) snapshot —
+// a real visit's snapshot (with its briefing) always wins over a prefetch.
+const _prefetchInFlight = new Set();
+async function prefetchCombo(view, hours) {
+  const key = _snapKey({ view, hours });
+  if (!key || _prefetchInFlight.has(key)) return;
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw) {
+      const s = JSON.parse(raw);
+      if (s.feed && Date.now() - s.ts < 6 * 3600 * 1000) return; // already fresh
+    }
+  } catch (e) {}
+  _prefetchInFlight.add(key);
+  try {
+    const params = buildArticleParams(Object.assign({}, state, { view, hours, page: 1 }));
+    const resp = await fetch(`/api/articles?${params}`);
+    if (!resp.ok) return;
+    const data = await resp.json();
+    if (!data.articles || !data.articles.length) return;
+    localStorage.setItem(key, JSON.stringify({
+      ts: Date.now(),
+      feed: data.articles.map(renderArticle).join(''),
+      briefing: '', briefingMeta: '', briefingShown: false,
+    }));
+  } catch (e) {
+    // best-effort background warm — a failure here is invisible to the user
+  } finally {
+    _prefetchInFlight.delete(key);
+  }
+}
+
+// --- Transparency: "how this was made" for the AI briefing -----------------
+async function showBriefingInfo() {
+  const params = new URLSearchParams();
+  if (state.view) params.set('view', state.view);
+  params.set('hours', state.hours || 24);
+  let data;
+  try {
+    const resp = await fetch(`/api/briefing_meta?${params}`);
+    data = await resp.json();
+    if (!resp.ok) throw new Error(data.error || 'no meta');
+  } catch (err) {
+    alert('No generation details available yet — open the briefing first. (' + err.message + ')');
+    return;
+  }
+  const m = data.meta || {};
+  const age = data.age_s != null ? (data.age_s < 90 ? `${data.age_s}s ago` : `${Math.round(data.age_s / 60)}m ago`) : '?';
+  const srcRows = (data.sources || []).map(s =>
+    `<tr><td style="text-align:right;color:var(--text-tertiary);padding-right:.5rem;">${s.n}</td>` +
+    `<td style="padding-right:.5rem;white-space:nowrap;color:var(--accent-brand);">${s.n_sources || 1}&times;</td>` +
+    `<td><a href="${esc(s.link)}" target="_blank" rel="noopener">${esc(s.title || s.link)}</a></td></tr>`
+  ).join('');
+  const cont = (m.continuity_titles || []).map(t => `<li>${esc(t)}</li>`).join('');
+  const threads = (m.threads_used || []).map(t =>
+    `<li><strong>${esc(t.title || '')}</strong> (since ${esc(t.first_seen || '?')}): ${esc(t.summary || '')}</li>`).join('');
+
+  const modal = document.createElement('div');
+  modal.className = 'pill-modal';
+  modal.innerHTML = `
+    <div class="pill-modal-content" style="max-width:760px;max-height:85vh;overflow-y:auto;">
+      <h3>How this briefing was made</h3>
+      <div style="font-size:0.82rem;line-height:1.5;">
+        <p><strong>Model:</strong> ${esc(m.model || 'unknown (generated before metadata capture)')} ·
+           <strong>Generated:</strong> ${esc(data.generated_at || '?')} UTC (${age}) ·
+           <strong>Cache:</strong> ${m.cache_ttl_s ? Math.round(m.cache_ttl_s / 60) + ' min' : '45 min'}</p>
+        <p>The briefing summarizes the window's <strong>top ${data.article_count || '?'} events ranked by the same
+           Importance score as the feed</strong> (coverage 0.5 &middot; recency 0.3 &middot; velocity 0.2 —
+           <a href="/methodology" target="_blank">full methodology</a>).</p>
+        ${cont ? `<details><summary style="cursor:pointer;">Continuity: stories the previous briefing covered (${(m.continuity_titles || []).length})</summary><ul style="margin:.4rem 0 .4rem 1.1rem;">${cont}</ul></details>` : ''}
+        ${threads ? `<details><summary style="cursor:pointer;">Ongoing story threads it was tracking (${(m.threads_used || []).length})</summary><ul style="margin:.4rem 0 .4rem 1.1rem;">${threads}</ul></details>` : ''}
+        <details><summary style="cursor:pointer;">The ${(data.sources || []).length} ranked source events it was given</summary>
+          <div style="max-height:220px;overflow-y:auto;margin:.4rem 0;"><table style="font-size:0.78rem;border-collapse:collapse;">${srcRows}</table></div>
+        </details>
+        ${m.prompt ? `<details><summary style="cursor:pointer;"><strong>The verbatim prompt</strong> (exactly what the model received)</summary>
+          <pre style="white-space:pre-wrap;font-size:0.72rem;max-height:300px;overflow-y:auto;background:var(--bg,rgba(127,127,127,.08));padding:.6rem;border-radius:6px;">${esc(m.prompt)}</pre>
+        </details>` : '<p style="color:var(--text-tertiary);">Prompt not stored for this briefing (generated before metadata capture) — refresh the briefing to capture it.</p>'}
+      </div>
+      <div class="pill-modal-actions">
+        <button class="btn-cancel" onclick="this.closest('.pill-modal').remove()">Close</button>
+      </div>
+    </div>`;
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+}
+
+// Transparency: plain-words explanation of the Importance ordering.
+function showSortInfo(ev) {
+  ev.stopPropagation();
+  const tip = document.createElement('div');
+  tip.className = 'pill-modal';
+  tip.innerHTML = `
+    <div class="pill-modal-content" style="max-width:460px;">
+      <h3>How "Importance" ordering works</h3>
+      <div style="font-size:0.84rem;line-height:1.55;">
+        <p>Every event in your time window gets a score:</p>
+        <ul style="margin:0 0 .6rem 1.1rem;">
+          <li><strong>Coverage (50%)</strong> — how many outlets reported it</li>
+          <li><strong>Recency (30%)</strong> — newer events score higher (12h decay)</li>
+          <li><strong>Velocity (20%)</strong> — how fast coverage is growing</li>
+        </ul>
+        <p>No editors, no personalization — everyone sees the same ranking.
+           "Newest/Oldest" simply sort by crawl time.
+           <a href="/methodology" target="_blank">Full methodology &rarr;</a></p>
+      </div>
+      <div class="pill-modal-actions">
+        <button class="btn-cancel" onclick="this.closest('.pill-modal').remove()">Close</button>
+      </div>
+    </div>`;
+  tip.addEventListener('click', (e) => { if (e.target === tip) tip.remove(); });
+  document.body.appendChild(tip);
+}
+
+// Skeleton placeholder cards shown while a different view/window loads —
+// honest "new content coming" instead of another view's stale articles.
+function skeletonCards(n = 8) {
+  const card =
+    '<li class="skeleton-card" aria-hidden="true">' +
+      '<div class="skel-block skel-thumb"></div>' +
+      '<div class="skel-lines">' +
+        '<div class="skel-block skel-line w85"></div>' +
+        '<div class="skel-block skel-line w55"></div>' +
+        '<div class="skel-block skel-line thin w95"></div>' +
+        '<div class="skel-block skel-line thin w70"></div>' +
+        '<div class="skel-block skel-line thin w35"></div>' +
+      '</div>' +
+    '</li>';
+  return card.repeat(n);
+}
+
+// Build /api/articles query params from a state-like object. Shared by
+// fetchArticles (full state) and prefetchCombo (a minimal {view,hours}
+// override layered on the current state) so the two never drift apart.
+function buildArticleParams(s) {
+  const params = new URLSearchParams();
+  if (s.hours) params.set('hours', s.hours);
+  if (s.view) params.set('view', s.view);
+  if (s.match_types && s.match_types.length) {
+    params.set('match_types', s.match_types.join(','));
+  }
+  if (s.q) params.set('q', s.q);
+  if (s.title) params.set('title', s.title);
+  if (s.description) params.set('description', s.description);
+  if (s.person) params.set('person', s.person);
+  if (s.org) params.set('org', s.org);
+  if (s.location) params.set('location', s.location);
+  if (s.theme) params.set('theme', s.theme);
+  if (s.domain) params.set('domain', s.domain);
+  if (s.outlet) params.set('outlet', s.outlet);
+  if (s.language) params.set('language', s.language);
+  params.set('en_only', s.en_only ? '1' : '0');
+  if (s.date_from) params.set('date_from', s.date_from);
+  if (s.date_to) params.set('date_to', s.date_to);
+  // Importance is the backend default → send nothing so the key matches the
+  // pre-warmed feed. Only the explicit date order (and its direction) is sent.
+  if (s.order === 'date') {
+    params.set('order', 'date');
+    if (s.sort && s.sort !== 'newest') params.set('sort', s.sort);
+  }
+  params.set('page', s.page || 1);
+  params.set('per_page', 50);
+  return params;
+}
+
 async function fetchArticles() {
   renderActiveFilters();
+
+  // --- Switch-aware loading state. Runs BEFORE the briefing kicks off so a
+  // snapshot paint can restore the matching briefing too. Three cases:
+  //   1. snapshot exists for the target combo  -> instant-paint, quiet refresh
+  //   2. different combo, no snapshot          -> skeleton cards
+  //   3. same combo (filters/auto-refresh)     -> keep content, dim as stale
+  const list = document.getElementById('articleList');
+  const snapKey = _snapKey(); // non-null only for clean page-1 views
+  const effKey = snapKey || `filtered:${state.view}|${state.hours}`;
+  const prevKey = list.dataset.snapKey || '';
+  let painted = false;
+  if (snapKey && snapKey !== prevKey) painted = restoreSnapshot();
+  if (!painted) {
+    if (effKey !== prevKey || !list.querySelector('li.article')) {
+      list.classList.remove('is-stale');
+      list.innerHTML = skeletonCards();
+      list.classList.add('anim-next'); // animate the next real render in
+    } else {
+      list.classList.add('is-stale');
+    }
+  }
+  list.dataset.snapKey = effKey;
+
   if (typeof fetchBriefing === "function") fetchBriefing();
 
-  const params = new URLSearchParams();
-  if (state.hours) params.set('hours', state.hours);
-  if (state.view) params.set('view', state.view);
-  if (state.match_types && state.match_types.length) {
-    params.set('match_types', state.match_types.join(','));
-  }
-  if (state.q) params.set('q', state.q);
-  if (state.title) params.set('title', state.title);
-  if (state.description) params.set('description', state.description);
-  if (state.person) params.set('person', state.person);
-  if (state.org) params.set('org', state.org);
-  if (state.location) params.set('location', state.location);
-  if (state.theme) params.set('theme', state.theme);
-  if (state.domain) params.set('domain', state.domain);
-  if (state.outlet) params.set('outlet', state.outlet);
-  if (state.language) params.set('language', state.language);
-  params.set('en_only', state.en_only ? '1' : '0');
-  if (state.date_from) params.set('date_from', state.date_from);
-  if (state.date_to) params.set('date_to', state.date_to);
-  if (state.sort && state.sort !== 'newest') params.set('sort', state.sort);
-  params.set('page', state.page);
-  params.set('per_page', 50);
+  const params = buildArticleParams(state);
 
   if (currentFetchController) {
     try { currentFetchController.abort(); } catch (_) {}
@@ -514,22 +748,16 @@ async function fetchArticles() {
     try { controller.abort('client-timeout'); } catch (_) {}
   }, 45000);
 
-  const list = document.getElementById('articleList');
   const fetchStart = performance.now();
-  // Keep existing content visible while refreshing (restored snapshot, previous
-  // render, or auto-refresh) — only show the full spinner on a truly empty list.
-  const hasContent = !!list.querySelector('li.article');
-  if (!hasContent) {
-    list.innerHTML = '<li class="loading"><span class="spinner"></span>Loading articles…<span class="loading-elapsed" id="loadElapsed">0.0s elapsed</span></li>';
-  }
   document.body.classList.add('fetching');
   document.getElementById('topProgress').classList.add('active');
-  const elapsedEl = document.getElementById('loadElapsed');
+  // Elapsed feedback lives in the results-meta line (works alongside skeletons
+  // and kept-visible content alike).
+  const resultsMetaEl = document.getElementById('resultsMeta');
   currentFetchTimer = setInterval(() => {
     if (myGen !== currentFetchGen) { clearInterval(currentFetchTimer); return; }
-    if (!elapsedEl || !elapsedEl.isConnected) { clearInterval(currentFetchTimer); return; }
     const s = ((performance.now() - fetchStart) / 1000).toFixed(1);
-    elapsedEl.textContent = `${s}s elapsed${s > 5 ? ' — still working' : ''}`;
+    if (resultsMetaEl) resultsMetaEl.textContent = `Loading… ${s}s${s > 5 ? ' — still working' : ''}`;
   }, 100);
   const finishLoading = () => {
     if (myGen !== currentFetchGen) return; // superseded, leave UI alone
@@ -537,6 +765,8 @@ async function fetchArticles() {
     clearTimeout(hardTimeout);
     document.body.classList.remove('fetching');
     document.getElementById('topProgress').classList.remove('active');
+    list.classList.remove('is-stale');
+    if (resultsMetaEl && /^Loading…/.test(resultsMetaEl.textContent)) resultsMetaEl.textContent = '';
     if (currentFetchController === controller) currentFetchController = null;
   };
 
@@ -594,6 +824,11 @@ async function fetchArticles() {
       }
       window.__widenFrom = null;
       list.innerHTML = noticeHtml + data.articles.map(renderArticle).join('');
+      if (list.classList.contains('anim-next')) {
+        list.classList.remove('anim-next');
+        list.classList.add('anim-in'); // staggered card entrance (CSS)
+        setTimeout(() => list.classList.remove('anim-in'), 700);
+      }
       if (window.perfMark) {
         window.perfMark('feed_ms', performance.now() - fetchStart);
         if (!window.__ttaSent) { window.__ttaSent = true; window.perfMark('time_to_articles', performance.now()); }
@@ -690,6 +925,13 @@ async function fetchViews() {
       if (v.description) btn.dataset.tip = v.description;
       btn.dataset.viewId = v.id;
 
+      // Hover-prefetch: warm the snapshot for what a click would actually
+      // select (mirrors the click handler's default_hours snap below).
+      btn.addEventListener('pointerenter', () => {
+        if (state.view === v.id) return; // hovering the active pill == deselect, nothing to warm
+        prefetchCombo(v.id, v.default_hours ? String(v.default_hours) : state.hours);
+      });
+
       const infoBtn = document.createElement('button');
       infoBtn.className = 'pill-info-btn';
       infoBtn.textContent = '?';
@@ -737,6 +979,7 @@ async function fetchViews() {
         });
         renderMatchProfile();
         updateUrl();
+        window.scrollTo({ top: 0 }); // make the transition visible
         fetchArticles();
       });
       if (v.custom) {
@@ -785,7 +1028,9 @@ async function fetchViews() {
         (data.user.is_admin ? ` <a href="/admin/users" style="color:var(--text-secondary);text-decoration:none;">Admin</a>` : '') +
         ` <a href="/logout" style="color:var(--text-tertiary);text-decoration:none;">Logout (${data.user.display_name})</a>`;
     } else {
-      navAuth.innerHTML = '';  // login/register hidden temporarily
+      // Discreet sign-in link — unlocks custom pills ("+ New" in the pill row).
+      navAuth.innerHTML =
+        `<a href="/login" style="color:var(--text-secondary);text-decoration:none;">Sign in</a>`;
     }
   } catch (err) {
     document.getElementById('viewsBar').innerHTML = '';
@@ -835,14 +1080,36 @@ function showNewPillModal() {
   modal.innerHTML = `
     <div class="pill-modal-content">
       <h3>Create Custom Pill</h3>
+      <div class="pill-mode-toggle" style="display:flex;gap:0.4rem;margin-bottom:0.7rem;">
+        <button type="button" id="pillModeSem" class="profile-seg active" onclick="setPillMode('semantic')">Describe it</button>
+        <button type="button" id="pillModeKw" class="profile-seg" onclick="setPillMode('keyword')">Keywords</button>
+      </div>
       <label>Pill name</label>
-      <input type="text" id="newPillName" placeholder="e.g. Semiconductor Supply" maxlength="100">
-      <label>Keywords</label>
-      <textarea id="newPillKeywords" placeholder="chip, semiconductor, TSMC, fab, wafer, silicon"></textarea>
-      <div class="hint">Comma-separated. Min 2, max 200. Articles matching any keyword will be shown.</div>
-      <label style="display:flex;align-items:center;gap:0.4rem;margin-top:0.6rem;text-transform:none;letter-spacing:0;">
-        <input type="checkbox" id="newPillScanDesc" checked> Also scan article descriptions (recommended)
-      </label>
+      <input type="text" id="newPillName" placeholder="e.g. GLP-1 & Obesity Medicine" maxlength="100">
+
+      <div id="pillSemFields">
+        <label>Describe the topic</label>
+        <textarea id="newPillDesc" maxlength="2000" placeholder="News about GLP-1 drugs, weight-loss medications, and obesity medicine — approvals, trials, insurance coverage, makers like Novo Nordisk and Eli Lilly."></textarea>
+        <div class="hint">Articles are matched by meaning, not exact words. 1-3 sentences works best.</div>
+        <label>Match strictness</label>
+        <select id="newPillStrict">
+          <option value="0.48">Broad — more articles, more noise</option>
+          <option value="0.55" selected>Balanced</option>
+          <option value="0.65">Strict — fewer, highly on-topic</option>
+        </select>
+        <button type="button" class="btn-cancel" style="margin-top:0.5rem;" onclick="previewPill()">Preview matches</button>
+        <div id="pillPreview" style="max-height:180px;overflow-y:auto;font-size:0.78rem;margin-top:0.4rem;"></div>
+      </div>
+
+      <div id="pillKwFields" style="display:none;">
+        <label>Keywords</label>
+        <textarea id="newPillKeywords" placeholder="chip, semiconductor, TSMC, fab, wafer, silicon"></textarea>
+        <div class="hint">Comma-separated. Min 2, max 200. Articles matching any keyword will be shown.</div>
+        <label style="display:flex;align-items:center;gap:0.4rem;margin-top:0.6rem;text-transform:none;letter-spacing:0;">
+          <input type="checkbox" id="newPillScanDesc" checked> Also scan article descriptions (recommended)
+        </label>
+      </div>
+
       <div class="pill-modal-actions">
         <button class="btn-cancel" onclick="this.closest('.pill-modal').remove()">Cancel</button>
         <button class="btn-create" onclick="createPill()">Create</button>
@@ -854,19 +1121,59 @@ function showNewPillModal() {
   document.body.appendChild(modal);
 }
 
+function setPillMode(mode) {
+  window.__pillMode = mode;
+  document.getElementById('pillSemFields').style.display = mode === 'semantic' ? '' : 'none';
+  document.getElementById('pillKwFields').style.display = mode === 'keyword' ? '' : 'none';
+  document.getElementById('pillModeSem').classList.toggle('active', mode === 'semantic');
+  document.getElementById('pillModeKw').classList.toggle('active', mode === 'keyword');
+}
+
+// Live preview via the existing semantic-search endpoint — shows what the
+// description would match BEFORE creating the pill.
+async function previewPill() {
+  const desc = document.getElementById('newPillDesc').value.trim();
+  const box = document.getElementById('pillPreview');
+  if (desc.length < 10) { box.textContent = 'Describe the topic first (10+ chars).'; return; }
+  box.textContent = 'Searching…';
+  try {
+    const resp = await fetch(`/api/semantic_search?q=${encodeURIComponent(desc)}&per_page=10&hours=168`);
+    const data = await resp.json();
+    const arts = data.articles || [];
+    if (!arts.length) { box.textContent = 'No matches in the last week — try a broader description.'; return; }
+    box.innerHTML = arts.map(a =>
+      `<div style="padding:0.25rem 0;border-top:1px solid var(--border);">${esc(a.title || a.url)}</div>`
+    ).join('');
+  } catch (err) {
+    box.textContent = 'Preview failed: ' + err.message;
+  }
+}
+
 async function createPill() {
   const name = document.getElementById('newPillName').value.trim();
-  const keywords = document.getElementById('newPillKeywords').value.trim();
-  const scanDesc = document.getElementById('newPillScanDesc').checked;
   const errEl = document.getElementById('newPillError');
   if (!name) { errEl.textContent = 'Name required.'; return; }
-  if (!keywords) { errEl.textContent = 'Keywords required.'; return; }
+
+  const mode = window.__pillMode || 'semantic';
+  let body;
+  if (mode === 'semantic') {
+    const description = document.getElementById('newPillDesc').value.trim();
+    if (description.length < 10) { errEl.textContent = 'Description required (10+ chars).'; return; }
+    body = {
+      name, pill_type: 'semantic', description,
+      similarity_threshold: parseFloat(document.getElementById('newPillStrict').value),
+    };
+  } else {
+    const keywords = document.getElementById('newPillKeywords').value.trim();
+    if (!keywords) { errEl.textContent = 'Keywords required.'; return; }
+    body = { name, keywords, scan_description: document.getElementById('newPillScanDesc').checked };
+  }
 
   try {
     const resp = await fetch('/api/pills', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ name, keywords, scan_description: scanDesc }),
+      body: JSON.stringify(body),
     });
     const data = await resp.json();
     if (!resp.ok) { errEl.textContent = data.error || 'Failed'; return; }
@@ -911,6 +1218,32 @@ fetchStats();
 fetchGalFacets();
 fetchArticles().catch(e => console.error("fetchArticles:", e));
 
+// Idle prefetch: once the page has settled, quietly warm all curated pills'
+// default combos so a first-of-session pill click instant-paints from a
+// snapshot instead of hitting skeletons. Polls for fetchViews() to have
+// populated viewsById (it's async and may not have resolved yet).
+(function idlePrefetchPills() {
+  const startedAt = performance.now();
+  function tryStart() {
+    const ids = Object.keys(viewsById);
+    if (!ids.length) {
+      if (performance.now() - startedAt > 10000) return; // give up after 10s
+      setTimeout(tryStart, 500);
+      return;
+    }
+    let i = 0;
+    (function next() {
+      if (i >= ids.length) return;
+      const v = viewsById[ids[i++]];
+      if (v && v.id !== state.view) {
+        prefetchCombo(v.id, v.default_hours ? String(v.default_hours) : state.hours);
+      }
+      setTimeout(next, 800);
+    })();
+  }
+  setTimeout(tryStart, 3000);
+})();
+
 // When the app/tab is reopened, refresh in the background (content stays visible).
 let _lastRefresh = Date.now();
 addEventListener('visibilitychange', () => {
@@ -928,7 +1261,7 @@ addEventListener('visibilitychange', () => {
 setInterval(() => {
   if (document.hidden) return;
   fetchStats();
-  if (!currentFetchController && state.page === 1 && !state.view) {
+  if (!currentFetchController && state.page === 1 && !state.view && !state.q) {
     fetchArticles();
   }
 }, 60000);
@@ -936,6 +1269,7 @@ setInterval(() => {
 // Auto-refresh briefing every 15 min (matches cache TTL)
 setInterval(() => {
   if (document.hidden) return;
+  if (state.q) return;  // briefing is hidden during search; don't refetch
   _briefingView = null;  // force re-fetch
   fetchBriefing();
 }, 900000);

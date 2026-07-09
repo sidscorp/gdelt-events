@@ -214,18 +214,32 @@ def api_pill_info(view_id):
 
     elif view["kind"] == "tag_match":
         cat = view.get("tag_category", "")
+        info["description"] = view.get("description", "")
         try:
             import importlib, sys
-            parent = str(Path(__file__).resolve().parent.parent)
-            if parent not in sys.path:
-                sys.path.insert(0, parent)
+            # repo root = routes/ -> dashboard/ -> repo (this broke silently
+            # when the route moved from dashboard/app.py into dashboard/routes/)
+            repo_root = str(Path(__file__).resolve().parent.parent.parent)
+            if repo_root not in sys.path:
+                sys.path.insert(0, repo_root)
             tagger = importlib.import_module("pipeline.tagger")
             cat_conf = tagger.CATEGORIES.get(cat, {})
             info["keywords"] = sorted(cat_conf.get("keywords", []))
             info["gkg_theme_prefixes"] = cat_conf.get("gkg_theme_prefixes", [])
             info["scan_description"] = cat_conf.get("scan_description", False)
-        except Exception:
+            # Judge-gated pills (July 2026): expose the actual inclusion criteria
+            if cat_conf.get("description"):
+                info["judge_criteria"] = cat_conf["description"]
+                info["judge_model"] = "gpt-oss-120b"
+                info["judge_strict"] = bool(cat_conf.get("judge_strict"))
+                info["neg_criteria"] = cat_conf.get("neg_description")
+            if cat_conf.get("candidate_source") == "fda_match_cache":
+                info["candidate_source"] = (
+                    "Name matches against ~8,500 FDA-registered medical device "
+                    "manufacturers (fda_match_cache)")
+        except Exception as e:
             info["keywords"] = []
+            info["error_detail"] = str(e)[:120]
 
     return jsonify(info)
 

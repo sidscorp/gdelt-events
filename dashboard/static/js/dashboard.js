@@ -109,11 +109,15 @@ _enBtn.addEventListener('click', () => {
   fetchArticles();
 });
 
-// Fast, styled hover tooltip for view pills (shows the view's description)
+// Fast, styled hover tooltip for view pills (shows the view's description).
+// Hover-capable pointers only: on touch devices a tap fires emulated
+// mouseover with no mouseout, leaving the tip stuck until the next tap.
 const _pillTip = document.createElement('div');
 _pillTip.className = 'pill-tip';
 document.body.appendChild(_pillTip);
+const _hoverCapable = window.matchMedia('(hover: hover) and (pointer: fine)').matches;
 document.addEventListener('mouseover', (e) => {
+  if (!_hoverCapable) return;
   const el = e.target.closest && e.target.closest('.view-pill[data-tip]');
   if (!el) return;
   _pillTip.textContent = el.dataset.tip;
@@ -125,6 +129,8 @@ document.addEventListener('mouseover', (e) => {
 document.addEventListener('mouseout', (e) => {
   if (e.target.closest && e.target.closest('.view-pill[data-tip]')) _pillTip.classList.remove('show');
 });
+// Any click/tap dismisses the tip (covers hybrid touch+mouse devices too).
+document.addEventListener('click', () => _pillTip.classList.remove('show'));
 
 // Filter inputs. Map DOM id -> state field name.
 const FILTER_INPUT_MAP = {
@@ -1045,8 +1051,19 @@ async function showPillInfo(viewId) {
     let html = `<button class="pill-info-close" onclick="this.closest('.pill-info-modal').remove()">&times;</button>`;
     html += `<h3>${info.name || viewId}</h3>`;
     html += `<p style="color:var(--text-secondary);font-size:0.78rem;">${info.description || ''}</p>`;
+    if (info.judge_criteria) {
+      html += `<strong>How articles get in:</strong>` +
+        `<p style="font-size:0.76rem;color:var(--text-secondary);margin:0.3rem 0;">` +
+        `Candidate articles (matched by the keywords below${info.candidate_source ? ', or by ' + esc(info.candidate_source) : ', or by semantic similarity'}) ` +
+        `are each read by an AI judge (${esc(info.judge_model || 'LLM')}) and only included if they match this definition` +
+        `${info.judge_strict ? ' <em>(strict — borderline matches are rejected)</em>' : ''}:</p>` +
+        `<blockquote style="font-size:0.76rem;color:var(--text-secondary);border-left:2px solid var(--accent-brand);margin:0.3rem 0;padding-left:0.6rem;">${esc(info.judge_criteria)}</blockquote>`;
+      if (info.neg_criteria) {
+        html += `<p style="font-size:0.72rem;color:var(--text-tertiary);margin:0.3rem 0;">Explicitly excluded: ${esc(info.neg_criteria)}</p>`;
+      }
+    }
     if (info.keywords && info.keywords.length) {
-      html += `<strong>Keywords (${info.keywords.length}):</strong><div class="kw-list">`;
+      html += `<strong>Nomination keywords (${info.keywords.length}):</strong><div class="kw-list">`;
       html += info.keywords.map(k => `<span class="kw-tag">${k}</span>`).join('');
       html += `</div>`;
     }

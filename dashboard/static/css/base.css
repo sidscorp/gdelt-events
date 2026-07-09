@@ -68,3 +68,14 @@ body.dark input, body.dark select, body.dark textarea {
   color: var(--text);
   border-color: var(--border);
 }
+
+/* PWA standalone mode: keep content clear of the status bar / notch. The
+   status bar is black-translucent (page renders underneath it), so pad the
+   body by the device's safe-area inset — browsers ignore this entirely. */
+@media (display-mode: standalone) {
+  body {
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+  }
+}

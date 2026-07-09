@@ -965,3 +965,8 @@ body.dark .lang-toggle.active { color: #1a1714; }
 }
 .why-badge:hover { color: var(--accent-brand); border-color: var(--accent-brand); }
 .briefing-head { display: flex; align-items: center; }
+
+/* PWA standalone: the fixed top progress bar sits below the status bar */
+@media (display-mode: standalone) {
+  #topProgress { top: env(safe-area-inset-top, 0px); }
+}

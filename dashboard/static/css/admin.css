@@ -7,7 +7,7 @@ td { padding: 0.5rem; border-bottom: 1px solid #eee; }
 .status-pending { color: #b87300; }
 .status-approved { color: #2d7a3a; }
 form { display: inline; }
-button { font-family: inherit; font-size: 0.75rem; padding: 0.2rem 0.5rem; border: 1px solid var(--border); background: #fff; cursor: pointer; }
+button { font-family: inherit; font-size: 0.75rem; padding: 0.2rem 0.5rem; border: 1px solid var(--border); background: var(--surface); cursor: pointer; }
 button:hover { background: var(--text); color: var(--bg); }
 .btn-reject { color: #a33; border-color: #a33; }
 .links { margin-top: 2rem; font-size: 0.78rem; }

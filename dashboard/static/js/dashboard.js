@@ -1131,7 +1131,7 @@ function showNewPillModal() {
         <button class="btn-cancel" onclick="this.closest('.pill-modal').remove()">Cancel</button>
         <button class="btn-create" onclick="createPill()">Create</button>
       </div>
-      <div id="newPillError" style="color:#a33;font-size:0.78rem;margin-top:0.5rem;"></div>
+      <div id="newPillError" style="color:var(--tone-neg);font-size:0.78rem;margin-top:0.5rem;"></div>
     </div>
   `;
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });

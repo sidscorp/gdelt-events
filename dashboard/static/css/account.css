@@ -5,7 +5,7 @@ h2 { font-size: 1rem; margin-top: 2rem; margin-bottom: 0.6rem; padding-top: 1rem
 h2:first-of-type { border-top: none; padding-top: 0; }
 form { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 1rem; }
 label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); }
-input { font-family: inherit; font-size: 0.88rem; padding: 0.45rem; border: 1px solid var(--border); background: #fff; }
+input { font-family: inherit; font-size: 0.88rem; padding: 0.45rem; border: 1px solid var(--border); background: var(--surface); }
 input:focus { outline: none; border-color: var(--text); }
 button { font-family: inherit; font-size: 0.82rem; padding: 0.45rem 1rem; background: var(--text); color: var(--bg); border: none; cursor: pointer; align-self: flex-start; }
 button:hover { opacity: 0.85; }

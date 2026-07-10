@@ -6,6 +6,7 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
+  color-scheme: light;
   --text: #111;
   --text-secondary: #555;
   --text-tertiary: #888;
@@ -30,6 +31,7 @@
 }
 
 body.dark {
+  color-scheme: dark;
   --text: #e8e4df;
   --text-secondary: #a8a29e;
   --text-tertiary: #78716c;

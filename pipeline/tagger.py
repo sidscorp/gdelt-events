@@ -353,27 +353,6 @@ CATEGORIES: dict[str, dict] = {
         "gkg_theme_prefixes": [],
         "scan_description": True,
     },
-    # FDA-registered device makers acting AS device companies. Candidates come
-    # from fda_match_cache (name matches), NOT keywords — pill_scorer.py
-    # special-cases candidate_source and applies the semantic gate + anti-query.
-    "meddev_companies": {
-        "judge_strict": True,
-        "description": (
-            "News about medical device manufacturers acting as medical device "
-            "companies: product launches and clearances, device recalls, "
-            "clinical trials, FDA regulatory actions, medtech industry deals "
-            "and partnerships."
-        ),
-        "neg_description": (
-            "Routine stock-market coverage: shares bought or sold by funds, "
-            "13F filings, analyst ratings and price targets, shareholder "
-            "lawsuits, dividend announcements, earnings-preview boilerplate."
-        ),
-        "keywords": [],
-        "candidate_source": "fda_match_cache",
-        "gkg_theme_prefixes": [],
-        "scan_description": True,
-    },
     # --- Federal health agencies ---
     "fda_agency": {
         "description": (

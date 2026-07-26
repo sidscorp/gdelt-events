@@ -97,10 +97,10 @@ def test_views_endpoint():
     """Smoke: /api/views returns the registered view list with default_hours."""
     data = _get_json(f"{BASE}/api/views", timeout=10)
     assert "views" in data and len(data["views"]) >= 1
-    fda = next((v for v in data["views"] if v["id"] == "fda-medical-devices"), None)
-    assert fda is not None, "fda-medical-devices view missing"
-    assert fda.get("default_hours") == 24
-    assert fda.get("kind") == "fda_match"
+    devices = next((v for v in data["views"] if v["id"] == "medical-devices"), None)
+    assert devices is not None, "medical-devices view missing"
+    assert devices.get("default_hours") == 24
+    assert devices.get("kind") == "tag_match"
 
 
 # -----------------------------------------------------------------------
@@ -155,19 +155,6 @@ class TestArticleRelevance:
             f"medical devices precision {precision:.0%} < 60%"
         )
 
-    def test_fda_strict_returns_company_names(self):
-        data = _fetch_articles({
-            "source": "gal", "view": "fda-medical-devices",
-            "match_types": "legal", "hours": 168,
-        })
-        if data["total"] == 0:
-            pytest.skip("no FDA matches in window")
-        with_name = sum(1 for a in data["articles"] if a.get("matched_name"))
-        assert with_name == len(data["articles"]), (
-            f"{len(data['articles']) - with_name} articles missing matched_name"
-        )
-
-
 class TestSortOrder:
     """Verify sort parameter actually changes article ordering."""
 
@@ -191,9 +178,9 @@ class TestSortOrder:
 class TestFilterStacking:
     """Verify filters apply correctly on top of view pills."""
 
-    def test_language_filter_on_fda_view(self):
+    def test_language_filter_on_pill_view(self):
         data = _fetch_articles({
-            "source": "gal", "view": "fda-medical-devices",
+            "source": "gal", "view": "medical-devices",
             "hours": 168, "language": "en",
         })
         for a in data["articles"]:

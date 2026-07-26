@@ -79,53 +79,6 @@
       "description": "All sources merged — should exceed GAL alone because GKG contributes."
     },
     {
-      "id": "fda_view_gal",
-      "params": {"source": "gal", "view": "fda-medical-devices", "hours": 72},
-      "min_results": 5,
-      "max_latency_s": 2.5,
-      "description": "FDA Medical Device Companies view — GAL portion."
-    },
-    {
-      "id": "fda_view_gal_stacked_language",
-      "params": {"source": "gal", "view": "fda-medical-devices", "hours": 168, "language": "en"},
-      "min_results": 1,
-      "max_latency_s": 10.0,
-      "description": "Regression: FDA view must stack with language filter. Before the fix, the view path ignored every filter except time."
-    },
-    {
-      "id": "fda_view_gal_stacked_domain",
-      "params": {"source": "gal", "view": "fda-medical-devices", "hours": 168, "domain": "benzinga"},
-      "min_results": 1,
-      "max_latency_s": 10.0,
-      "description": "Regression: FDA view must stack with domain filter."
-    },
-    {
-      "id": "fda_view_gkg",
-      "params": {"source": "gkg", "view": "fda-medical-devices", "hours": 72},
-      "min_results": 1,
-      "max_latency_s": 2.5
-    },
-    {
-      "id": "fda_view_all",
-      "params": {"source": "all", "view": "fda-medical-devices", "hours": 72},
-      "min_results": 5,
-      "max_latency_s": 2.5
-    },
-    {
-      "id": "fda_gal_strict_7d",
-      "params": {"source": "gal", "view": "fda-medical-devices", "match_types": "legal", "hours": 168},
-      "min_results": 20,
-      "max_latency_s": 3.0,
-      "description": "Strict mode: only full legal name matches."
-    },
-    {
-      "id": "fda_gal_broad_7d",
-      "params": {"source": "gal", "view": "fda-medical-devices", "match_types": "legal,stripped", "hours": 168},
-      "min_results": 200,
-      "max_latency_s": 4.0,
-      "description": "Broad mode: legal + stripped base names. Must exceed strict."
-    },
-    {
       "id": "supply_chain_gal_24h",
       "params": {"source": "gal", "view": "supply-chain-alerts", "hours": 24},
       "min_results": 50,

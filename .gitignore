@@ -32,3 +32,6 @@ test_driver_query.py
 *.bak_*
 _backup_*/
 venv/
+
+# Inline file backups written by the deploy convention
+*._backup_*

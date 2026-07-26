@@ -481,7 +481,7 @@ def _connect_write(path, retries=40):
         try:
             con = duckdb.connect(str(path))
             con.execute("SET threads = 4")
-            con.execute("SET memory_limit = '4GB'")
+            con.execute("SET memory_limit = '10GB'")
             con.execute(f"SET temp_directory='{_tmp_dir()}'")
             return con
         except Exception as e:  # noqa: BLE001
@@ -534,7 +534,7 @@ def run(max_articles=None):
     # all writes go to a private scratch DB and are merged in at the end.
     read_con = duckdb.connect(str(config.DB_PATH), read_only=True)
     read_con.execute("SET threads = 4")
-    read_con.execute("SET memory_limit = '4GB'")
+    read_con.execute("SET memory_limit = '10GB'")
     read_con.execute(f"SET temp_directory='{_tmp_dir()}'")
     write_con = _connect_write(SCRATCH_PATH)
     try:

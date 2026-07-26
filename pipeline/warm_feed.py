@@ -14,9 +14,12 @@ GLOBAL_COMBOS = [("", 3), ("", 24)]
 # these is data_version-guarded below: no point re-running the same query
 # against unchanged data every 2 minutes.
 PILL_COMBOS = [
-    ("ai-general", 24), ("ai-regulation", 24), ("supply-chain-alerts", 24),
-    ("medical-devices", 24), ("fda-medical-devices", 24),
+    ("ai-general", 24), ("ai-regulation", 24), ("ai-defense", 24),
+    ("ai-sector-impact", 24), ("semiconductors", 24),
     ("oss-vulnerabilities", 24), ("cyber-attacks", 24),
+    ("public-health", 24), ("medical-devices", 24), ("fda-medical-devices", 24),
+    ("fda-agency", 24), ("nih-news", 24), ("cms-news", 24), ("va-news", 24),
+    ("supply-chain-alerts", 24), ("geopolitics-conflict", 24), ("energy-climate", 24),
 ]
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"

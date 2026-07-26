@@ -109,6 +109,31 @@ PILL_INTENTS: dict[str, str] = {
         "Public health: disease outbreaks, epidemics, vaccines and drug "
         "approvals, health systems, health policy."
     ),
+    "fda_agency": (
+        "News about the U.S. Food and Drug Administration as a regulatory "
+        "body: drug and device approvals, recalls, warning letters, facility "
+        "inspections, advisory committee meetings, policy changes and "
+        "rulemaking, and FDA leadership decisions. NOT routine stock-market "
+        "coverage or company financials that merely mention FDA approval."
+    ),
+    "nih_news": (
+        "News about the National Institutes of Health: research funding and "
+        "grants, major study findings, institute directors and leadership, "
+        "budget and policy affecting biomedical research."
+    ),
+    "cms_news": (
+        "News about the Centers for Medicare & Medicaid Services: rulemaking, "
+        "reimbursement changes, Medicare and Medicaid policy, enrollment, and "
+        "agency leadership. NOT general political debate about healthcare "
+        "spending or entitlement reform."
+    ),
+    "va_news": (
+        "News about the U.S. Department of Veterans Affairs (the federal "
+        "agency): VA healthcare and hospitals, veterans' benefits and claims, "
+        "VA leadership, and veterans services. NOT general military news, VFW/"
+        "American Legion advocacy, foreign veterans, or political campaigns "
+        "about veterans issues without VA action."
+    ),
 }
 
 

@@ -374,6 +374,95 @@ CATEGORIES: dict[str, dict] = {
         "gkg_theme_prefixes": [],
         "scan_description": True,
     },
+    # --- Federal health agencies ---
+    "fda_agency": {
+        "description": (
+            "News about the U.S. Food and Drug Administration as a regulatory "
+            "body: drug and device approvals, recalls, warning letters, "
+            "facility inspections, advisory committee meetings, policy "
+            "changes and rulemaking, and FDA leadership decisions."
+        ),
+        "neg_description": (
+            "Routine stock-market coverage, company earnings, or financial "
+            "news that merely mentions FDA approval in passing without "
+            "covering the agency's actions or decisions."
+        ),
+        "judge_strict": True,
+        "keywords": [
+            "fda approval", "fda clears", "fda approves", "fda recalls",
+            "fda warning letter", "fda inspection", "fda commissioner",
+            "fda advisory committee", "fda panel", "fda ban",
+            "food and drug administration", "fda rejects", "fda denies",
+            "fda fast track", "fda breakthrough", "fda priority review",
+            "fda final rule", "fda proposed rule", "fda guidance",
+            "fda enforcement", "fda consent decree", "fda import alert",
+        ],
+        "gkg_theme_prefixes": [],
+        "scan_description": True,
+    },
+    "nih_news": {
+        "description": (
+            "News about the National Institutes of Health: research funding "
+            "and grants, major study findings and research breakthroughs from "
+            "NIH-funded work, institute directors and leadership changes, "
+            "budget and policy decisions affecting biomedical research."
+        ),
+        "judge_strict": True,
+        "keywords": [
+            "national institutes of health", "nih director", "nih funding",
+            "nih grant", "nih study", "nih research", "nih budget",
+            "ninds", "national cancer institute", "nida", "nhlbi", "niaid",
+            "nih director", "nih policy", "nih director's blog",
+        ],
+        "gkg_theme_prefixes": [],
+        "scan_description": True,
+    },
+    "cms_news": {
+        "description": (
+            "News about the Centers for Medicare & Medicaid Services: "
+            "rulemaking and final rules, reimbursement rate changes, "
+            "Medicare and Medicaid policy decisions, enrollment changes, "
+            "agency leadership, and program administration."
+        ),
+        "neg_description": (
+            "General political debate about healthcare spending, entitlement "
+            "reform, or budget politics that is not about CMS-specific "
+            "actions, rules, or administration."
+        ),
+        "judge_strict": True,
+        "keywords": [
+            "centers for medicare", "cms administrator", "cms final rule",
+            "cms proposed rule", "cms rulemaking", "cms reimbursement",
+            "cms payment", "medicare advantage", "medicaid expansion",
+            "cms policy", "cms enrollment", "cms chief",
+        ],
+        "gkg_theme_prefixes": [],
+        "scan_description": True,
+    },
+    "va_news": {
+        "description": (
+            "News about the U.S. Department of Veterans Affairs: VA healthcare "
+            "and hospitals, veterans' benefits and claims processing, VA "
+            "leadership and policy, VA modernization and IT, and veterans "
+            "services administered by the VA."
+        ),
+        "neg_description": (
+            "General military or veterans news not about the VA: VFW or "
+            "American Legion advocacy, foreign countries' veterans, military "
+            "records disputes not involving VA healthcare or benefits, "
+            "political campaigns about veterans issues without VA action."
+        ),
+        "judge_strict": True,
+        "keywords": [
+            "department of veterans affairs", "va secretary",
+            "va hospital", "veterans health", "va medical center",
+            "va benefits", "va claims", "va disability",
+            "veterans affairs", "va healthcare", "va secretary of",
+            "veterans health administration", "va secretary of",
+        ],
+        "gkg_theme_prefixes": [],
+        "scan_description": True,
+    },
 }
 
 

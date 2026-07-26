@@ -1,0 +1,64 @@
+name: Task
+description: A single deployable change, sized to one PR.
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        One issue = one PR = one deployable change. If a task needs two deploys,
+        it is two issues.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: >
+        What is wrong today, with evidence. Prefer an observation over an
+        assertion — a log line, a screenshot, a measured number, a file:line.
+      placeholder: |
+        `GET /` returns a 9.3 KB shell with zero article text;
+        `curl -s https://gdeltmonitor.com | grep -c '<article'` returns 0.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: Checkboxes. Each one must be objectively true or false.
+      value: |
+        - [ ]
+        - [ ]
+    validations:
+      required: true
+
+  - type: textarea
+    id: test
+    attributes:
+      label: Automated test to add
+      description: >
+        Which file, and what it asserts. "Manual verification" is not an answer —
+        if it genuinely cannot be automated, say why here and rely on the CiC script.
+      placeholder: "tests/test_ssr.py: assert >= 20 article elements in the raw HTML of /"
+    validations:
+      required: true
+
+  - type: input
+    id: cic
+    attributes:
+      label: CiC script path
+      description: >
+        Path under tests/cic/ for the browser verification script, if this change
+        is visible in the UI. Leave as "n/a" for backend-only work.
+      placeholder: tests/cic/001-ssr-feed.md
+    validations:
+      required: true
+
+  - type: textarea
+    id: rollback
+    attributes:
+      label: Rollback
+      description: How to undo this in production if it misbehaves.
+      placeholder: "Revert the template change — purely additive to <head>."
+    validations:
+      required: true

@@ -12,8 +12,11 @@ Membership rule per curated pill:
     and, when the pill has a neg_description:
         reject/demote if sem_neg >= sem_pos
 Custom semantic pills: tag if sem >= pill threshold.
-`meddev_companies` (candidate_source='fda_match_cache'): candidates are FDA
-name matches; tag if sem >= sem_lo AND sem_pos > sem_neg.
+
+A pill may declare `candidate_source='fda_match_cache'` to draw candidates from
+FDA name matches instead of keywords (tag if sem >= sem_lo AND sem_pos >
+sem_neg). No pill currently does — `meddev_companies` was the only one and was
+removed; the mechanism is inert until something declares it again.
 
 Articles without vectors (non-English / embed lag) keep keyword-only tags —
 demotion only ever touches articles that HAVE a vector.

@@ -17,7 +17,7 @@ PILL_COMBOS = [
     ("ai-general", 24), ("ai-regulation", 24), ("ai-defense", 24),
     ("ai-sector-impact", 24), ("semiconductors", 24),
     ("oss-vulnerabilities", 24), ("cyber-attacks", 24),
-    ("public-health", 24), ("medical-devices", 24), ("fda-medical-devices", 24),
+    ("public-health", 24), ("medical-devices", 24),
     ("fda-agency", 24), ("nih-news", 24), ("cms-news", 24), ("va-news", 24),
     ("supply-chain-alerts", 24), ("geopolitics-conflict", 24), ("energy-climate", 24),
 ]

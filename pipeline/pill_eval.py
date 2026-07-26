@@ -58,13 +58,6 @@ PILL_INTENTS: dict[str, str] = {
         "(13F filings, analyst ratings, shareholder suits) and NOT companies "
         "appearing in unrelated contexts."
     ),
-    "meddev_companies": (
-        "News involving FDA-registered medical device manufacturers acting AS "
-        "medical device companies: product launches, recalls, clinical trials, "
-        "regulatory actions, industry deals. NOT routine stock-market coverage "
-        "(13F filings, analyst ratings, shareholder suits) and NOT companies "
-        "appearing in unrelated contexts."
-    ),
     "ai_general": (
         "Artificial intelligence news: model releases, AI companies, research "
         "breakthroughs, AI investments and adoption, the AI industry broadly."

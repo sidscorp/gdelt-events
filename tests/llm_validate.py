@@ -94,8 +94,8 @@ def describe_query(case):
     if params.get("person"): parts.append(f'mentions person "{params["person"]}"')
     if params.get("org"): parts.append(f'mentions org "{params["org"]}"')
     if params.get("theme"): parts.append(f'theme "{params["theme"]}"')
-    if params.get("view") == "fda-medical-devices":
-        parts.append("FDA-registered medical device companies")
+    if params.get("view") == "medical-devices":
+        parts.append("medical devices and medtech")
     return "news articles about " + (" and ".join(parts) if parts else params.get("source", "general"))
 
 

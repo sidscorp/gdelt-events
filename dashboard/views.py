@@ -123,20 +123,6 @@ VIEWS = [
         "group": "Health & Science",
     },
     {
-        "id": "fda-medical-devices",
-        "name": "Medical Device Companies",
-        "description": (
-            "FDA-registered device manufacturers acting as device companies: "
-            "product launches, clearances, recalls, trials, medtech deals. "
-            "Name matches are semantically gated to filter out stock-market "
-            "noise and incidental mentions."
-        ),
-        "kind": "tag_match",
-        "tag_category": "meddev_companies",
-        "default_hours": 24,
-        "group": "Health & Science",
-    },
-    {
         "id": "fda-agency",
         "name": "FDA",
         "description": (

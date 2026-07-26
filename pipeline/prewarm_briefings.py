@@ -5,7 +5,7 @@ import urllib.request, time, sys
 
 BASE = "http://localhost:8015"
 PILLS = ["ai-general", "ai-regulation", "supply-chain-alerts",
-         "medical-devices", "fda-medical-devices", "oss-vulnerabilities", "cyber-attacks"]
+         "medical-devices", "oss-vulnerabilities", "cyber-attacks"]
 # (view, hours) combos to keep warm. Global default is 3h (the page default),
 # so warm both 3h and 24h for global; pills snap to their 24h default_hours.
 COMBOS = [("", 3), ("", 24)] + [(v, 24) for v in PILLS]

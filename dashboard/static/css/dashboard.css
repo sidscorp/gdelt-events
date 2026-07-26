@@ -251,6 +251,16 @@
     margin-bottom: 0.8rem;
     min-height: 0;
   }
+  .pill-group-label {
+    font-size: 0.66rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-tertiary);
+    width: 100%;
+    margin: 0.3rem 0 0.15rem 0;
+    font-weight: 600;
+  }
+  .pill-group-label:first-child { margin-top: 0; }
   .view-pill {
     font-family: inherit;
     font-size: 0.82rem;
@@ -809,6 +819,12 @@
     font-size: 0.68rem; color: var(--text-tertiary); background: none; border: none; cursor: pointer; font-family: inherit;
   }
   .briefing-dismiss:hover { color: var(--text); }
+  .briefing-restore {
+    font-family: inherit; font-size: 0.78rem; padding: 0.35rem 0.8rem; margin: 0.7rem 0;
+    border: 1px dashed var(--surface-border); border-radius: var(--radius);
+    background: none; color: var(--text-tertiary); cursor: pointer;
+  }
+  .briefing-restore:hover { color: var(--accent-brand); border-color: var(--accent-brand); }
   .briefing-body { font-size: 0.92rem; line-height: 1.72; color: var(--text); }
   .briefing-body h4 {
     font-size: 1.1rem !important; font-weight: 600 !important; margin: 0 0 0.55rem !important;

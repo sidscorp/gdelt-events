@@ -72,11 +72,12 @@
     <span class="briefing-label">✦ AI Briefing</span>
     <span style="flex:1"></span>
     <button class="briefing-info-btn" onclick="showBriefingInfo()" title="See exactly what this briefing used: model, sources, and the verbatim prompt">&#9432; how this was made</button>
-    <button class="briefing-dismiss" onclick="document.getElementById('briefingPanel').style.display='none'">dismiss</button>
+    <button class="briefing-dismiss" onclick="dismissBriefing()">dismiss</button>
   </div>
   <div id="briefingText" class="briefing-body"></div>
   <div id="briefingMeta" class="briefing-meta"></div>
 </div>
+<button id="briefingRestore" class="briefing-restore" style="display:none;" onclick="restoreBriefing()" title="Bring the AI briefing back">✦ Show AI Briefing</button>
 
 
 <div id="fdaEventsPanel">

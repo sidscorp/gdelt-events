@@ -38,6 +38,22 @@ let _briefingView = null;
 let _briefingHours = null;
 let _briefingAbort = null;
 
+// Dismiss collapses the panel into a small restore pill instead of hiding it
+// outright, so there's always a way back without switching views or waiting
+// on the 15-min auto-refresh.
+function dismissBriefing() {
+  const p = document.getElementById('briefingPanel');
+  const r = document.getElementById('briefingRestore');
+  if (p) p.style.display = 'none';
+  if (r) r.style.display = '';
+}
+function restoreBriefing() {
+  const p = document.getElementById('briefingPanel');
+  const r = document.getElementById('briefingRestore');
+  if (p) p.style.display = '';
+  if (r) r.style.display = 'none';
+}
+
 async function fetchBriefing() {
   const view = (typeof state !== 'undefined' && state.view) || '';
   const hours = (typeof state !== 'undefined' && state.hours) || 24;
@@ -47,7 +63,9 @@ async function fetchBriefing() {
   // query is active. Hide the panel and force regeneration once search clears.
   if (q) {
     const p = document.getElementById('briefingPanel');
+    const r = document.getElementById('briefingRestore');
     if (p) p.style.display = 'none';
+    if (r) r.style.display = 'none';
     _briefingView = null;
     return;
   }
@@ -79,6 +97,8 @@ async function fetchBriefing() {
   }
   metaEl.textContent = keepText ? 'Updating…' : 'Generating briefing…';
   panel.style.display = '';
+  const restoreEl = document.getElementById('briefingRestore');
+  if (restoreEl) restoreEl.style.display = 'none';
   const briefStart = performance.now();
   let briefFirstMarked = false;
 

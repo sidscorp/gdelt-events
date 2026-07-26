@@ -922,8 +922,26 @@ async function fetchViews() {
     const data = await resp.json();
     const bar = document.getElementById('viewsBar');
     bar.innerHTML = '';
+    const GROUP_ORDER = ["Technology & AI", "Security", "Health & Science", "World & Economy"];
+    const groups = {};
     (data.views || []).forEach(v => {
+      const g = v.group || 'Other';
+      if (!groups[g]) groups[g] = [];
+      groups[g].push(v);
       viewsById[v.id] = v;
+    });
+    const orderedGroups = [
+      ...GROUP_ORDER.filter(g => groups[g]),
+      ...Object.keys(groups).filter(g => !GROUP_ORDER.includes(g)),
+    ];
+    for (const group of orderedGroups) {
+      const pills = groups[group];
+      if (!pills || !pills.length) continue;
+      const label = document.createElement('div');
+      label.className = 'pill-group-label';
+      label.textContent = group;
+      bar.appendChild(label);
+      for (const v of pills) {
       const btn = document.createElement('button');
       btn.className = 'view-pill' + (state.view === v.id ? ' active' : '');
       // no-op; segmented control is rendered after the loop
@@ -1009,7 +1027,8 @@ async function fetchViews() {
       }
       bar.appendChild(btn);
       bar.appendChild(infoBtn);
-    });
+      }
+    }
 
     // Add [+ New] button if authenticated
     if (data.authenticated) {

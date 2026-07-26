@@ -166,6 +166,7 @@ def api_views():
                 "kind": "tag_match",
                 "tag_category": f"custom_{pill['id']}",
                 "default_hours": 24,
+                "group": "My Pills",
                 "custom": True,
                 "pill_id": pill["id"],
                 "pill_type": pill_type,

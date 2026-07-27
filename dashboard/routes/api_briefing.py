@@ -12,7 +12,7 @@ from briefing import (
     BRIEFING_TTL_S, BRIEFING_EVENT_LIMIT, BRIEFING_MODEL,
     _build_briefing_prompt, _fetch_briefing_events,
     _generate_briefing, _generate_briefing_stream,
-    get_threads, update_threads_async,
+    get_threads, record_briefing_history, update_threads_async,
 )
 
 bp = Blueprint("api_briefing", __name__)
@@ -29,6 +29,9 @@ def api_briefing():
     refresh = request.args.get("refresh") == "1"  # pre-warm: force regeneration
 
     cache_key = f"{view_id or '_all'}:{hours}"
+    # Distinguish organic visits from forced refreshes in the permanent record
+    # so a future bot reader can filter synthetic generations if desired.
+    history_trigger = "prewarm" if refresh else "visit"
 
     # Check cache first (both streaming and non-streaming)
     from models import get_user_db
@@ -151,6 +154,11 @@ def api_briefing():
                     uc.close()
                 except Exception:
                     pass
+                record_briefing_history(
+                    cache_key, view_id or "_all", hours, briefing,
+                    sources_json, len(sources), _meta_json(len(briefing)),
+                    generated_at, trigger=history_trigger,
+                )
                 update_threads_async(cache_key, threads, briefing)
             yield f"data: {json.dumps({'done': True, 'article_count': len(sources)})}\n\n"
 
@@ -171,6 +179,11 @@ def api_briefing():
     )
     ucon.commit()
     ucon.close()
+    record_briefing_history(
+        cache_key, view_id or "_all", hours, briefing,
+        sources_json, len(sources), _meta_json(len(briefing)),
+        generated_at, trigger=history_trigger,
+    )
 
     return jsonify({
         "briefing": briefing,

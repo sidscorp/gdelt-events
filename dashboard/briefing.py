@@ -316,6 +316,32 @@ def _generate_briefing(sources, view_name, view_desc, hours, prev=None, threads=
     return "".join(parts).strip() if parts else None
 
 
+def record_briefing_history(cache_key, view_id, hours, briefing, sources_json,
+                            article_count, meta_json, generated_at, trigger="visit"):
+    """Append one generation row to the permanent briefing_history table.
+
+    Failure is logged only — never affects the briefing the user just
+    received. Called from api_briefing after a successful cache write (both
+    SSE and non-streaming paths). ``trigger`` distinguishes organic visits
+    ('visit') from future pre-warm/manual-regenerate traffic so a bot reader
+    can filter synthetic generations out if desired."""
+    try:
+        from models import get_user_db
+        con = get_user_db()
+        con.execute(
+            "INSERT INTO briefing_history "
+            "(cache_key, view_id, hours, generated_at, briefing, "
+            " article_count, sources_json, meta_json, trigger) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (cache_key, view_id, hours, generated_at,
+             briefing, article_count, sources_json, meta_json, trigger),
+        )
+        con.commit()
+        con.close()
+    except Exception:
+        req_log.warning("briefing_history insert failed for %s", cache_key, exc_info=True)
+
+
 BRIEFING_EVENT_BUFFER = 400   # articles pulled before dedup (pills/filtered)
 BRIEFING_EVENT_LIMIT = 50     # distinct events fed to the model
 BRIEFING_DESC_CHARS = 220

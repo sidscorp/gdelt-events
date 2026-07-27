@@ -80,12 +80,46 @@ def init_user_db():
             threads_json TEXT,
             updated_at TEXT DEFAULT (datetime('now'))
         );
+
+        CREATE TABLE IF NOT EXISTS briefing_history (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            cache_key     TEXT NOT NULL,
+            view_id       TEXT NOT NULL,
+            hours         INTEGER NOT NULL,
+            generated_at  TEXT NOT NULL,
+            briefing      TEXT NOT NULL,
+            article_count INTEGER,
+            sources_json  TEXT,
+            meta_json     TEXT,
+            trigger       TEXT NOT NULL DEFAULT 'visit'
+        );
+        CREATE INDEX IF NOT EXISTS ix_bh_view_time
+            ON briefing_history (view_id, hours, generated_at DESC);
     """)
     # Migrate: add columns if missing (idempotent)
     _migrate_semantic_columns(con)
     _migrate_briefing_columns(con)
     _migrate_perf_table(con)
+    _migrate_briefing_history(con)
     con.close()
+
+
+def _migrate_briefing_history(con):
+    """Permanent append-only archive of every briefing generation.
+    Created here (not in the executescript) so older installs that predate
+    the table pick it up on next restart; if it already exists, ensure the
+    trigger column is present (added 2026-07-26 alongside the bot-readiness
+    work; safe on fresh installs because executescript already creates it)."""
+    cols = {r[1] for r in con.execute("PRAGMA table_info(briefing_history)").fetchall()}
+    if cols and "trigger" not in cols:
+        con.execute(
+            "ALTER TABLE briefing_history ADD COLUMN trigger TEXT NOT NULL DEFAULT 'visit'"
+        )
+    con.execute(
+        "CREATE INDEX IF NOT EXISTS ix_bh_view_time "
+        "ON briefing_history (view_id, hours, generated_at DESC)"
+    )
+    con.commit()
 
 
 def _migrate_perf_table(con):

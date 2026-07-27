@@ -38,3 +38,6 @@ venv/
 
 # Node deps for the Playwright UI smoke test (tests/e2e_smoke.mjs)
 node_modules/
+
+# ...but this bench IS a committed tool, not a one-off
+!tests/bench_semantic.py

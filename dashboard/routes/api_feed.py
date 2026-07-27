@@ -112,27 +112,27 @@ def api_semantic_search():
     if con is None:
         return jsonify({"error": "Database busy"}), 503
 
-    # Route to gal_recent when the window allows. This path used to hardcode
-    # `FROM gal` (25M rows) and pass every candidate as a single IN list, which
-    # is the point-lookup pathology documented in CLAUDE.md: DuckDB builds a
-    # hash over the whole table. Measured 2026-07-26 at k=500 unbounded: 15.5s
-    # in the DB vs 92ms in FAISS.
+    # Route to gal_recent when the window allows; this path used to hardcode
+    # `FROM gal` (23.7M rows) regardless of window.
     tbl = _gal_table(con, cutoff=max(bounds) if bounds else None)
+
+    # ONE query with the full IN list. Chunking this at 500 (the CLAUDE.md
+    # point-lookup rule) is wrong here and was measurably slower: that rule
+    # covers the two-step cache->IN pattern in _fetch_gal_view, where the
+    # cache does the narrowing. Here the candidate list is ALREADY bounded by
+    # k, so splitting it just turns one scan into ceil(k/500) scans.
+    # Measured on prod 2026-07-26, db ms at k=500/1000/2000:
+    #   single IN : 485 / 543 / 559     chunked at 500: 489 / 1006 / 1991
+    ph = ",".join(["?"] * len(candidate_urls))
+    where = " AND ".join([f"url IN ({ph})"] + conds)
 
     cancel = _arm_statement_timeout(con)
     t1 = time.time()
     try:
-        rows = []
-        for i in range(0, len(candidate_urls), 500):
-            chunk = candidate_urls[i:i + 500]
-            ph = ",".join(["?"] * len(chunk))
-            where = " AND ".join([f"url IN ({ph})"] + conds)
-            rows.extend(
-                con.execute(
-                    f"SELECT {GAL_COLS} FROM {tbl} WHERE {where}",
-                    chunk + filt_params,
-                ).fetchall()
-            )
+        rows = con.execute(
+            f"SELECT {GAL_COLS} FROM {tbl} WHERE {where}",
+            candidate_urls + filt_params,
+        ).fetchall()
     except Exception as e:
         return jsonify({"error": f"DB query error: {e}"}), 500
     finally:

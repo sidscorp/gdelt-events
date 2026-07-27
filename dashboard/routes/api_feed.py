@@ -16,7 +16,7 @@ from parsers import (
 )
 from articles import (
     _api_articles_inner, _feed_cache, _feed_cache_key, _data_version,
-    _FEED_TTL_S, _FEED_CACHE_MAX, _parse_date_filters, GAL_COLS,
+    _FEED_TTL_S, _FEED_CACHE_MAX, _parse_date_filters, GAL_COLS, _gal_table,
 )
 
 bp = Blueprint("api_feed", __name__)
@@ -49,7 +49,13 @@ def api_semantic_search():
     try:
         page = max(1, int(request.args.get("page", 1)))
         per_page = max(1, min(100, int(request.args.get("per_page", 25))))
-        k = max(per_page * page, min(2000, int(request.args.get("k", 500))))
+        # Default 2000, not 500. This is a search-then-filter design: FAISS
+        # ranks globally and the time window is applied afterwards, so a narrow
+        # window keeps only the candidates that happen to fall inside it. At
+        # k=500 an hours=24 query returned ONE result - it looked broken while
+        # working as designed. Measured 2026-07-26: k=100 -> k=2000 costs 0.03s
+        # (FAISS is ~90ms flat regardless) and returns 3.5x more results.
+        k = max(per_page * page, min(2000, int(request.args.get("k", 2000))))
     except (TypeError, ValueError):
         return jsonify({"error": "Invalid pagination params"}), 400
 
@@ -72,43 +78,61 @@ def api_semantic_search():
     score_by_url = {url: score for url, score in candidates}
     candidate_urls = list(score_by_url.keys())
 
-    # Build filters
-    conds = ["url IN ({})".format(",".join(["?"] * len(candidate_urls)))]
-    params = list(candidate_urls)
+    # Filters other than the URL list: built once, reused for every chunk.
+    conds = []
+    filt_params = []
+    bounds = []
 
     hours, df, dt = _parse_date_filters(request)
     if hours:
+        cutoff = _hours_cutoff(hours)
         conds.append("crawled_at >= ?")
-        params.append(_hours_cutoff(hours))
+        filt_params.append(cutoff)
+        bounds.append(cutoff)
     if df is not None:
         conds.append("crawled_at >= ?")
-        params.append(df)
+        filt_params.append(df)
+        bounds.append(df)
     if dt is not None:
         conds.append("crawled_at <= ?")
-        params.append(dt)
+        filt_params.append(dt)
 
     domain = (request.args.get("domain") or "").strip()
     if domain:
         conds.append("domain ILIKE ?")
-        params.append(f"%{domain}%")
+        filt_params.append(f"%{domain}%")
 
     language = (request.args.get("language") or "").strip()
     if language:
         conds.append("language = ?")
-        params.append(language)
+        filt_params.append(language)
 
     # Query DuckDB for full article metadata
     con = get_db()
     if con is None:
         return jsonify({"error": "Database busy"}), 503
 
+    # Route to gal_recent when the window allows. This path used to hardcode
+    # `FROM gal` (25M rows) and pass every candidate as a single IN list, which
+    # is the point-lookup pathology documented in CLAUDE.md: DuckDB builds a
+    # hash over the whole table. Measured 2026-07-26 at k=500 unbounded: 15.5s
+    # in the DB vs 92ms in FAISS.
+    tbl = _gal_table(con, cutoff=max(bounds) if bounds else None)
+
     cancel = _arm_statement_timeout(con)
     t1 = time.time()
     try:
-        sql = (
-            f"SELECT {GAL_COLS} FROM gal WHERE " + " AND ".join(conds)
-        )
-        rows = con.execute(sql, params).fetchall()
+        rows = []
+        for i in range(0, len(candidate_urls), 500):
+            chunk = candidate_urls[i:i + 500]
+            ph = ",".join(["?"] * len(chunk))
+            where = " AND ".join([f"url IN ({ph})"] + conds)
+            rows.extend(
+                con.execute(
+                    f"SELECT {GAL_COLS} FROM {tbl} WHERE {where}",
+                    chunk + filt_params,
+                ).fetchall()
+            )
     except Exception as e:
         return jsonify({"error": f"DB query error: {e}"}), 500
     finally:
@@ -144,6 +168,7 @@ def api_semantic_search():
         "per_page": per_page,
         "pages": pages,
         "k_searched": k,
+        "gal_table": tbl,
         "timing_ms": {
             "faiss": int(t_faiss * 1000),
             "db": int(t_db * 1000),

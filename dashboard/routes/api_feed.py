@@ -116,11 +116,21 @@ def api_semantic_search():
     # `FROM gal` (23.7M rows) regardless of window.
     tbl = _gal_table(con, cutoff=max(bounds) if bounds else None)
 
-    # ONE query with the full IN list. Chunking this at 500 (the CLAUDE.md
-    # point-lookup rule) is wrong here and was measurably slower: that rule
-    # covers the two-step cache->IN pattern in _fetch_gal_view, where the
-    # cache does the narrowing. Here the candidate list is ALREADY bounded by
-    # k, so splitting it just turns one scan into ceil(k/500) scans.
+    # On the full gal table an IN list over ~500 URLs can flip the planner
+    # into hash-building the 24M-row side, which OOMs the connection's
+    # memory_limit (observed 2026-07-28: k=2000 unbounded -> "failed to pin
+    # block", 500 on every default search; k=500 fine; gal_recent fine at any
+    # k). k=2000 exists for narrow windows, and those route to gal_recent —
+    # so keep it there, and cap the lookup at the top-500 candidates whenever
+    # we fall back to gal.
+    if tbl == "gal" and len(candidate_urls) > 500:
+        candidate_urls = [url for url, _ in candidates[:500]]
+
+    # ONE query with the (possibly capped) IN list. Chunking this at 500 (the
+    # CLAUDE.md point-lookup rule) is wrong here and was measurably slower:
+    # that rule covers the two-step cache->IN pattern in _fetch_gal_view,
+    # where the cache does the narrowing. Here the candidate list is ALREADY
+    # bounded, so splitting it just turns one scan into ceil(k/500) scans.
     # Measured on prod 2026-07-26, db ms at k=500/1000/2000:
     #   single IN : 485 / 543 / 559     chunked at 500: 489 / 1006 / 1991
     ph = ",".join(["?"] * len(candidate_urls))

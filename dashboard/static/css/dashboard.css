@@ -988,3 +988,74 @@ body.dark .lang-toggle.active { color: #1a1714; }
 @media (display-mode: standalone) {
   #topProgress { top: env(safe-area-inset-top, 0px); }
 }
+
+/* ===================================================================== */
+/* === UI polish (2026-07-28): compact header, type system, sticky bar = */
+/* ===================================================================== */
+
+:root { --font-ui: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, 'Helvetica Neue', sans-serif; }
+
+/* Type system: serif stays the editorial voice (article titles, summaries,
+   briefing prose); everything that is UI chrome speaks sans. */
+button, select, input,
+.section-label, .pill-group-label, .header-nav, .header-tag, .header-stats,
+.results-meta, .active-filters, .filter-label, .filters,
+.time-pill, .view-pill, .lang-toggle, .pagination, footer,
+.article-header, .match-line, .briefing-head, .briefing-meta, .feed-notice {
+  font-family: var(--font-ui);
+}
+
+/* Compact one-row header: wordmark left, nav right, one quiet stats line. */
+header { border-bottom: 2px solid var(--accent-brand); padding-bottom: 0.5rem; margin-bottom: 0.8rem; }
+.header-row { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 0.4rem 1rem; }
+header h1 {
+  margin: 0; font-family: var(--font-ui); font-size: 1.25rem; font-weight: 700;
+  letter-spacing: -0.01em; text-transform: none;
+}
+.header-nav { display: flex; gap: 0.9rem; align-items: baseline; font-size: 0.78rem; }
+.header-nav a { color: var(--text-secondary); text-decoration: none; }
+.header-nav a:hover { color: var(--accent-brand); }
+.header-sub { display: flex; flex-wrap: wrap; gap: 0.2rem 1.2rem; align-items: baseline; margin-top: 0.25rem; }
+.header-tag { font-size: 0.74rem; color: var(--text-tertiary); }
+.header-stats { margin-top: 0 !important; font-size: 0.72rem; }
+.header-stats span {
+  background: none !important; border: none !important; padding: 0 !important;
+  border-radius: 0 !important; margin-right: 0.9rem !important;
+  color: var(--text-tertiary) !important; font-size: 0.72rem !important;
+}
+
+/* Accent discipline: the language toggle is a quiet control, not the loudest
+   element on the page — active mirrors the time-pill active treatment. */
+.lang-toggle.active, body.dark .lang-toggle.active {
+  background: var(--accent-soft); border-color: var(--accent-brand); color: var(--accent-brand);
+}
+
+/* Slim sticky toolbar once the filter stack scrolls away. */
+#stickyBar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 60;
+  display: flex; align-items: center; gap: 0.7rem;
+  padding: 0.35rem max(1rem, calc((100vw - 900px) / 2));
+  font-family: var(--font-ui); font-size: 0.78rem;
+  background: var(--bg);
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+  transform: translateY(-100%); transition: transform 0.18s ease;
+}
+#stickyBar.visible { transform: translateY(0); }
+#stickyTopic {
+  border: none; background: none; color: var(--text); font-weight: 600;
+  font-size: 0.78rem; padding: 0.2rem 0.3rem; cursor: pointer; white-space: nowrap;
+}
+#stickyTopic:hover { color: var(--accent-brand); }
+#stickyChips { display: flex; gap: 0.15rem; }
+#stickyChips button {
+  border: 1px solid transparent; background: none; color: var(--text-secondary);
+  font-size: 0.74rem; padding: 0.15rem 0.5rem; border-radius: var(--radius-sm); cursor: pointer;
+}
+#stickyChips button:hover { color: var(--accent-brand); }
+#stickyChips button.active {
+  background: var(--accent-soft); color: var(--accent-brand); border-color: var(--accent-brand);
+}
+#stickyMeta { margin-left: auto; color: var(--text-tertiary); font-size: 0.72rem; white-space: nowrap; }
+@media (max-width: 560px) { #stickyMeta { display: none; } }

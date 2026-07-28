@@ -174,8 +174,9 @@ def sitemap():
 
     from articles import _data_version
     try:
-        feed_mod = datetime.utcfromtimestamp(int(_data_version())).strftime(
-            "%Y-%m-%dT%H:%M:%S+00:00")
+        version = int(_data_version())
+        feed_mod = (datetime.utcfromtimestamp(version).strftime(
+            "%Y-%m-%dT%H:%M:%S+00:00") if version > 0 else None)
     except Exception:
         feed_mod = None
 

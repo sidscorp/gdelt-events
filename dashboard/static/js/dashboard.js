@@ -855,13 +855,24 @@ async function fetchArticles() {
     renderPagination(data);
   } catch (err) {
     if (myGen !== currentFetchGen) return; // a newer fetch superseded us
+    // If content is already on screen (SSR first paint or a kept snapshot),
+    // a failed refresh must not wipe it — keep it and report in the meta line.
+    const hasContent = !!list.querySelector('li.article');
     if (err.name === 'AbortError') {
       // Either client-timeout or user action. If it was us hitting 45s, show
       // an actionable message; if user triggered another fetch, they'll see
       // the new spinner so we don't need to render anything here.
       if (currentFetchController === controller) {
-        list.innerHTML = `<li class="loading">Request timed out after 45s — the backend is overloaded or the query is hung.<br><small>Try a narrower time window (1h or 6h), or wait a minute and retry.</small></li>`;
+        if (hasContent) {
+          const meta = document.getElementById('resultsMeta');
+          if (meta) meta.textContent = 'Refresh timed out — showing the last loaded articles.';
+        } else {
+          list.innerHTML = `<li class="loading">Request timed out after 45s — the backend is overloaded or the query is hung.<br><small>Try a narrower time window (1h or 6h), or wait a minute and retry.</small></li>`;
+        }
       }
+    } else if (hasContent) {
+      const meta = document.getElementById('resultsMeta');
+      if (meta) meta.textContent = 'Refresh failed — showing the last loaded articles.';
     } else {
       list.innerHTML = `<li class="loading">Error loading articles: ${err.message}<br><small>The backend may be restarting. Try again in a few seconds.</small></li>`;
     }

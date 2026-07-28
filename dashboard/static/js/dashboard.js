@@ -977,14 +977,6 @@ async function fetchViews() {
         prefetchCombo(v.id, v.default_hours ? String(v.default_hours) : state.hours);
       });
 
-      const infoBtn = document.createElement('button');
-      infoBtn.className = 'pill-info-btn';
-      infoBtn.textContent = '?';
-      infoBtn.title = 'Show filter criteria';
-      infoBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        showPillInfo(v.id);
-      });
       btn.addEventListener('click', () => {
         if (state.view === v.id) {
           state.view = '';
@@ -1047,7 +1039,6 @@ async function fetchViews() {
         btn.appendChild(delBtn);
       }
       bar.appendChild(btn);
-      bar.appendChild(infoBtn);
       }
     }
 
@@ -1240,6 +1231,52 @@ async function createPill() {
     errEl.textContent = 'Network error: ' + err.message;
   }
 }
+
+// --- Sticky slim toolbar: appears once the filter stack scrolls away -------
+(function initStickyBar() {
+  const bar = document.getElementById('stickyBar');
+  if (!bar) return;
+  const chips = bar.querySelectorAll('#stickyChips button');
+  const topicBtn = document.getElementById('stickyTopic');
+  const metaEl = document.getElementById('stickyMeta');
+
+  function sync() {
+    chips.forEach(c => c.classList.toggle('active', c.dataset.hours === String(state.hours)));
+    const v = state.view && viewsById[state.view];
+    topicBtn.textContent = '↑ ' + (v ? v.name : 'All topics');
+    const meta = document.getElementById('resultsMeta');
+    metaEl.textContent = meta && /articles/.test(meta.textContent) ? meta.textContent : '';
+  }
+
+  // Sticky chips drive the real time pills so every side effect stays in one place.
+  chips.forEach(c => c.addEventListener('click', () => {
+    const real = document.querySelector(`.time-pill[data-hours="${c.dataset.hours}"]`);
+    if (real) real.click();
+    sync();
+  }));
+
+  let shown = false, ticking = false;
+  const threshold = () => {
+    const el = document.getElementById('mainFilters');
+    return el ? el.offsetTop + el.offsetHeight : 600;
+  };
+  addEventListener('scroll', () => {
+    if (ticking) return;
+    ticking = true;
+    requestAnimationFrame(() => {
+      ticking = false;
+      const want = window.scrollY > threshold();
+      if (want !== shown) {
+        shown = want;
+        bar.classList.toggle('visible', shown);
+        bar.setAttribute('aria-hidden', shown ? 'false' : 'true');
+        if (shown) sync();
+      } else if (shown) {
+        sync();
+      }
+    });
+  }, { passive: true });
+})();
 
 // --- Clock widget ---
 (function initClock() {

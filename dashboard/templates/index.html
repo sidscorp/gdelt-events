@@ -18,50 +18,33 @@
 {% block content %}
 <div id="topProgress"></div>
 
+<div id="stickyBar" aria-hidden="true">
+  <button id="stickyTopic" title="Back to top" onclick="window.scrollTo({top:0,behavior:'smooth'})">&#8593; All topics</button>
+  <div id="stickyChips">
+    <button data-hours="3">3h</button><button data-hours="6">6h</button><button data-hours="24">24h</button><button data-hours="72">3d</button><button data-hours="168">7d</button><button data-hours="720">30d</button>
+  </div>
+  <span id="stickyMeta"></span>
+</div>
+
 <header>
-  <div style="display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap;">
-    <h1 style="margin:0;">GDELT News Monitor</h1>
-    <div id="clockWidget" style="font-size:0.78rem; color:var(--text-secondary); display:flex; align-items:baseline; gap:0.4rem;">
-      <span id="clockTime" style="font-variant-numeric:tabular-nums;"></span>
-      <select id="clockTz" style="font-size:0.72rem; border:1px solid var(--border); background:var(--surface); color:var(--text); border-radius:var(--radius-sm); padding:0.1rem 0.3rem; cursor:pointer;">
-        <option value="UTC">UTC</option>
-        <option value="America/New_York">US Eastern</option>
-        <option value="America/Chicago">US Central</option>
-        <option value="America/Denver">US Mountain</option>
-        <option value="America/Los_Angeles">US Pacific</option>
-        <option value="Europe/London">London</option>
-        <option value="Europe/Berlin">Berlin</option>
-        <option value="Asia/Tokyo">Tokyo</option>
-        <option value="Asia/Shanghai">Shanghai</option>
-        <option value="Asia/Kolkata">India</option>
-      </select>
+  <div class="header-row">
+    <h1>GDELT Monitor</h1>
+    <div id="navBar" class="header-nav">
+      <a href="/about">About</a>
+      <a href="/methodology" title="The logic behind everything displayed">Methodology</a>
+      <span id="navAuth"></span>
+      <button class="theme-toggle" onclick="toggleDarkMode()" id="themeBtn" title="Toggle dark mode">light</button>
     </div>
   </div>
-  <div style="font-size:0.82rem; color:var(--text-secondary); margin-top:0.2rem;">
-    Real-time monitoring of 44K global news sources, updated every 15 minutes.
-    Filter by curated topic, time range, or text below.
-    Coverage spans roughly the past 60 days.
-    <br>A hobby project by <a href="https://www.linkedin.com/in/siddnambiar" target="_blank" rel="noopener" style="color:var(--text-secondary);">Sidd Nambiar</a>.
-    <br>Self-hosted on personal hardware.
+  <div class="header-sub">
+    <span class="header-tag">Real-time monitoring of 44K global news sources · updated every 15 min</span>
+    <span class="header-stats" id="stats">loading...</span>
   </div>
-  <div style="margin-top:0.5rem; display:none;">
-    <a href="/search" style="display:inline-flex; align-items:center; gap:0.4rem; font-size:0.82rem; color:var(--text); text-decoration:none; border:1px solid var(--border); padding:0.35rem 0.8rem; border-radius:3px; background:var(--bg-hover);">
-      <span style="font-size:1rem;">&#x1F50D;</span>
-      <span><strong>Semantic Search</strong> — describe what you're looking for in plain English and find articles by meaning, not just keywords</span>
-    </a>
-  </div>
-  <div id="navBar" style="font-size:0.75rem; margin-top:0.4rem; display:flex; gap:1rem; color:var(--text-tertiary);">
-    <a href="/about" style="color:var(--text-secondary); text-decoration:none;">About</a>
-    <a href="/methodology" style="color:var(--text-secondary); text-decoration:none;" title="The logic behind everything displayed">Methodology</a>
-    <span id="navAuth"></span>
-    <button class="theme-toggle" onclick="toggleDarkMode()" id="themeBtn" title="Toggle dark mode">light</button>
-  </div>
-  <div class="header-stats" id="stats">loading...</div>
 </header>
 
 <!-- Source tabs removed — unified feed -->
 
-<div class="section-label">Curated topics <span style="text-transform:none; letter-spacing:0; color:var(--text-tertiary); font-size:0.7rem;">— click for pre-built filters, or click the ? to see what each one matches</span></div>
+<div class="section-label">Curated topics <span style="text-transform:none; letter-spacing:0; color:var(--text-tertiary); font-size:0.7rem;">— click to filter · hover to see what a topic matches</span></div>
 <div style="display:flex; align-items:center; flex-wrap:wrap; gap:0.3rem;">
   <div class="views-bar" id="viewsBar" style="margin:0;"></div>
   <div class="match-profile" id="matchProfile">
@@ -200,7 +183,23 @@
 <div class="pagination" id="pagination"></div>
 
 <footer>
-  Data from <a href="https://www.gdeltproject.org">GDELT Project</a> &middot; updated every 15 minutes
+  <div>Data from <a href="https://www.gdeltproject.org">GDELT Project</a> &middot; updated every 15 minutes &middot; coverage spans roughly the past 60 days</div>
+  <div style="margin-top:0.3rem;">A hobby project by <a href="https://www.linkedin.com/in/siddnambiar" target="_blank" rel="noopener">Sidd Nambiar</a> &middot; self-hosted on personal hardware &middot; <a href="/methodology">how it works</a></div>
+  <div id="clockWidget" style="margin-top:0.5rem; display:flex; align-items:baseline; gap:0.4rem; justify-content:center;">
+    <span id="clockTime" style="font-variant-numeric:tabular-nums;"></span>
+    <select id="clockTz" style="font-size:0.72rem; border:1px solid var(--border); background:var(--surface); color:var(--text); border-radius:var(--radius-sm); padding:0.1rem 0.3rem; cursor:pointer;">
+      <option value="UTC">UTC</option>
+      <option value="America/New_York">US Eastern</option>
+      <option value="America/Chicago">US Central</option>
+      <option value="America/Denver">US Mountain</option>
+      <option value="America/Los_Angeles">US Pacific</option>
+      <option value="Europe/London">London</option>
+      <option value="Europe/Berlin">Berlin</option>
+      <option value="Asia/Tokyo">Tokyo</option>
+      <option value="Asia/Shanghai">Shanghai</option>
+      <option value="Asia/Kolkata">India</option>
+    </select>
+  </div>
 </footer>
 {% endblock %}
 {% block scripts %}

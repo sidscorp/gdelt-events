@@ -1,5 +1,19 @@
 {% extends "base.html" %}
-{% block title %}GDELT News{% endblock %}
+{% block title %}{{ page_title or "GDELT News" }}{% endblock %}
+{% block meta %}
+<meta name="description" content="{{ meta_desc }}">
+<link rel="canonical" href="{{ canonical }}">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="GDELT Monitor">
+<meta property="og:title" content="{{ page_title }}">
+<meta property="og:description" content="{{ meta_desc }}">
+<meta property="og:url" content="{{ canonical }}">
+<meta property="og:image" content="{{ og_image }}">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="{{ page_title }}">
+<meta name="twitter:description" content="{{ meta_desc }}">
+<meta name="twitter:image" content="{{ og_image }}">
+{% endblock %}
 {% block page_css %}<link rel="stylesheet" href="/static/css/dashboard.css">{% endblock %}
 {% block content %}
 <div id="topProgress"></div>
@@ -58,23 +72,24 @@
 
 <div class="section-label">Time range</div>
 <div class="time-pills" id="timePills">
-  <button class="time-pill active" data-hours="3">3h</button>
-  <button class="time-pill" data-hours="6">6h</button>
-  <button class="time-pill" data-hours="24">24h</button>
-  <button class="time-pill" data-hours="72">3d</button>
-  <button class="time-pill" data-hours="168">7d</button>
-  <button class="time-pill" data-hours="720">30d</button>
+  {%- set active_h = ssr_hours or 3 %}
+  <button class="time-pill{% if active_h == 3 %} active{% endif %}" data-hours="3">3h</button>
+  <button class="time-pill{% if active_h == 6 %} active{% endif %}" data-hours="6">6h</button>
+  <button class="time-pill{% if active_h == 24 %} active{% endif %}" data-hours="24">24h</button>
+  <button class="time-pill{% if active_h == 72 %} active{% endif %}" data-hours="72">3d</button>
+  <button class="time-pill{% if active_h == 168 %} active{% endif %}" data-hours="168">7d</button>
+  <button class="time-pill{% if active_h == 720 %} active{% endif %}" data-hours="720">30d</button>
   <button id="enOnlyToggle" class="lang-toggle active" title="Show only English-language articles (off = all languages)">🌐 English only</button>
 </div>
 
-<div id="briefingPanel" class="briefing-card" style="display:none;">
+<div id="briefingPanel" class="briefing-card" {% if not ssr_briefing %}style="display:none;"{% endif %}>
   <div class="briefing-head">
     <span class="briefing-label">✦ AI Briefing</span>
     <span style="flex:1"></span>
     <button class="briefing-info-btn" onclick="showBriefingInfo()" title="See exactly what this briefing used: model, sources, and the verbatim prompt">&#9432; how this was made</button>
     <button class="briefing-dismiss" onclick="dismissBriefing()">dismiss</button>
   </div>
-  <div id="briefingText" class="briefing-body"></div>
+  <div id="briefingText" class="briefing-body"{% if ssr_briefing %} data-key="{{ ssr_briefing_key }}"{% endif %}>{% if ssr_briefing %}{{ ssr_briefing|safe }}{% endif %}</div>
   <div id="briefingMeta" class="briefing-meta"></div>
 </div>
 <button id="briefingRestore" class="briefing-restore" style="display:none;" onclick="restoreBriefing()" title="Bring the AI briefing back">✦ Show AI Briefing</button>
@@ -149,10 +164,37 @@
 
 <div class="active-filters" id="activeFilters"></div>
 
-<div class="results-meta" id="resultsMeta" style="margin-bottom:0.3rem;"></div>
+<div class="results-meta" id="resultsMeta" style="margin-bottom:0.3rem;">{% if ssr_total %}{{ "{:,}".format(ssr_total) }} articles{% endif %}</div>
 
-<ul class="article-list" id="articleList">
+{# Server-rendered first paint (issue #6): page 1 straight from the warmed
+   feed cache. Markup mirrors dashboard.js renderArticle closely enough for
+   the CSS; the client hydrates over it (data-ssr) and replaces it with the
+   live render on first fetch. On cache miss this is the classic shell. #}
+<ul class="article-list" id="articleList"{% if ssr_articles %} data-ssr="1" data-snap-key="{{ ssr_snap_key }}"{% endif %}>
+{% if ssr_articles %}
+  {% for a in ssr_articles %}
+  <li class="article">
+    <div class="article-row">
+      {% if a.image %}<div class="article-thumb"><img src="{{ a.image }}" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest('.article-thumb').remove()"></div>{% endif %}
+      <div class="article-body">
+        <div class="article-header">
+          <span class="article-source">{{ a.source }}</span>
+          <span class="article-time">{{ a.time_ago }}</span>
+        </div>
+        <div class="article-title"><a href="{{ a.url }}" target="_blank" rel="noopener">{{ a.title or a.url }}</a></div>
+        {% if a.description %}<div class="article-desc">{{ a.description }}</div>{% endif %}
+        {% if a.variant_count and a.variant_count > 1 and a.event_url %}
+        <div class="rollup" style="margin-top:0.4rem; font-size:0.8rem;">
+          <a href="{{ a.event_url }}" style="font-size:0.74rem;">&#9636; covered by {{ a.variant_count }} sources &rarr;</a>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </li>
+  {% endfor %}
+{% else %}
   <li class="loading">Loading articles...</li>
+{% endif %}
 </ul>
 
 <div class="pagination" id="pagination"></div>

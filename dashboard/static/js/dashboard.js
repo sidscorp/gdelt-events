@@ -57,6 +57,16 @@ const _urlParams = new URLSearchParams(window.location.search);
 if (_urlParams.get('view')) {
   state.view = _urlParams.get('view');
 }
+// ?hours= drives the initial window (and its chip) — required for the
+// server-rendered first paint to describe the same combo the client fetches.
+if (_urlParams.get('hours')) {
+  const _h = _urlParams.get('hours');
+  if (['3', '6', '24', '72', '168', '720'].includes(_h)) {
+    state.hours = _h;
+    document.querySelectorAll('.time-pill').forEach(p =>
+      p.classList.toggle('active', p.dataset.hours === _h));
+  }
+}
 if (_urlParams.get('en_only') === '0') {
   state.en_only = false;
 }
@@ -1248,7 +1258,13 @@ async function createPill() {
 // Source tabs removed — unified feed
 
 // Init — paint the last snapshot instantly (if any), then fetch fresh data.
-restoreSnapshot();
+// When the server already rendered the feed (data-ssr, issue #6), keep that —
+// it comes from the 15-min feed cache, always fresher than a <=6h-old local
+// snapshot. fetchArticles sees the matching data-snap-key and treats it as
+// current content: no skeletons, replaced in place when live data lands.
+if (document.getElementById('articleList').dataset.ssr !== '1') {
+  restoreSnapshot();
+}
 fetchViews().catch(e => console.error("fetchViews:", e));
 fetchStats();
 fetchGalFacets();

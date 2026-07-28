@@ -57,6 +57,16 @@ const _urlParams = new URLSearchParams(window.location.search);
 if (_urlParams.get('view')) {
   state.view = _urlParams.get('view');
 }
+// ?hours= drives the initial window (and its chip) — required for the
+// server-rendered first paint to describe the same combo the client fetches.
+if (_urlParams.get('hours')) {
+  const _h = _urlParams.get('hours');
+  if (['3', '6', '24', '72', '168', '720'].includes(_h)) {
+    state.hours = _h;
+    document.querySelectorAll('.time-pill').forEach(p =>
+      p.classList.toggle('active', p.dataset.hours === _h));
+  }
+}
 if (_urlParams.get('en_only') === '0') {
   state.en_only = false;
 }
@@ -845,13 +855,24 @@ async function fetchArticles() {
     renderPagination(data);
   } catch (err) {
     if (myGen !== currentFetchGen) return; // a newer fetch superseded us
+    // If content is already on screen (SSR first paint or a kept snapshot),
+    // a failed refresh must not wipe it — keep it and report in the meta line.
+    const hasContent = !!list.querySelector('li.article');
     if (err.name === 'AbortError') {
       // Either client-timeout or user action. If it was us hitting 45s, show
       // an actionable message; if user triggered another fetch, they'll see
       // the new spinner so we don't need to render anything here.
       if (currentFetchController === controller) {
-        list.innerHTML = `<li class="loading">Request timed out after 45s — the backend is overloaded or the query is hung.<br><small>Try a narrower time window (1h or 6h), or wait a minute and retry.</small></li>`;
+        if (hasContent) {
+          const meta = document.getElementById('resultsMeta');
+          if (meta) meta.textContent = 'Refresh timed out — showing the last loaded articles.';
+        } else {
+          list.innerHTML = `<li class="loading">Request timed out after 45s — the backend is overloaded or the query is hung.<br><small>Try a narrower time window (1h or 6h), or wait a minute and retry.</small></li>`;
+        }
       }
+    } else if (hasContent) {
+      const meta = document.getElementById('resultsMeta');
+      if (meta) meta.textContent = 'Refresh failed — showing the last loaded articles.';
     } else {
       list.innerHTML = `<li class="loading">Error loading articles: ${err.message}<br><small>The backend may be restarting. Try again in a few seconds.</small></li>`;
     }
@@ -1248,7 +1269,13 @@ async function createPill() {
 // Source tabs removed — unified feed
 
 // Init — paint the last snapshot instantly (if any), then fetch fresh data.
-restoreSnapshot();
+// When the server already rendered the feed (data-ssr, issue #6), keep that —
+// it comes from the 15-min feed cache, always fresher than a <=6h-old local
+// snapshot. fetchArticles sees the matching data-snap-key and treats it as
+// current content: no skeletons, replaced in place when live data lands.
+if (document.getElementById('articleList').dataset.ssr !== '1') {
+  restoreSnapshot();
+}
 fetchViews().catch(e => console.error("fetchViews:", e));
 fetchStats();
 fetchGalFacets();

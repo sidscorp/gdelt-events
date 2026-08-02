@@ -1,139 +1,100 @@
 {% extends "base.html" %}
-{% block title %}{{ ticker or "SEC Analysis" }} — SEC Company Analysis{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/about.css">{% endblock %}
+{% block title %}{% if company %}{{ company.name }} financials{% else %}SEC Financials{% endif %} — GDELT Monitor{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/about.css?v=3">{% endblock %}
 {% block content %}
 
-<div style="max-width: 960px; margin: 0 auto; padding: 2rem 1rem 4rem;">
+<h1>SEC Financials</h1>
+<p class="subtitle">Filed figures from SEC EDGAR, collected and served locally — no live lookup.</p>
 
-  <h1>SEC Company Analysis</h1>
-  <p class="subtitle">Live financials from SEC EDGAR filings. Enter any ticker for real-time metrics, margins, and valuation ratios.</p>
+<form class="sec-form" method="get" action="/sec-analysis" autocomplete="off">
+  <input type="text" name="ticker" value="{{ ticker }}" placeholder="Ticker, e.g. AAPL"
+         maxlength="10" aria-label="Ticker symbol">
+  <button type="submit">Analyze</button>
+</form>
 
-  <form method="GET" action="/sec-analysis" style="display:flex; gap:0.5rem; margin: 1.5rem 0 2rem;">
-    <input type="text" name="ticker" placeholder="AAPL" value="{{ ticker }}"
-           style="padding:0.6rem 0.8rem; font-size:1.1rem; border:1px solid var(--border);
-                  background:var(--card-bg); color:var(--text); border-radius:6px; flex:1; max-width:200px;"
-           maxlength="10" autofocus>
-    <button type="submit" style="padding:0.6rem 1.2rem; font-size:1rem; border:1px solid var(--border);
-                    background:var(--accent); color:#fff; border-radius:6px; cursor:pointer; font-weight:600;">
-      Analyze
-    </button>
-  </form>
+{% if not ticker and not error %}
+<p class="sec-hint">Try
+  {% for s in suggested %}<a href="/sec-analysis?ticker={{ s }}">{{ s }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+</p>
+{% endif %}
 
-  {% if error %}
-    <div style="padding:1rem; background:var(--card-bg); border-left:4px solid #e74c3c; border-radius:6px; margin-bottom:2rem;">
-      <strong>Error:</strong> {{ error }}
-    </div>
-    <p><em>Try these examples: <a href="?ticker=BAH">BAH</a>, <a href="?ticker=AAPL">AAPL</a>, <a href="?ticker=MSFT">MSFT</a></em></p>
-  {% endif %}
+{% if error %}
+<p class="sec-error">{{ error }}</p>
+{% endif %}
 
-  {% if company and financials %}
-    {% set latest = financials[0] %}
+{% if company and latest %}
+<h2>{{ company.name }} {% if company.ticker %}<span class="sec-tick">{{ company.ticker }}</span>{% endif %}</h2>
+{% if matched_by_name %}
+<p class="sec-hint">Matched on company name — no filer files under the ticker
+  <strong>{{ ticker }}</strong>.{% if other_matches %} Also:
+  {% for m in other_matches %}<a href="/sec-analysis?ticker={{ m.name.split(' ')[0] }}">{{ m.name }}</a>{% if not loop.last %} · {% endif %}{% endfor %}{% endif %}
+</p>
+{% endif %}
 
-    <div style="display:flex; align-items:baseline; gap:1rem; margin-bottom:0.5rem;">
-      <h2 style="margin:0;">{{ company.name }} <span style="font-size:0.8rem; color:var(--text-tertiary);">({{ ticker }})</span></h2>
-    </div>
+<p class="sec-basis">
+  <strong>{{ latest.label }}</strong><br>
+  Source: {{ latest.form }} filing. Quarterly figures are the quarter alone, not
+  year-to-date.
+</p>
 
-    <h2>Latest Period: {{ latest.period_end }} ({{ latest.fp }} FY{{ latest.fy }})</h2>
+<ul class="tech-list sec-metrics">
+  <li><span>Revenue</span> <span>{{ fmt_usd(latest.revenue) }}</span></li>
+  <li><span>Gross Profit</span> <span>{{ fmt_usd(latest.gross_profit) }}</span></li>
+  <li><span>Operating Income</span> <span>{{ fmt_usd(latest.operating_income) }}</span></li>
+  <li><span>Net Income</span> <span>{{ fmt_usd(latest.net_income) }}</span></li>
+  <li><span>EPS (Basic)</span> <span>{% if latest.eps_basic is not none %}${{ '%.2f'|format(latest.eps_basic) }}{% else %}—{% endif %}</span></li>
+  <li><span>Shares Outstanding</span> <span>{{ fmt_num(latest.shares_outstanding) }}</span></li>
+</ul>
 
-    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:1rem; margin-bottom:2rem;">
-      <div class="__metric"><div class="__label">Revenue</div><div class="__val">{{ latest._rev }}</div></div>
-      <div class="__metric"><div class="__label">Gross Profit</div><div class="__val">{{ latest._gp }}</div></div>
-      <div class="__metric"><div class="__label">Operating Income</div><div class="__val">{{ latest._op }}</div></div>
-      <div class="__metric"><div class="__label">Net Income</div><div class="__val">{{ latest._ni }}</div></div>
-      <div class="__metric"><div class="__label">EPS (Basic)</div><div class="__val">{{ latest._eps }}</div></div>
-      <div class="__metric"><div class="__label">Cash &amp; Equivalents</div><div class="__val">{{ latest._cash }}</div></div>
-    </div>
+<h2>Margins</h2>
+<ul class="tech-list">
+  <li><span>Gross margin</span> <span>{{ fmt_pct(latest.gross_margin) }}</span></li>
+  <li><span>Operating margin</span> <span>{{ fmt_pct(latest.operating_margin) }}</span></li>
+  <li><span>Net margin</span> <span>{{ fmt_pct(latest.net_margin) }}</span></li>
+</ul>
 
-    {% if ratios and ratios.get("pe_ratio") %}
-    <h2>Valuation Ratios</h2>
-    <p class="subtitle">Ratios requiring a current stock price are <em>not shown</em> since prices are not fetched via this tool.</p>
-    {% endif %}
+<h2>Balance sheet <span class="sec-instant">as of {{ latest.period_end }}</span></h2>
+<ul class="tech-list">
+  <li><span>Total assets</span> <span>{{ fmt_usd(latest.total_assets) }}</span></li>
+  <li><span>Total liabilities</span> <span>{{ fmt_usd(latest.total_liabilities) }}</span></li>
+  <li><span>Stockholders' equity</span> <span>{{ fmt_usd(latest.stockholders_equity) }}</span></li>
+  <li><span>Cash &amp; equivalents</span> <span>{{ fmt_usd(latest.cash) }}</span></li>
+  <li><span>Current ratio</span> <span>{% if latest.current_ratio %}{{ '%.2f'|format(latest.current_ratio) }}{% else %}—{% endif %}</span></li>
+</ul>
 
-    <h2>Profitability Margins</h2>
-    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:1rem; margin-bottom:2rem;">
-      <div class="__metric"><div class="__label">Gross Margin</div><div class="__val">{{ latest._gross_margin }}</div></div>
-      <div class="__metric"><div class="__label">Operating Margin</div><div class="__val">{{ latest._operating_margin }}</div></div>
-      <div class="__metric"><div class="__label">Net Margin</div><div class="__val">{{ latest._net_margin }}</div></div>
-      {% if latest._rev_growth != "—" %}<div class="__metric"><div class="__label">Revenue Growth (YoY)</div><div class="__val">{{ latest._rev_growth }}</div></div>{% endif %}
-      {% if latest._earn_growth != "—" %}<div class="__metric"><div class="__label">Earnings Growth (YoY)</div><div class="__val">{{ latest._earn_growth }}</div></div>{% endif %}
-    </div>
-
-    <h2>Balance Sheet Health</h2>
-    <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:1rem; margin-bottom:2rem;">
-      <div class="__metric"><div class="__label">Total Assets</div><div class="__val">{{ latest._assets }}</div></div>
-      <div class="__metric"><div class="__label">Total Liabilities</div><div class="__val">{{ latest._liab }}</div></div>
-      <div class="__metric"><div class="__label">Stockholders' Equity</div><div class="__val">{{ latest._equity }}</div></div>
-      <div class="__metric"><div class="__label">Long-Term Debt</div><div class="__val">{{ latest._debt }}</div></div>
-      <div class="__metric"><div class="__label">Debt-to-Equity</div><div class="__val">{{ latest._debt_to_equity }}</div></div>
-      <div class="__metric"><div class="__label">Current Ratio</div><div class="__val">{{ latest._current_ratio }}</div></div>
-    </div>
-
-    <h2>Historical Comparison</h2>
-    <div style="overflow-x:auto; margin-bottom:2rem;">
-      <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
-        <thead>
-          <tr style="border-bottom:2px solid var(--border);">
-            <th style="text-align:left; padding:0.5rem;">Period</th>
-            <th style="text-align:left; padding:0.5rem;">Type</th>
-            <th style="text-align:right; padding:0.5rem;">Revenue</th>
-            <th style="text-align:right; padding:0.5rem;">Gross Profit</th>
-            <th style="text-align:right; padding:0.5rem;">Op Income</th>
-            <th style="text-align:right; padding:0.5rem;">Net Income</th>
-            <th style="text-align:right; padding:0.5rem;">EPS</th>
-            <th style="text-align:right; padding:0.5rem;">Net Margin</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for s in financials[:8] %}
-          <tr style="border-bottom:1px solid var(--border-subtle); {% if loop.first %}font-weight:600;{% endif %}">
-            <td style="padding:0.4rem 0.5rem;">{{ s.period_end }}</td>
-            <td style="padding:0.4rem 0.5rem;">{{ s.form }}</td>
-            <td style="text-align:right; padding:0.4rem 0.5rem;">{{ s._rev }}</td>
-            <td style="text-align:right; padding:0.4rem 0.5rem;">{{ s._gp }}</td>
-            <td style="text-align:right; padding:0.4rem 0.5rem;">{{ s._op }}</td>
-            <td style="text-align:right; padding:0.4rem 0.5rem;">{{ s._ni }}</td>
-            <td style="text-align:right; padding:0.4rem 0.5rem;">{{ s._eps }}</td>
-            <td style="text-align:right; padding:0.4rem 0.5rem;">{{ s._net_margin }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-
-    <p class="subtitle" style="font-size:0.8rem; margin-top:3rem;">
-      Data from SEC EDGAR via <code>data.sec.gov</code>. Financials extracted from company 10-K and 10-Q filings.
-      Not financial advice. Consult a professional before making investment decisions.
-    </p>
-
-  {% elif ticker and not error %}
-    <div style="padding:1rem; background:var(--card-bg); border-radius:6px; text-align:center; color:var(--text-tertiary);">
-      Loading...
-    </div>
-  {% elif not ticker and not error %}
-    <p style="color:var(--text-tertiary);">Enter a stock ticker above to analyze SEC filings.
-      <br><em>Try: <a href="?ticker=BAH">BAH</a>, <a href="?ticker=AAPL">AAPL</a>, <a href="?ticker=MSFT">MSFT</a>, <a href="?ticker=GOOGL">GOOGL</a></em></p>
-  {% endif %}
-
+{% if periods|length > 1 %}
+<h2>History</h2>
+<div class="sec-scroll">
+<table class="sec-table">
+  <thead>
+    <tr><th>Period</th><th>Form</th><th>Revenue</th><th>Operating</th><th>Net income</th><th>EPS</th></tr>
+  </thead>
+  <tbody>
+  {% for p in periods %}
+    <tr>
+      <td>{{ p.fp }} {{ p.fy }}<span class="sec-end">{{ p.period_end }}</span></td>
+      <td class="sec-form-cell">{{ p.form }}</td>
+      <td>{{ fmt_usd(p.revenue) }}</td>
+      <td>{{ fmt_usd(p.operating_income) }}</td>
+      <td>{{ fmt_usd(p.net_income) }}</td>
+      <td>{% if p.eps_basic is not none %}${{ '%.2f'|format(p.eps_basic) }}{% else %}—{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
 </div>
+<p class="sec-note">
+  Quarters are discrete periods, so they sum toward the fiscal year rather than
+  repeating it. A blank cell means the company did not tag that concept in that
+  filing — it is not a zero.
+</p>
+{% endif %}
+{% endif %}
 
-<style>
-.__metric {
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.8rem 1rem;
-}
-.__label {
-  font-size: 0.75rem;
-  color: var(--text-tertiary);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 0.3rem;
-}
-.__val {
-  font-size: 1.25rem;
-  font-weight: 600;
-  color: var(--text);
-}
-</style>
+<footer>
+  <a href="/">Back to dashboard</a> · Data from
+  <a href="https://www.sec.gov/edgar" target="_blank" rel="noopener">SEC EDGAR</a>
+  {% if as_of %} · collected {{ as_of[:4] }}-{{ as_of[4:6] }}-{{ as_of[6:8] }}{% endif %}
+</footer>
+
 {% endblock %}

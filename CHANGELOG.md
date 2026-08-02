@@ -21,6 +21,69 @@ Newest first.
 
 ---
 
+## 2026-08-02 — SEC financials: correct the numbers, then pre-collect them
+
+**What** — Rewrote SEC XBRL extraction and turned `/sec-analysis` from a live per-request
+API call into a locally-collected store. New `pipeline/sec_normalize.py`,
+`sec_schema.py`, `sec_ingest.py`; `dashboard/routes/sec_analysis.py` now reads
+`data/sec.db` directly.
+
+**Why** — The page went live earlier today publishing **wrong financials**. For GOOGL:
+blank Revenue, a Q2 net income of $140.23B (larger than all of FY2025's $132.17B), and
+142 million shares against ~12.2 billion actual. Three distinct bugs, all confirmed
+against real filings rather than inferred:
+
+1. **Concepts were resolved once, globally.** Alphabet has 87
+   `RevenueFromContractWithCustomerExcludingAssessedTax` entries but none ending
+   2026-06-30 — recent periods use `Revenues`. The resolver locked onto the stale tag
+   and returned `None`. Now every concept in a chain contributes and the earliest one
+   with a fact *for that period* wins.
+2. **Fact duration was never read.** A 10-Q carries both spans under the same end date
+   and `fp`: `Revenues` 180d = $229.69B (H1) and 90d = $119.80B (Q2). The old code
+   parsed `end` only, so the pick was arbitrary. Duration is now first-class.
+3. **De-cumulation was applied to balance-sheet facts.** `12,230,000,000 −
+   12,088,000,000 = 142,000,000` — that is where the share count came from. Instants
+   (`start is None`) are never de-cumulated.
+4. Latent: removed `LiabilitiesAndStockholdersEquity` from the `total_liabilities`
+   chain. It is liabilities *plus equity*, i.e. total assets.
+
+**How it was verified** — 10 tests in `tests/test_sec_normalize.py`, offline against
+trimmed fixtures (60 KB / 73 KB, verified to reproduce the full multi-MB files).
+**Mutation-tested**: each original bug was reintroduced and confirmed to fail 2–3 tests —
+tests that pass without being able to fail prove nothing. Invariants (quarter never
+exceeds its own fiscal year, `eps × shares ≈ net income`, instants non-negative) catch
+the class rather than the three instances. MSFT included as a non-calendar-fiscal-year
+filer so the logic is not fitted to Alphabet.
+
+Backfill: **15,909 companies, 289,153 periods, 50 MB, 5m52s**. Spot-checked AAPL (Sept
+year-end → Q3), NVDA (Jan year-end → Q1 FY2027), MSFT (June year-end → FY), AMZN, TSLA.
+Live on prod: GOOGL now reads **$119.80B / $112.19B / 12,230,000,000**.
+
+**Files** — `pipeline/sec_normalize.py`, `pipeline/sec_schema.py`,
+`pipeline/sec_ingest.py`, `scripts/register_sec_task.ps1`,
+`tests/test_sec_normalize.py` + `tests/fixtures/`, `dashboard/routes/sec_analysis.py`,
+`dashboard/templates/sec_analysis.html`, `dashboard/static/css/about.css`.
+
+**Notes**
+- **Freshness without polling:** financial facts change only when a company files, and
+  SEC publishes who filed. Backfill is one 1.4 GB `companyfacts.zip`; the daily job reads
+  the ~1.1 MB filing index and refetches only the ~180 CIKs that filed a 10-K/10-Q
+  (~90s). `GDELT-SecIngest` runs 06:40 daily with `--days-back 3` so a weekend or a
+  missed run self-heals.
+- Ingest writes `ingest_log`; the daily `gdelt-watch` alerts if no successful run in 48h.
+  Every silent-failure incident here has come from a job stopping unnoticed.
+- **Known data-quality caveats, not yet resolved:** ~10% of tickered rows show
+  liabilities > assets (plausible for negative-equity filers, but unverified), 0.6% show
+  a quarter exceeding its fiscal year, and revenue coverage is 73% (banks and REITs do
+  not tag `Revenues`). Large caps spot-check clean; the long tail is weaker.
+  `shares = 100` for EIDP/Smurfit/NSTAR is **correct** — wholly-owned subsidiaries.
+- Ticker lookup falls back to a name match: SEC maps `XOM` to a holding-company CIK
+  distinct from "Exxon Mobil Corporation", so ticker-only lookup missed the filer people
+  mean.
+- `~/projects/sec-analyzer` and its FastAPI are no longer in the request path.
+
+---
+
 ## 2026-08-02 — Fix empty SSR on curated view pages (#6)
 
 **What** — `warm_feed.py`'s "already warmed" marker now keys on the dashboard's process

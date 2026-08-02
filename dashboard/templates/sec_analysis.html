@@ -1,14 +1,14 @@
 {% extends "base.html" %}
-{% block title %}{% if company %}{{ company.name }} financials{% else %}SEC Financials{% endif %} — GDELT Monitor{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/about.css?v=4">{% endblock %}
+{% block title %}{% if company %}{{ company.name }} financials{% else %}Company Financials{% endif %} — GDELT Monitor{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/sec.css?v=1">{% endblock %}
 {% block content %}
 
 <h1>Company Financials</h1>
-<p class="subtitle">Filed figures from SEC EDGAR, with the context that makes them mean something. Collected locally — no live lookup.</p>
+<p class="subtitle">Filed figures from SEC EDGAR, with enough context to read them. Collected locally — no live lookup.</p>
 
 <form class="sec-form" method="get" action="/sec-analysis" autocomplete="off">
   <input type="text" name="ticker" value="{{ ticker }}" maxlength="60"
-         placeholder="Ticker or company name" aria-label="Ticker or company name">
+         placeholder="Ticker or company name — AAPL, Microsoft, jp morgan" aria-label="Ticker or company name">
   <button type="submit">Look up</button>
 </form>
 
@@ -34,85 +34,106 @@
 {% endif %}
 
 <p class="sec-basis"><strong>{{ latest.label }}</strong><br>
-  From the {{ latest.form }} filing. Quarterly figures are the quarter alone, not year-to-date.</p>
+  From the {{ latest.form }} filing. Quarterly figures cover the quarter alone, not the year so far.</p>
 
 {% if observations %}
 <h2>What stands out</h2>
 <ul class="sec-obs">
   {% for o in observations %}<li class="sec-obs-{{ o.kind }}">{{ o.text }}</li>{% endfor %}
 </ul>
-<p class="sec-note">Every sentence above is computed from the filed figures — no model writes them, so none can state a number that was not filed.</p>
+<p class="sec-note">Computed from the filed figures — no model writes these, so none can state a number that was not filed.</p>
 {% endif %}
 
-<h2>The quarter in numbers</h2>
-<ul class="tech-list sec-metrics">
-  <li><span>Revenue</span> <span>{{ fmt_usd(latest.revenue) }}
-    {% if latest.revenue_yoy is not none %}<em class="{{ 'up' if latest.revenue_yoy >= 0 else 'down' }}">{{ fmt_signed_pct(latest.revenue_yoy) }} YoY</em>{% endif %}</span></li>
-  <li><span>Gross profit</span> <span>{{ fmt_usd(latest.gross_profit) }}
-    {% if latest.gross_margin is not none %}<em>{{ fmt_pct(latest.gross_margin) }} margin</em>{% endif %}</span></li>
-  <li><span>Operating income</span> <span>{{ fmt_usd(latest.operating_income) }}
-    {% if latest.operating_margin is not none %}<em>{{ fmt_pct(latest.operating_margin) }} margin</em>{% endif %}</span></li>
-  <li><span>Net income</span> <span>{{ fmt_usd(latest.net_income) }}
-    {% if latest.net_income_yoy is not none %}<em class="{{ 'up' if latest.net_income_yoy >= 0 else 'down' }}">{{ fmt_signed_pct(latest.net_income_yoy) }} YoY</em>{% endif %}</span></li>
-  <li><span>EPS (basic)</span> <span>{% if latest.eps_basic is not none %}${{ '%.2f'|format(latest.eps_basic) }}{% else %}—{% endif %}</span></li>
-  <li><span>Shares outstanding</span> <span>{{ fmt_num(latest.shares_outstanding) }}</span></li>
-</ul>
-
-{% macro barchart(c, title, cls) %}
-{% if c %}
-<figure class="sec-fig">
-  <figcaption>{{ title }}</figcaption>
-  <svg viewBox="0 0 {{ c.width }} {{ c.height }}" class="sec-chart {{ cls }}" role="img" aria-label="{{ title }}">
-    {% if c.show_zero %}<line x1="0" y1="{{ c.zero_y }}" x2="{{ c.width }}" y2="{{ c.zero_y }}" class="axis"/>{% endif %}
-    {% for b in c.bars %}
-      <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"
-            class="bar{% if b.neg %} neg{% endif %}{% if b.annual %} annual{% endif %}"><title>{{ b.label }}: {{ b.value }}</title></rect>
-      {% if loop.index0 % 2 == 0 or loop.last %}<text x="{{ b.cx }}" y="{{ c.height - 4 }}" class="tick">{{ b.label }}</text>{% endif %}
-    {% endfor %}
-  </svg>
-</figure>
-{% endif %}
+{# Each row carries a plain-language definition. The point of this page is that
+   someone who does not read filings can still follow it. #}
+{% macro metric(name, value, definition, delta=None, delta_dir=None, sub=None) %}
+<li>
+  <span class="m-name">{{ name }}</span>
+  <span class="m-value">{{ value }}{% if delta %}<em class="m-delta {{ delta_dir }}">{{ delta }}</em>{% endif %}{% if sub %}<em class="m-sub">{{ sub }}</em>{% endif %}</span>
+  <span class="m-def">{{ definition }}</span>
+</li>
 {% endmacro %}
 
-<h2>Trend</h2>
-{{ barchart(rev_chart, 'Revenue by period — taller bars are annual filings', 'rev') }}
-{{ barchart(ni_chart, 'Net income by period — bars below the line are losses', 'ni') }}
+<div class="sec-grid">
+  <div>
+    <h2>The income statement</h2>
+    <ul class="sec-metrics">
+      {{ metric('Revenue', fmt_usd(latest.revenue),
+                'All money taken in from sales, before any costs are subtracted. The top line.',
+                fmt_signed_pct(latest.revenue_yoy) ~ ' vs a year ago' if latest.revenue_yoy is not none else None,
+                'up' if latest.revenue_yoy is not none and latest.revenue_yoy >= 0 else 'down') }}
+      {{ metric('Gross profit', fmt_usd(latest.gross_profit),
+                'Revenue minus the direct cost of producing what was sold. What is left to cover everything else.',
+                None, None, fmt_pct(latest.gross_margin) ~ ' of revenue' if latest.gross_margin is not none else None) }}
+      {{ metric('Operating income', fmt_usd(latest.operating_income),
+                'Profit from running the business itself — after wages, R&D and overheads, but before interest, investments and tax.',
+                None, None, fmt_pct(latest.operating_margin) ~ ' of revenue' if latest.operating_margin is not none else None) }}
+      {{ metric('Net income', fmt_usd(latest.net_income),
+                'The bottom line: what remains after every cost, including tax and anything unrelated to normal operations. Can differ sharply from operating income.',
+                fmt_signed_pct(latest.net_income_yoy) ~ ' vs a year ago' if latest.net_income_yoy is not none else None,
+                'up' if latest.net_income_yoy is not none and latest.net_income_yoy >= 0 else 'down') }}
+      {{ metric('EPS (basic)', '$' ~ '%.2f'|format(latest.eps_basic) if latest.eps_basic is not none else '—',
+                'Net income divided by shares outstanding — the profit attributable to one share.') }}
+      {{ metric('Shares outstanding', fmt_num(latest.shares_outstanding),
+                'How many shares exist. A falling count means buybacks; a rising one means dilution.') }}
+    </ul>
 
-{% if margin_chart %}
-<figure class="sec-fig">
-  <figcaption>Operating margin ({{ margin_chart.lo }} – {{ margin_chart.hi }})</figcaption>
-  <svg viewBox="0 0 {{ margin_chart.width }} {{ margin_chart.height }}" class="sec-chart line" role="img" aria-label="Operating margin trend">
-    {% if margin_chart.zero_y %}<line x1="0" y1="{{ margin_chart.zero_y }}" x2="{{ margin_chart.width }}" y2="{{ margin_chart.zero_y }}" class="axis dashed"/>{% endif %}
-    <polyline points="{{ margin_chart.points }}" class="trend"/>
-    {% for d in margin_chart.dots %}<circle cx="{{ d.x }}" cy="{{ d.y }}" r="2.5" class="dot"><title>{{ d.label }}: {{ d.value }}</title></circle>{% endfor %}
-  </svg>
-</figure>
-{% endif %}
+    <h2>Balance sheet <span class="sec-instant">as of {{ latest.period_end }}</span></h2>
+    <ul class="sec-metrics">
+      {{ metric('Total assets', fmt_usd(latest.total_assets),
+                'Everything the company owns — cash, inventory, property, investments.') }}
+      {{ metric('Total liabilities', fmt_usd(latest.total_liabilities),
+                'Everything it owes: debt, payables, obligations. Assets minus liabilities is what shareholders own.') }}
+      {{ metric("Stockholders' equity", fmt_usd(latest.stockholders_equity),
+                'The shareholders’ residual claim. Negative equity means liabilities exceed assets.') }}
+      {{ metric('Cash & equivalents', fmt_usd(latest.cash),
+                'Money available immediately. A buffer against bad quarters and the fuel for acquisitions.') }}
+    </ul>
+  </div>
 
-{% if news %}
-<h2>In the news</h2>
-<p class="sec-note">Recent coverage from this site's own feed of ~44,000 sources. Note this is <em>current</em> news, not the filing period — the feed keeps a rolling 60-day window, so older quarters have no coverage left to show.</p>
-<ul class="sec-news">
-  {% for n in news %}
-  <li><a href="{{ n.url }}" target="_blank" rel="noopener">{{ n.title }}</a>
-      <span class="sec-news-meta">{{ n.outlet }}{% if n.date %} · {{ n.date }}{% endif %}</span></li>
-  {% endfor %}
-</ul>
-{% endif %}
+  <div>
+    <h2>Trend</h2>
+    {% macro barchart(c, title, help, cls) %}
+    {% if c %}
+    <figure class="sec-fig">
+      <figcaption>{{ title }}<span class="cap-help">{{ help }}</span></figcaption>
+      <svg viewBox="0 0 {{ c.width }} {{ c.height }}" class="sec-chart {{ cls }}" role="img" aria-label="{{ title }}">
+        {% if c.show_zero %}<line x1="0" y1="{{ c.zero_y }}" x2="{{ c.width }}" y2="{{ c.zero_y }}" class="axis"/>{% endif %}
+        {% for b in c.bars %}
+          <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"
+                class="bar{% if b.neg %} neg{% endif %}{% if b.annual %} annual{% endif %}"><title>{{ b.label }}: {{ b.value }}</title></rect>
+          {% if loop.index0 % 2 == 0 or loop.last %}<text x="{{ b.cx }}" y="{{ c.height - 4 }}" class="tick">{{ b.label }}</text>{% endif %}
+        {% endfor %}
+      </svg>
+    </figure>
+    {% endif %}
+    {% endmacro %}
 
-<h2>Balance sheet <span class="sec-instant">as of {{ latest.period_end }}</span></h2>
-<ul class="tech-list">
-  <li><span>Total assets</span> <span>{{ fmt_usd(latest.total_assets) }}</span></li>
-  <li><span>Total liabilities</span> <span>{{ fmt_usd(latest.total_liabilities) }}</span></li>
-  <li><span>Stockholders' equity</span> <span>{{ fmt_usd(latest.stockholders_equity) }}</span></li>
-  <li><span>Cash &amp; equivalents</span> <span>{{ fmt_usd(latest.cash) }}</span></li>
-</ul>
+    {{ barchart(rev_chart, 'Revenue by period',
+                'Solid bars are full-year filings, so they tower over the quarters beside them. Hover any bar for its value.', 'rev') }}
+    {{ barchart(ni_chart, 'Net income by period',
+                'Bars below the line are losses.', 'ni') }}
+
+    {% if margin_chart %}
+    <figure class="sec-fig">
+      <figcaption>Operating margin
+        <span class="cap-help">Share of every revenue dollar kept as operating profit. Range shown: {{ margin_chart.lo }} to {{ margin_chart.hi }}. Rising means the business is getting more efficient.</span>
+      </figcaption>
+      <svg viewBox="0 0 {{ margin_chart.width }} {{ margin_chart.height }}" class="sec-chart line" role="img" aria-label="Operating margin trend">
+        {% if margin_chart.zero_y %}<line x1="0" y1="{{ margin_chart.zero_y }}" x2="{{ margin_chart.width }}" y2="{{ margin_chart.zero_y }}" class="axis dashed"/>{% endif %}
+        <polyline points="{{ margin_chart.points }}" class="trend"/>
+        {% for d in margin_chart.dots %}<circle cx="{{ d.x }}" cy="{{ d.y }}" r="2.5" class="dot"><title>{{ d.label }}: {{ d.value }}</title></circle>{% endfor %}
+      </svg>
+    </figure>
+    {% endif %}
+  </div>
+</div>
 
 {% if periods|length > 1 %}
 <h2>History</h2>
 <div class="sec-scroll">
 <table class="sec-table">
-  <thead><tr><th>Period</th><th>Revenue</th><th>YoY</th><th>Operating</th><th>Net income</th><th>Net margin</th></tr></thead>
+  <thead><tr><th>Period</th><th>Revenue</th><th>YoY</th><th>Operating income</th><th>Net income</th><th>Net margin</th></tr></thead>
   <tbody>
   {% for p in periods %}
     <tr>
@@ -127,7 +148,28 @@
   </tbody>
 </table>
 </div>
-<p class="sec-note">Quarters are discrete periods and sum toward the fiscal year rather than repeating it. A blank cell means the company did not tag that concept — it is not a zero.</p>
+<p class="sec-note">Quarters are discrete periods and sum toward the fiscal year rather than repeating it. A blank cell means the company did not tag that concept in that filing — it is not a zero.</p>
+
+<h2>How to read this</h2>
+<dl class="sec-glossary">
+  <dt>Quarter vs fiscal year</dt>
+  <dd>A fiscal year need not match the calendar. Microsoft's ends in June, Apple's in September, Nvidia's in January — so “Q1 2027” can fall in early 2026.</dd>
+
+  <dt>Year over year (YoY)</dt>
+  <dd>This quarter against the <em>same</em> quarter a year earlier, never the previous quarter. Comparing a retailer's Q1 to its Christmas quarter would show a collapse every single year.</dd>
+
+  <dt>Margin</dt>
+  <dd>A profit figure as a share of revenue. It answers “how much of each dollar taken in is kept?”, which lets a small company be compared with a huge one.</dd>
+
+  <dt>Percentage points (pp)</dt>
+  <dd>The gap between two percentages. A margin moving from 30% to 34% rose four percentage points — not 4%, which would be 31.2%.</dd>
+
+  <dt>Operating vs net income</dt>
+  <dd>Operating income is the business. Net income includes investment gains, interest, one-off charges and tax. A large gap between them means something other than trading drove the result.</dd>
+
+  <dt>Why a figure may be blank</dt>
+  <dd>Companies tag their own filings, and not every concept is tagged. Banks and insurers rarely tag a single “revenue” line at all, reporting interest income instead. Blank means not reported, never zero.</dd>
+</dl>
 {% endif %}
 {% endif %}
 

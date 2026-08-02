@@ -21,6 +21,39 @@ Newest first.
 
 ---
 
+## 2026-08-02 — Financials page: widescreen, and it explains the metrics
+
+**What** — `/sec-analysis` gets its own stylesheet (`static/css/sec.css`), a two-column
+widescreen layout, a plain-language definition under every metric, and a "How to read
+this" glossary.
+
+**Why** — The page was inheriting `about.css`, which sets `body { max-width: 640px }`.
+That is right for prose and wrong for financial data: six numeric columns of history were
+scrolling sideways on a desktop monitor. And the figures assumed the reader already knew
+what "operating margin" or "percentage points" meant, which defeats the point of a page
+whose job is to make numbers understandable.
+
+**How it was verified** — Prod renders 10 metric definitions, 6 glossary entries, 3 SVG
+charts and the two-column grid for GOOGL, INTC and `jp morgan` alike. Visual check at
+1568px: definitions sit under each figure, annual bars read as distinct from quarters,
+margin trend legible. Balance-sheet arithmetic checks out on screen — Alphabet's
+$281.50B liabilities + $640.48B equity = $921.98B assets.
+
+**Files** — `dashboard/static/css/sec.css` (new), `dashboard/templates/sec_analysis.html`.
+
+**Notes**
+- Layout collapses to one column under 900px, and the glossary from two columns to one.
+- The definitions are always visible rather than hidden behind hover: a tooltip is
+  useless on touch and invisible to anyone skimming.
+- Left behind: the `.sec-*` rules appended to `about.css` earlier today are now dead,
+  since this page no longer loads that sheet. Harmless but worth deleting; not removed
+  now because `about.css` still carries the live note-form styles and this was not the
+  moment to risk them.
+- `smoke.sh` 19/20 — the `gal language=en` failure is ingest lag again (`hours=1` returns
+  0 with no filters at all; latest data 49m old, ingest is hourly), not a regression.
+
+---
+
 ## 2026-08-02 — /sec-analysis explains the numbers instead of listing them
 
 **What** — The financials page now says what the figures mean, shows their shape, and

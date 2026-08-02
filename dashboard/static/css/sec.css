@@ -1,0 +1,139 @@
+/* sec.css — the company financials page.
+ *
+ * Split out of about.css because that sheet sets body{max-width:640px}, which is
+ * right for prose and far too narrow for financial data: the history table has
+ * six numeric columns and was scrolling sideways on a desktop monitor.
+ *
+ * Layout is a two-column grid on wide screens (figures beside charts) that
+ * collapses to one column under 900px. Tokens come from base.css so light and
+ * dark both work with no second sheet.
+ */
+
+body { max-width: 1180px; margin: 48px auto; padding: 0 2rem; line-height: 1.65; }
+
+h1 { font-size: 1.7rem; margin-bottom: 0.25rem; }
+h2 {
+  font-size: 1rem; margin: 2rem 0 0.6rem; color: var(--text);
+  letter-spacing: 0.01em;
+}
+p { font-size: 0.88rem; margin-bottom: 0.9rem; }
+.subtitle { font-size: 0.84rem; color: var(--text-tertiary); margin-bottom: 1.6rem; }
+a { color: var(--text); }
+footer {
+  margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border);
+  font-size: 0.75rem; color: var(--text-tertiary);
+}
+
+/* ── search ────────────────────────────────────────────────────────────── */
+.sec-form { display: flex; gap: 0.5rem; margin: 1.2rem 0 0.6rem; }
+.sec-form input[type="text"] {
+  font-family: inherit; font-size: 0.95rem; padding: 0.55rem 0.8rem; width: 22rem;
+  max-width: 100%; background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.sec-form input:focus { outline: none; border-color: var(--accent-brand); }
+.sec-form button {
+  font-family: inherit; font-size: 0.85rem; cursor: pointer; padding: 0.55rem 1.3rem;
+  border: 1px solid var(--accent-brand); background: none; color: var(--accent-brand);
+  border-radius: var(--radius-sm);
+}
+.sec-form button:hover { background: var(--accent-soft); }
+.sec-hint { font-size: 0.82rem; color: var(--text-tertiary); }
+.sec-hint a { color: var(--accent-brand); text-decoration: none; }
+.sec-error { font-size: 0.88rem; color: var(--text-secondary); font-style: italic; }
+.sec-tick { font-size: 0.82rem; color: var(--text-tertiary); font-weight: 400; letter-spacing: 0.05em; }
+.sec-meta { font-size: 0.78rem; color: var(--text-tertiary); margin: -0.3rem 0 0.9rem; }
+.sec-matchnote { font-style: italic; }
+.sec-instant { font-size: 0.75rem; color: var(--text-tertiary); font-weight: 400; }
+
+/* The period basis is load-bearing: conflating a quarter with year-to-date is
+   what put a wrong number on this page in the first place. */
+.sec-basis {
+  font-size: 0.82rem; color: var(--text-secondary); line-height: 1.55;
+  border-left: 2px solid var(--accent-brand); padding-left: 0.8rem;
+  margin: 0.9rem 0 1.4rem;
+}
+
+/* ── observations ──────────────────────────────────────────────────────── */
+.sec-obs { list-style: none; padding: 0; margin: 0.4rem 0 0.7rem; }
+.sec-obs li {
+  font-size: 0.92rem; line-height: 1.6; padding: 0.6rem 0 0.6rem 0.9rem;
+  border-left: 2px solid var(--border); margin-bottom: 0.4rem;
+}
+.sec-obs li.sec-obs-loss, .sec-obs li.sec-obs-composition {
+  border-left-color: var(--accent-brand);
+}
+.sec-note { font-size: 0.76rem; color: var(--text-tertiary); margin-top: 0.5rem; }
+
+/* ── the wide two-column body ──────────────────────────────────────────── */
+.sec-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2.2rem; }
+@media (max-width: 900px) { .sec-grid { grid-template-columns: 1fr; gap: 1rem; } }
+
+/* ── metric rows, each with a plain-language definition ────────────────── */
+.sec-metrics { list-style: none; padding: 0; margin: 0; }
+.sec-metrics > li {
+  padding: 0.6rem 0; border-bottom: 1px solid var(--border);
+  display: grid; grid-template-columns: 1fr auto; gap: 0.2rem 1rem; align-items: baseline;
+}
+.sec-metrics .m-name { font-weight: 600; font-size: 0.86rem; }
+.sec-metrics .m-value {
+  font-size: 0.98rem; font-variant-numeric: tabular-nums; text-align: right;
+}
+/* The definition is the point of this page for a non-finance reader, so it is
+   always visible rather than hidden behind a tooltip. */
+.sec-metrics .m-def {
+  grid-column: 1 / -1; font-size: 0.75rem; color: var(--text-tertiary);
+  line-height: 1.45; margin-top: 0.1rem;
+}
+.m-delta { font-size: 0.72rem; margin-left: 0.45rem; }
+.m-delta.up, td.up { color: #4a9d8f; }
+.m-delta.down, td.down { color: #c2604f; }
+.m-sub { font-size: 0.72rem; color: var(--text-tertiary); margin-left: 0.45rem; }
+
+/* ── charts ────────────────────────────────────────────────────────────── */
+.sec-fig { margin: 0 0 1.3rem; }
+.sec-fig figcaption {
+  font-size: 0.72rem; color: var(--text-tertiary); margin-bottom: 0.35rem;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.sec-fig .cap-help {
+  display: block; text-transform: none; letter-spacing: 0; margin-top: 0.15rem;
+  color: var(--text-tertiary); font-size: 0.72rem;
+}
+.sec-chart { width: 100%; height: auto; overflow: visible; }
+.sec-chart .bar { fill: var(--accent-brand); opacity: 0.72; }
+.sec-chart .bar.annual { opacity: 1; }
+.sec-chart .bar.neg, .sec-chart.ni .bar.neg { fill: #c2604f; opacity: 0.9; }
+.sec-chart.ni .bar { fill: #5b7fb9; }
+.sec-chart .axis { stroke: var(--text-tertiary); stroke-width: 1; opacity: 0.55; }
+.sec-chart .axis.dashed { stroke-dasharray: 3 3; }
+.sec-chart .tick { font-size: 8px; fill: var(--text-tertiary); text-anchor: middle; }
+.sec-chart .trend { fill: none; stroke: var(--accent-brand); stroke-width: 1.8; }
+.sec-chart .dot { fill: var(--accent-brand); }
+
+/* ── history table ─────────────────────────────────────────────────────── */
+.sec-scroll { overflow-x: auto; }
+.sec-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+.sec-table th {
+  text-align: right; font-weight: 600; padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--border); color: var(--text-secondary);
+  font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
+}
+.sec-table th:first-child, .sec-table td:first-child { text-align: left; }
+.sec-table td {
+  text-align: right; padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--border);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.sec-end { display: block; font-size: 0.68rem; color: var(--text-tertiary); }
+
+/* ── glossary ──────────────────────────────────────────────────────────── */
+.sec-glossary { columns: 2; column-gap: 2.2rem; margin-top: 0.5rem; }
+@media (max-width: 900px) { .sec-glossary { columns: 1; } }
+.sec-glossary dt {
+  font-weight: 600; font-size: 0.82rem; margin-top: 0.7rem;
+  break-after: avoid;
+}
+.sec-glossary dd {
+  margin: 0.15rem 0 0; font-size: 0.78rem; color: var(--text-secondary);
+  line-height: 1.5; break-inside: avoid;
+}

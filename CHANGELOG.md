@@ -21,6 +21,41 @@ Newest first.
 
 ---
 
+## 2026-08-02 — About page: LinkedIn, visitor notes, AI-use disclosure
+
+**What** — `/about` gains a LinkedIn link, a public "leave a note" box (`POST /api/note`
+→ `visitor_notes` in `users.db`), and a one-line disclosure of AI assistance under
+"Built by". New notes surface in the daily `gdelt-watch` run and Matrix-alert.
+
+**Why** — Sidd wanted a way for readers to reach him, and to state plainly how the
+project was built. Two stale claims were found on the page while editing and fixed in
+the same pass: the prose said briefings run on *"GLM-4.7 on Cerebras"* and the tech-stack
+list said *"Gemini 2.5 Flash via OpenRouter"* — both wrong, and OpenRouter is not in the
+path at all. Same rot as `/methodology` had.
+
+**How it was verified** — Against dev then prod: rate limit returns **429 after 3
+submits/hour**; a filled honeypot returns `ok:true` to the bot but **stores nothing**
+(confirmed absent from both databases); an empty note is rejected 400. A real note
+posted to prod appeared in `visitor_notes` and the watch reported
+`ALERT 1 new visitor note(s)`. The setup test row was then deleted so it would not fire
+a false alert. `/about` 200, LinkedIn present, AI line present, and grep confirms zero
+occurrences of GLM-4.7 / Gemini / OpenRouter remain.
+
+**Files** — `dashboard/routes/api_feed.py`, `dashboard/templates/about.html`,
+`dashboard/static/css/about.css` (`?v=2`), plus `gdelt_demand_report.py` /
+`gdelt_watch.py` on the ops boxes.
+
+**Notes**
+- The IP is stored only as a **daily-salted hash** — enough to rate-limit, not enough to
+  identify anyone, and it cannot link a visitor across days.
+- Notes are never rendered back into HTML anywhere; if that ever changes, they must be
+  escaped, since the content is attacker-controlled.
+- A Buy Me a Coffee button was requested but deferred — Sidd will supply the URL.
+- The honeypot is positioned off-screen rather than `display:none`, which some bots skip.
+- This was the first deploy to use `deploy_guard.ps1 claim`, and it worked.
+
+---
+
 ## 2026-08-02 — Deploy lock for the shared production tree
 
 **What** — `scripts/deploy_guard.ps1` (`status` / `claim` / `release`), plus a check at

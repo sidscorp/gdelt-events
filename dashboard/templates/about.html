@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}About — GDELT Monitor{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/about.css">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/about.css?v=2">{% endblock %}
 {% block content %}
 
 <h1>About GDELT Monitor</h1>
@@ -21,7 +21,7 @@
 <h2>How it works</h2>
 <p>Articles are scanned using Aho-Corasick automata — a trie-based algorithm that finds all occurrences of thousands of patterns in a single linear pass. Matches are materialized into indexed cache tables so the dashboard can serve results in under a second. The system maintains a rolling 60-day window and prunes older data to keep storage bounded. New articles are classified every 15 minutes.</p>
 
-<p>Alongside keyword matching, each English article is embedded with a local neural model (nomic-embed-text via Ollama) and indexed in a FAISS vector store. A leader-clustering pass groups articles whose embeddings are near-duplicates into persistent event clusters — this is what powers the rolled-up event cards and their permalinks. The AI briefings are generated on demand from the top events in a view by GLM-4.7 on Cerebras (via a self-hosted LLM gateway), streamed token-by-token and cached so repeat views load instantly. Topic pills are precision-gated by an LLM judge — see the <a href="/methodology">methodology page</a> for the full logic behind everything displayed.</p>
+<p>Alongside keyword matching, each English article is embedded with a local neural model (nomic-embed-text via Ollama) and indexed in a FAISS vector store. A leader-clustering pass groups articles whose embeddings are near-duplicates into persistent event clusters — this is what powers the rolled-up event cards and their permalinks. The AI briefings are generated on demand from the top events in a view by gpt-oss-120b (an open-weights model, via a self-hosted LLM gateway), streamed token-by-token and cached so repeat views load instantly. Topic pills are precision-gated by an LLM judge — see the <a href="/methodology">methodology page</a> for the full logic behind everything displayed.</p>
 
 <h2>The tech stack</h2>
 <ul class="tech-list">
@@ -30,7 +30,7 @@
   <li><span>Pattern matching</span> <span>Aho-Corasick via pyahocorasick</span></li>
   <li><span>Embeddings</span> <span>nomic-embed-text v1.5 via Ollama</span></li>
   <li><span>Event clustering</span> <span>FAISS IVF-PQ + exact-cosine re-rank</span></li>
-  <li><span>AI briefings</span> <span>Gemini 2.5 Flash via OpenRouter</span></li>
+  <li><span>AI briefings</span> <span>gpt-oss-120b via self-hosted LiteLLM gateway</span></li>
   <li><span>Web framework</span> <span>Flask + Waitress</span></li>
   <li><span>App</span> <span>Installable PWA (service worker)</span></li>
   <li><span>Infrastructure</span> <span>Cloudflare Tunnel (zero-trust)</span></li>
@@ -40,6 +40,54 @@
 
 <h2>Built by</h2>
 <p><strong>Sidd Nambiar</strong> — Decision Scientist, computational modeler, and builder of systems that help make sense of the world. This project sits at the intersection of what I do professionally and what I find genuinely interesting: turning large, noisy data streams into useful intelligence.</p>
+
+<p class="ai-note">Built with heavy use of AI coding assistants over several years; the design decisions, and the mistakes, are my own.</p>
+
+<p><a href="https://www.linkedin.com/in/siddnambiar" target="_blank" rel="noopener">Connect on LinkedIn</a></p>
+
+<h2>Leave a note</h2>
+<p>If you use this, or it broke, or you want something it doesn't do yet — tell me. Goes straight to me; nothing else happens with it.</p>
+<form id="noteForm" class="note-form" autocomplete="off">
+  <textarea id="noteText" maxlength="2000" rows="4" required
+            placeholder="What's on your mind?"></textarea>
+  <input type="text" id="noteContact" maxlength="200"
+         placeholder="Email or handle, if you'd like a reply (optional)">
+  <!-- honeypot: hidden from people, irresistible to bots -->
+  <input type="text" id="noteWebsite" name="website" tabindex="-1"
+         autocomplete="off" aria-hidden="true" class="hp">
+  <button type="submit" id="noteSend">Send</button>
+  <span id="noteStatus" class="note-status" role="status" aria-live="polite"></span>
+</form>
+<script>
+document.getElementById('noteForm').addEventListener('submit', async function (e) {
+  e.preventDefault();
+  var btn = document.getElementById('noteSend');
+  var status = document.getElementById('noteStatus');
+  var note = document.getElementById('noteText').value.trim();
+  if (!note) return;
+  btn.disabled = true; status.textContent = 'sending\u2026';
+  try {
+    var r = await fetch('/api/note', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        note: note,
+        contact: document.getElementById('noteContact').value,
+        website: document.getElementById('noteWebsite').value
+      })
+    });
+    if (r.ok) {
+      document.getElementById('noteForm').innerHTML =
+        '<p class="note-thanks">Thanks \u2014 got it.</p>';
+    } else if (r.status === 429) {
+      status.textContent = 'that\u2019s a few already \u2014 try again later'; btn.disabled = false;
+    } else {
+      status.textContent = 'didn\u2019t send, sorry'; btn.disabled = false;
+    }
+  } catch (err) {
+    status.textContent = 'didn\u2019t send, sorry'; btn.disabled = false;
+  }
+});
+</script>
 
 <footer>
   <a href="/">Back to dashboard</a> · Data from <a href="https://www.gdeltproject.org" target="_blank">GDELT Project</a>

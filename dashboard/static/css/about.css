@@ -10,3 +10,26 @@ p { font-size: 0.88rem; margin-bottom: 1rem; }
 .tech-list li span:last-child { color: var(--text-secondary); }
 a { color: var(--text); }
 footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); font-size: 0.75rem; color: var(--text-tertiary); }
+
+/* Built-by note + the visitor note box. */
+.ai-note { font-size: 0.82rem; color: var(--text-secondary); font-style: italic; }
+.note-form { display: flex; flex-direction: column; gap: 0.6rem; margin-bottom: 1rem; }
+.note-form textarea, .note-form input[type="text"] {
+  font-family: inherit; font-size: 0.86rem; padding: 0.6rem 0.7rem; width: 100%;
+  background: var(--surface); color: var(--text); border-radius: var(--radius-sm);
+  border: 1px solid var(--border); resize: vertical;
+}
+.note-form textarea:focus, .note-form input[type="text"]:focus {
+  outline: none; border-color: var(--accent-brand);
+}
+.note-form button {
+  align-self: flex-start; font-family: inherit; font-size: 0.82rem; cursor: pointer;
+  padding: 0.4rem 1.1rem; border-radius: var(--radius-sm);
+  border: 1px solid var(--accent-brand); background: none; color: var(--accent-brand);
+}
+.note-form button:hover:not(:disabled) { background: var(--accent-soft); }
+.note-form button:disabled { opacity: 0.5; cursor: default; }
+.note-status { font-size: 0.78rem; color: var(--text-tertiary); }
+.note-thanks { font-size: 0.88rem; color: var(--accent-brand); }
+/* Honeypot: off-screen rather than display:none, which some bots skip. */
+.hp { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }

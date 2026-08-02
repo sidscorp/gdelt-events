@@ -21,6 +21,67 @@ Newest first.
 
 ---
 
+## 2026-08-02 — Cut briefing LLM spend ~30x
+
+**What** — Five changes to how briefings are generated: model back to
+`gpt-oss-120b`; thread updates skipped on prewarm generations; prewarm made
+demand-driven instead of a 17×6 cross-product; freshness scaled to the window being
+summarized; event list deduped and cut from 20 to 12.
+
+**Why** — Briefings were 89% of all LLM spend across the fleet ($20.80 of $23.45 over
+14 days), and a plan to pre-warm every combo 5×/day would have taken it to ~$130/month.
+Each change targets a measured cause:
+
+1. **`cerebras-fast` was believed free — it isn't.** Observed blended rate ~$1.90/1M
+   made it 8× costlier per briefing than the `gpt-oss-120b` it had replaced that
+   morning, and the largest single line item in the fleet. `pill_eval.py:31` already
+   records this exact conclusion for the pill judge, which was migrated off Cerebras
+   for the same reason and validated with an agreement eval.
+2. **Thread updates fired on every generation.** Measured in the GDELT Langfuse
+   project over 14 days: 1,749 `gdelt-briefing` calls, 1,638 `gdelt-thread-update` —
+   0.94 per briefing, at 1,179 in / 649 out each. That is 0.84× the cost of the
+   briefing itself, and thread continuity is only ever read by a human opening the
+   panel. Prewarm now skips it.
+3. **Prewarm warmed 102 combos for ~9 daily reads.** `briefing_history` shows only
+   **13 of 102 combos ever opened**, 7 of 17 views, 3 of 6 windows, with `3h`+`24h`
+   at 98.3% and the top 4 combos at 78%. Prewarm now selects from `trigger='visit'`
+   history, so it warms what is read and stops warming what isn't. Cold combos
+   generate on demand the rare time someone opens one, and are warmed thereafter.
+4. **Flat 1h freshness would have defeated a 4-hourly prewarm** — for three of every
+   four hours a visit regenerated anyway, paying for prewarm *and* on-demand.
+   `fresh_s(hours)` now scales 3h→3h … 720h→24h.
+5. **~3 duplicate titles per prompt**, from clustering leaving near-identical
+   headlines in the ranked list — wasted tokens and pushed the model to write the
+   same bullet twice.
+
+**How it was verified** — On dev (:8016) with a real forced generation: prompt
+**2,398 → 1,601 tokens**, events 20 → 12, **duplicate titles 3 → 0**. `fresh_s`
+returns 3/4/6/12/24/24h across the six windows. `demand_combos()` against production
+history selects **13 combos, not 102**. Thread-update guard confirmed by timestamp: a
+prewarm briefing generated 17:56:08 left `_all:720`'s `briefing_threads` row at
+17:02:22 — no update fired. Prod after deploy: `/`, `/api/stats`, `/?view=ai_sector`,
+`/methodology` all 200; `tests/smoke.sh` 19/20 (the `gal language=en` failure is
+ingest lag — the 1h window returns 0 with no filters at all).
+
+**Files** — `dashboard/briefing.py`, `dashboard/routes/api_briefing.py`,
+`pipeline/prewarm_briefings.py`, `dashboard/templates/methodology.html`.
+
+**Notes**
+- Projected ~**$1.40/month** for briefings (13 combos × 5 prewarms + ~9 visits/day),
+  against ~$132/month for the 102-combo × 5 plan on Cerebras with threads everywhere.
+  This is a projection from measured token counts and configured rates — **the real
+  number should be checked against `spend_lib` in a few days.**
+- Running briefings on rainbow-boi's local GPU was considered and rejected: ~$0.22/mo
+  of electricity vs ~$1.40 cloud, for a saving of about a dollar a month, in exchange
+  for coupling briefings to the GPU that already runs Frigate and the embedding model
+  (which silently died for 11 days in July), plus citation quality risk on a small model.
+- Cached briefings written before this change keep their 20 sources until they age out.
+- Cerebras dollar figures are LiteLLM's modeled cost — that entry has no explicit price
+  in the gateway config, so it falls back to the built-in map. Token counts are exact;
+  the dollars are worth sanity-checking against Cerebras's own billing.
+
+---
+
 ## 2026-08-02 — Serve-cached-then-regenerate briefings; all 17 views pre-warmed
 
 **What** — Model switched to `cerebras-fast`; `BRIEFING_TTL_S` renamed to

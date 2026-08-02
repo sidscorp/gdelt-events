@@ -10,7 +10,7 @@ import time as _time
 
 from db import get_db
 from briefing import (
-    BRIEFING_FRESH_S, BRIEFING_EVENT_LIMIT, BRIEFING_MODEL,
+    BRIEFING_FRESH_S, BRIEFING_EVENT_LIMIT, BRIEFING_MODEL, fresh_s,
     _build_briefing_prompt, _fetch_briefing_events,
     _generate_briefing, _generate_briefing_stream,
     _normalize_briefing,
@@ -76,7 +76,8 @@ def api_briefing():
         except Exception:
             cached_sources = []
         age_s = (datetime.utcnow() - datetime.strptime(cached["generated_at"], "%Y-%m-%d %H:%M:%S")).total_seconds()
-        is_stale = age_s >= BRIEFING_FRESH_S
+        # Freshness scales with the window being summarized — see briefing.fresh_s.
+        is_stale = age_s >= fresh_s(hours)
     elif not cached:
         is_stale = True  # no cache at all — must generate
 
@@ -173,7 +174,8 @@ def api_briefing():
             record_briefing_history(cache_key, view_id or "_all", hours, briefing,
                                     sources_json, len(sources), meta_json, generated_at,
                                     trigger=history_trigger)
-            update_threads_async(cache_key, threads, briefing)
+            if history_trigger != "prewarm":
+                update_threads_async(cache_key, threads, briefing)
             return jsonify({
                 "briefing": briefing, "sources": sources_payload,
                 "article_count": len(sources), "generated_at": generated_at,
@@ -275,7 +277,10 @@ def api_briefing():
                     sources_json, len(sources), meta_json, generated_at,
                     trigger=history_trigger,
                 )
-                update_threads_async(cache_key, threads, briefing)
+                # Thread continuity is only read by a human opening the panel, and
+                # costs ~0.84x the briefing itself (measured). Prewarm skips it.
+                if history_trigger != "prewarm":
+                    update_threads_async(cache_key, threads, briefing)
             yield f"data: {json.dumps({'done': True, 'refreshed': is_stale, 'article_count': len(sources)})}\n\n"
         finally:
             _finish_regen(cache_key)

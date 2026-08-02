@@ -24,8 +24,39 @@ req_log = logging.getLogger("dashboard.requests")
 # Routed through the self-hosted LLM gateway (LiteLLM @ llm.snambiar.com). The key
 # file now holds the gateway virtual key, and the model is a gateway alias.
 OPENROUTER_URL = "https://llm.snambiar.com/v1/chat/completions"
-BRIEFING_MODEL = "cerebras-fast"  # free Cerebras tier; if 402s (credits exhausted), prewarm skips and on-demand visit retries on next poll
-BRIEFING_FRESH_S = 3600  # cache age that triggers background regeneration (60 minutes)
+# Fireworks gpt-oss-120b ($0.15/$0.60 per 1M) — NOT cerebras-fast. Cerebras is
+# not free: its observed blended rate is ~$1.90/1M, which made it 8x pricier
+# per briefing and the single largest line item across the whole LLM fleet.
+# Same reasoning already applied to the pill judge (see pipeline/pill_eval.py).
+BRIEFING_MODEL = "accounts/fireworks/models/gpt-oss-120b"
+BRIEFING_FRESH_S = 3600  # default cache age that triggers background regeneration
+
+
+# How long a briefing stays "fresh" depends on the window it summarizes: a 3h
+# briefing goes stale fast, a 30-day one barely moves between prewarm runs.
+# A flat 1h meant that with prewarms every ~4h, three of every four hours a
+# visit silently regenerated anyway — paying for prewarm AND on-demand.
+# Keep the shortest window at or above the prewarm interval.
+FRESH_BY_HOURS = {
+    3: 3 * 3600,        # matches the tightest prewarm cadence
+    6: 4 * 3600,
+    24: 6 * 3600,
+    72: 12 * 3600,
+    168: 24 * 3600,
+    720: 24 * 3600,
+}
+
+
+def fresh_s(hours) -> int:
+    """Seconds a cached briefing for this window counts as fresh."""
+    try:
+        h = int(hours)
+    except (TypeError, ValueError):
+        return BRIEFING_FRESH_S
+    if h in FRESH_BY_HOURS:
+        return FRESH_BY_HOURS[h]
+    # Unlisted window: scale with it, clamped to the range above.
+    return max(3 * 3600, min(24 * 3600, h * 900))
 _OPENROUTER_KEY_PATH = OPENROUTER_KEY_PATH
 
 
@@ -449,7 +480,7 @@ def record_briefing_history(cache_key, view_id, hours, briefing, sources_json,
 
 
 BRIEFING_EVENT_BUFFER = 400   # articles pulled before dedup (pills/filtered)
-BRIEFING_EVENT_LIMIT = 20     # top-N importance-ranked events fed to the model
+BRIEFING_EVENT_LIMIT = 12     # top-N importance-ranked events fed to the model
 BRIEFING_DESC_CHARS = 220
 
 
@@ -543,10 +574,21 @@ def _fetch_briefing_events(view_id, hours):
             view_name = view["name"]
             view_desc = view.get("description", "") or view_desc
 
-        for c in _window_events(con, view, cutoff)[:BRIEFING_EVENT_LIMIT]:
+        # Clustering leaves near-identical headlines in the ranked list — measured
+        # at ~3 repeats per prompt, which burned tokens and pushed the model to
+        # write the same bullet twice. Dedup on a normalized title BEFORE taking
+        # the top N, so the model gets N *distinct* stories rather than N rows.
+        seen = set()
+        for c in _window_events(con, view, cutoff):
+            if len(events) >= BRIEFING_EVENT_LIMIT:
+                break
             title = (c.get("title") or "").strip()
             if len(title) <= 10:
                 continue
+            key = re.sub(r"[^a-z0-9]+", " ", title.lower()).strip()[:70]
+            if key in seen:
+                continue
+            seen.add(key)
             events.append({
                 "title": title,
                 "description": (c.get("description") or "")[:BRIEFING_DESC_CHARS],

@@ -5,10 +5,17 @@ Hits the local non-streaming endpoint with ?refresh=1 to force regeneration
 and re-cache. Data-version-guarded: only runs when gdelt_ingest.py has written
 a new data_version.txt, skipping redundant cycles.
 
-Scheduled twice daily (midnight + noon) via Windows Task Scheduler.
-With cerebras-fast (free tier), failures from 402s are logged and skipped;
-the "keep stale until fresh" design means users still see the last cached
-briefing. Total: 17 views × 6 windows = 102 combos, ~45-90 min sequential.
+DEMAND-DRIVEN: the combo list is not the 17x6=102 cross-product. It is read
+from briefing_history — the view/window pairs a human has actually opened in
+the last PREWARM_LOOKBACK_DAYS. Measured over the first week of history, only
+13 of the 102 combos were EVER opened and 4 accounted for 78% of reads, so
+warming the cross-product spent ~26 generations for every one a person saw.
+Combos nobody opens are simply generated on demand the rare time someone does,
+which then makes them "recent" and they get warmed from the next run on. The
+list self-tunes; there is nothing to maintain by hand.
+
+Failures are logged and skipped; the "keep stale until fresh" design means
+users still see the last cached briefing.
 
 Usage:
     python prewarm_briefings.py            # defaults to port 8015 (prod)
@@ -76,6 +83,43 @@ def warm(view, hours, base_url, timeout=120):
         print(f"[{time.strftime('%H:%M:%S')}] FAIL {label:30s} ({e})", flush=True)
 
 
+
+PREWARM_LOOKBACK_DAYS = 30   # how far back a "someone opened this" signal counts
+PREWARM_MAX_COMBOS = 30      # hard ceiling, so a burst of browsing can't explode cost
+ALWAYS_WARM = [("", 3), ("", 24)]   # global feed: the front page, always instant
+
+
+def demand_combos():
+    """(view_id, hours) pairs a human actually opened recently, most-read first.
+
+    Reads trigger='visit' rows only — prewarm's own writes must not feed back in
+    and keep a combo alive forever.
+    """
+    import sqlite3
+    db = DATA_DIR / "users.db"
+    combos = []
+    try:
+        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        rows = con.execute(
+            "SELECT view_id, hours, count(*) c FROM briefing_history "
+            "WHERE trigger = 'visit' "
+            "  AND generated_at >= date('now', ?) "
+            "GROUP BY view_id, hours ORDER BY c DESC",
+            (f"-{PREWARM_LOOKBACK_DAYS} day",),
+        ).fetchall()
+        con.close()
+        for view_id, hours, _c in rows:
+            combos.append(("" if view_id in (None, "_all") else view_id, int(hours)))
+    except Exception as e:
+        print(f"[{time.strftime('%H:%M:%S')}] demand query failed ({e}) — "
+              f"falling back to ALWAYS_WARM only", flush=True)
+
+    for c in ALWAYS_WARM:
+        if c not in combos:
+            combos.append(c)
+    return combos[:PREWARM_MAX_COMBOS]
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8015, help="Dashboard port (default: 8015)")
@@ -91,19 +135,19 @@ def main():
         print(f"[{time.strftime('%H:%M:%S')}] data unchanged (version {ver}) — skipping", flush=True)
         return
 
-    total = len(VIEWS) * len(HOURS)
-    print(f"[{time.strftime('%H:%M:%S')}] pre-warming {total} briefing combos "
-          f"({len(VIEWS)} views × {len(HOURS)} windows) on port {args.port}", flush=True)
+    combos = demand_combos()
+    total = len(combos)
+    print(f"[{time.strftime('%H:%M:%S')}] pre-warming {total} demand-selected combos "
+          f"(last {PREWARM_LOOKBACK_DAYS}d of reads) on port {args.port}", flush=True)
 
     t_start = time.time()
     ok_count = 0
     fail_count = 0
-    for view in VIEWS:
-        for hours in HOURS:
-            warm(view, hours, base_url)
-            ok_count += 1  # failure is logged but not fatal; count all attempts
-            if STAGGER_S:
-                time.sleep(STAGGER_S)
+    for view, hours in combos:
+        warm(view, hours, base_url)
+        ok_count += 1  # failure is logged but not fatal; count all attempts
+        if STAGGER_S:
+            time.sleep(STAGGER_S)
 
     elapsed = time.time() - t_start
     print(f"[{time.strftime('%H:%M:%S')}] done: {total} combos in {elapsed:.1f}s", flush=True)

@@ -21,6 +21,50 @@ Newest first.
 
 ---
 
+## 2026-08-02 — Documentation facts injected from code; /about and /methodology rewritten
+
+**What** — `pages.py::_doc_facts()` gathers `BRIEFING_MODEL`, `BRIEFING_EVENT_LIMIT`,
+`fresh_s()`, the `importance.py` weights and the live `VIEWS` registry, and injects them
+into `/about` and `/methodology`. Both pages now render those numbers from the source of
+truth. "What it does" was rewritten against the live pill registry, and `/methodology`
+gained four explanatory sections aimed at a technical reader.
+
+**Why** — Every concrete claim on those pages was hand-copied prose duplicating a
+constant in code, and **six were found wrong in a single day**: "GLM-4.7 on Cerebras",
+"Gemini 2.5 Flash via OpenRouter", "top 50 events", "cached for 45 minutes", "cached for
+60 minutes", and "a few built-in monitoring views" when there were 16. Rewriting alone
+would have reset the clock on the same failure. Two of the three views "What it does"
+named by hand no longer existed under those names.
+
+The new `/methodology` sections answer the questions a technical reader actually has and
+the terse spec did not: why raw article counts mislead (GDELT indexes syndication, not
+events), what an "event" is and where the clustering is known to be wrong, why keyword
+matching scored 11–25% precision and what judge-gating changed, and where briefings can
+still be wrong despite being grounded. Substantive technical writing is also the kind of
+content that earns links — relevant while GoogleBot is crawling ~10x less than BingBot.
+
+**How it was verified** — On dev then prod, the injected values resolve to the real
+config: "**16** curated topic feeds across **4** areas" with the group lists generated
+from `VIEWS`, "top **12** events", weights **0.5 / 0.3 / 0.2**, freshness "**3** hours …
+**24** hours", model `gpt-oss-120b`. `grep -c '{{'` returns **0** on both live pages, so
+no template expression leaked. `/about`, `/methodology`, `/` all 200.
+
+**Files** — `dashboard/routes/pages.py`, `dashboard/templates/about.html`,
+`dashboard/templates/methodology.html`.
+
+**Notes**
+- Each lookup is wrapped in its own `try/except` with a literal fallback in the template
+  (`{{ event_limit or 12 }}`), so an import failure degrades to the old behaviour rather
+  than 500-ing a public page.
+- Remaining hand-written numbers: 44,000 sources, 60-day retention, the 15-minute ingest
+  cadence, and the 11–25% / 75–94% precision figures. The first three could be injected
+  from `pipeline/config.py`; the precision figures are measurements from a point-in-time
+  audit and should stay prose.
+- The honest-limitations paragraphs are deliberate: a news-ranking tool's central
+  credibility question is what it gets wrong, and the previous page never said.
+
+---
+
 ## 2026-08-02 — About page: LinkedIn, visitor notes, AI-use disclosure
 
 **What** — `/about` gains a LinkedIn link, a public "leave a note" box (`POST /api/note`

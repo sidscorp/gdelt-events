@@ -358,12 +358,48 @@ def event_detail(cluster_id):
     return render_template("event_detail.html", cluster=cluster, error=None)
 
 
+
+# ── documentation facts ──────────────────────────────────────────────────────
+# /about and /methodology make concrete claims — model names, event limits, cache
+# windows, scoring weights, how many pills exist. Every one of those was hand-copied
+# prose duplicating a constant in code, and on 2026-08-02 six of them were found
+# wrong across three pages at once (GLM-4.7, Gemini 2.5 Flash, OpenRouter, "top 50
+# events", "45 minutes", "a few built-in views" when there were 16). Inject them from
+# the source of truth instead, so the pages cannot drift again.
+def _doc_facts():
+    facts = {}
+    try:
+        from briefing import BRIEFING_MODEL, BRIEFING_EVENT_LIMIT, fresh_s
+        facts["model"] = BRIEFING_MODEL.rsplit("/", 1)[-1]
+        facts["event_limit"] = BRIEFING_EVENT_LIMIT
+        facts["fresh_short_h"] = fresh_s(3) // 3600
+        facts["fresh_long_h"] = fresh_s(720) // 3600
+    except Exception:
+        pass
+    try:
+        from importance import IMP_W_COVERAGE, IMP_W_VELOCITY, IMP_W_RECENCY
+        facts["w_coverage"] = IMP_W_COVERAGE
+        facts["w_velocity"] = IMP_W_VELOCITY
+        facts["w_recency"] = IMP_W_RECENCY
+    except Exception:
+        pass
+    try:
+        facts["n_views"] = len(VIEWS)
+        by_group = {}
+        for v in VIEWS:
+            by_group.setdefault(v.get("group", "Other"), []).append(v)
+        facts["view_groups"] = by_group
+    except Exception:
+        pass
+    return facts
+
+
 @bp.route("/about")
 def about():
-    return render_template("about.html")
+    return render_template("about.html", **_doc_facts())
 
 
 @bp.route("/methodology")
 def methodology():
     """Transparency: the logic behind everything the dashboard displays."""
-    return render_template("methodology.html")
+    return render_template("methodology.html", **_doc_facts())

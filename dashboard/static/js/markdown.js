@@ -129,8 +129,10 @@ async function fetchBriefing() {
           if (data.found !== undefined) {
             textEl.innerHTML = '<span style="color:var(--text-tertiary); font-style:italic;">Not enough recent articles for a briefing — try a wider time range.</span>';
             metaEl.textContent = '';
-          } else {
+          } else if (!textEl.textContent.trim()) {
             panel.style.display = 'none';
+          } else {
+            metaEl.textContent = 'Using cached briefing';
           }
           return true;
         }
@@ -173,7 +175,7 @@ async function fetchBriefing() {
       metaEl.textContent = '';
     }
   } catch (err) {
-    if (err.name !== 'AbortError') panel.style.display = 'none';
+    if (err.name !== 'AbortError' && !textEl.textContent.trim()) panel.style.display = 'none';
   }
 }
 

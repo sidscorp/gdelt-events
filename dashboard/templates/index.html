@@ -14,7 +14,7 @@
 <meta name="twitter:description" content="{{ meta_desc }}">
 <meta name="twitter:image" content="{{ og_image }}">
 {% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/dashboard.css">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/dashboard.css?v=17">{% endblock %}
 {% block content %}
 <div id="topProgress"></div>
 
@@ -147,7 +147,7 @@
 
 <div class="active-filters" id="activeFilters"></div>
 
-<div class="results-meta" id="resultsMeta" style="margin-bottom:0.3rem;">{% if ssr_total %}{{ "{:,}".format(ssr_total) }} articles{% endif %}</div>
+<div class="results-meta" id="resultsMeta" style="margin-bottom:0.3rem;">{% if ssr_total %}All topics &middot; {{ "{:,}".format(ssr_total) }} articles{% endif %}</div>
 
 {# Server-rendered first paint (issue #6): page 1 straight from the warmed
    feed cache. Markup mirrors dashboard.js renderArticle closely enough for
@@ -203,7 +203,7 @@
 </footer>
 {% endblock %}
 {% block scripts %}
-<script src="/static/js/rum.js"></script>
-<script src="/static/js/dashboard.js"></script>
-<script src="/static/js/markdown.js"></script>
+<script src="/static/js/rum.js?v=17"></script>
+<script src="/static/js/dashboard.js?v=17"></script>
+<script src="/static/js/markdown.js?v=18"></script>
 {% endblock %}

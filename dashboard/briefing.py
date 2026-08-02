@@ -24,8 +24,8 @@ req_log = logging.getLogger("dashboard.requests")
 # Routed through the self-hosted LLM gateway (LiteLLM @ llm.snambiar.com). The key
 # file now holds the gateway virtual key, and the model is a gateway alias.
 OPENROUTER_URL = "https://llm.snambiar.com/v1/chat/completions"
-BRIEFING_MODEL = "cerebras-fast"  # Cerebras GLM-4.7 (fast, no-thinking) via the gateway; if Cerebras 402s (credits), "neuralwatt-kimi" works as fallback
-BRIEFING_TTL_S = 2700  # 45 minutes (pre-warmed for hot combos; news doesn't move that fast)
+BRIEFING_MODEL = "accounts/fireworks/models/gpt-oss-120b"  # Cerebras GLM-4.7 via the gateway; local-fast available for testing
+BRIEFING_TTL_S = 3600  # 60 minutes (hourly ingest + pre-warm cycle)
 _OPENROUTER_KEY_PATH = OPENROUTER_KEY_PATH
 
 
@@ -92,6 +92,72 @@ def _age_label(generated_at: str) -> tuple[float, str]:
     else:
         label = f"{int(age_s // 86400)} days ago"
     return age_s, label
+
+
+def _normalize_briefing(text, view_name, hours):
+    """Post-process a model-generated briefing for consistent structure.
+
+    Small models produce variable formatting — stray bullets, duplicate
+    text, missing headers. This pass enforces a clean, predictable shape
+    before the briefing is cached, so the dashboard never shows mess."""
+    text = text.strip()
+
+    # Build the canonical header
+    if hours <= 1:
+        time_label = "the last hour"
+    elif hours <= 24:
+        time_label = f"Last {hours} Hours"
+    elif hours <= 72:
+        time_label = f"Last {hours // 24} Days"
+    elif hours <= 168:
+        time_label = "Last Week"
+    elif hours <= 720:
+        time_label = "Last 30 Days"
+    else:
+        time_label = f"Last {hours // 24} Days"
+    canonical_header = f"## {view_name} — {time_label}"
+
+    # 1. Ensure the canonical header is present.
+    #    If the model wrote a different H2 header, replace it.
+    #    If there's no H2 header at all, prepend one.
+    lines = text.split("\n")
+    header_replaced = False
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("## "):
+            lines[i] = canonical_header
+            header_replaced = True
+            break
+    if not header_replaced:
+        lines.insert(0, canonical_header)
+        lines.insert(1, "")  # blank line after header
+
+    # 2. Fix stray bullet characters. Normalize all to "- ".
+    cleaned = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("- - "):
+            stripped = "- " + stripped[4:]
+        elif stripped.startswith("* - "):
+            stripped = "- " + stripped[4:]
+        elif stripped.startswith("*  ") and not stripped.startswith("* **"):
+            stripped = "- " + stripped[3:]
+        elif stripped.startswith("* ") and len(stripped) > 2:
+            if not stripped[2:].startswith("**"):
+                stripped = "- " + stripped[2:]
+        cleaned.append(stripped)
+
+    # 3. Collapse repeated blank lines (max 1 blank between sections).
+    final = []
+    prev_blank = False
+    for line in cleaned:
+        is_blank = not line.strip()
+        if is_blank and prev_blank:
+            continue
+        prev_blank = is_blank
+        final.append(line)
+
+    return "\n".join(final).strip()
 
 
 def _build_briefing_prompt(sources: list[dict], view_name: str, view_desc: str,
@@ -175,18 +241,18 @@ def _build_briefing_prompt(sources: list[dict], view_name: str, view_desc: str,
             f"Focus your analysis on developments relevant to this topic. "
         )
 
-    return (
-        f"You are a senior news intelligence analyst writing a briefing for a decision-maker. "
-        f"Below are {len(sources)} numbered news stories from {time_label}, drawn from "
-        f"44,000+ global sources monitored in real-time and de-duplicated into distinct events "
-        f"(a story covered by many outlets shows a 'N sources' count and is a single numbered item).\n"
-        f"The list is RANKED BY IMPORTANCE (coverage + momentum + recency): low-numbered items "
-        f"are the biggest stories right now. Every story in the top 5 must be represented in "
-        f"the briefing — by a highlight of its own, or a one-line mention if it truly warrants "
-        f"less — regardless of whether it fits the prior narrative.\n\n"
-        f"{topic_context}"
-        f"{prev_block}"
-        f"{threads_block}"
+    format_instructions = (
+        f"OutPUT THIS EXACT STRUCTURE, nothing else:\n\n"
+        f"## {view_name} — {time_label}\n\n"
+        f"A 2-3 sentence lede about the biggest stories.\n\n"
+        f"- **Topic:** one-sentence description [1]\n"
+        f"- **Topic:** one-sentence description [3]\n\n"
+        f"(5-8 bullets in that exact format. Bracketed numbers like [1] are "
+        f"citations — use real numbers from the list below, never write [N].)\n\n"
+        f"What to watch next: one sentence.\n\n"
+        f"Do not write the words CITATIONS, IMPORTANT, or NOTE anywhere. "
+        f"Do not repeat or list the sources. Cover stories 1-5. Be specific.\n\n"
+    ) if "local" in BRIEFING_MODEL else (
         f"Write a structured intelligence briefing in this format:\n\n"
         f"Start with a markdown H2 header line (begins with '## ') stating the topic and time window "
         f"(e.g., '## AI & Machine Learning — Last 24 Hours' or '## Global News — Last 7 Days'). "
@@ -201,7 +267,7 @@ def _build_briefing_prompt(sources: list[dict], view_name: str, view_desc: str,
         f"and what a strategist should watch.\n\n"
         f"End with a single sentence on what to watch next.\n\n"
         f"CITATIONS: After each highlight (and any specific factual claim), cite the supporting "
-        f"story/stories using bracketed numbers that match the numbered list below, e.g. '[3]' or "
+        f"story/stories using ASCII square brackets that match the numbered list below, e.g. '[3]' or "
         f"'[3][7]'. Each number is one story even if covered by many outlets — cite it once, not per "
         f"outlet. Cite only stories that directly support the claim; aim for 1-2 citations per "
         f"highlight. Use only numbers from the list — never invent numbers, and never write URLs.\n\n"
@@ -210,6 +276,19 @@ def _build_briefing_prompt(sources: list[dict], view_name: str, view_desc: str,
         f"if it does not fit the prior narrative.\n\n"
         f"Be specific and concrete. No filler. No hedging. "
         f"Use markdown formatting for emphasis and structure.\n\n"
+    )
+
+    return (
+        f"You are a senior news intelligence analyst writing a briefing for a decision-maker. "
+        f"Below are {len(sources)} numbered news stories from {time_label}, drawn from "
+        f"44,000+ global sources monitored in real-time and de-duplicated into distinct events "
+        f"(a story covered by many outlets shows a 'N sources' count and is a single numbered item).\n"
+        f"The list is RANKED BY IMPORTANCE (coverage + momentum + recency): low-numbered items "
+        f"are the biggest stories right now.\n\n"
+        f"{topic_context}"
+        f"{prev_block}"
+        f"{threads_block}"
+        f"{format_instructions}"
         f"Numbered sources:\n{numbered}"
     )
 
@@ -343,7 +422,7 @@ def record_briefing_history(cache_key, view_id, hours, briefing, sources_json,
 
 
 BRIEFING_EVENT_BUFFER = 400   # articles pulled before dedup (pills/filtered)
-BRIEFING_EVENT_LIMIT = 50     # distinct events fed to the model
+BRIEFING_EVENT_LIMIT = 20     # top-N importance-ranked events fed to the model
 BRIEFING_DESC_CHARS = 220
 
 

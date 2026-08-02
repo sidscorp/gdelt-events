@@ -246,21 +246,34 @@
   /* Views bar — saved-filter presets above the time pills */
   .views-bar {
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
     gap: 0.4rem;
     margin-bottom: 0.8rem;
     min-height: 0;
   }
-  .pill-group-label {
+  .pill-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.65rem;
+  }
+  .pill-row-label {
+    flex: 0 0 140px;
+    text-align: right;
     font-size: 0.66rem;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.06em;
     color: var(--text-tertiary);
-    width: 100%;
-    margin: 0.3rem 0 0.15rem 0;
     font-weight: 600;
+    padding-top: 0.44rem;
+    line-height: 1;
   }
-  .pill-group-label:first-child { margin-top: 0; }
+  .pill-row-pills {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    min-width: 0;
+  }
   .view-pill {
     font-family: inherit;
     font-size: 0.82rem;
@@ -734,13 +747,12 @@
   .suggestion-item:hover { background: var(--bg-hover); }
   .suggestion-count { color: var(--text-tertiary); font-size: 0.72rem; }
 
-  /* Section label — tiny uppercase hint for what each row does */
   .section-label {
     font-size: 0.66rem;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--text-tertiary);
-    margin: 0.6rem 0 0.2rem 0;
+    margin: 1rem 0 0.2rem 0;
   }
   .section-label:first-of-type { margin-top: 0.4rem; }
 
@@ -877,6 +889,15 @@
   margin: 0.3rem 0 0.15rem;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
+@media (max-width: 640px) {
+  .pill-row {
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .pill-row-label {
+    flex: auto; width: auto; text-align: left; padding-top: 0;
+  }
+}
 @media (max-width: 560px) {
   .article-thumb img { width: 84px; height: 62px; }
   .article-desc { -webkit-line-clamp: 4; }
@@ -998,7 +1019,7 @@ body.dark .lang-toggle.active { color: #1a1714; }
 /* Type system: serif stays the editorial voice (article titles, summaries,
    briefing prose); everything that is UI chrome speaks sans. */
 button, select, input,
-.section-label, .pill-group-label, .header-nav, .header-tag, .header-stats,
+.section-label, .pill-row-label, .pill-group-label, .header-nav, .header-tag, .header-stats,
 .results-meta, .active-filters, .filter-label, .filters,
 .time-pill, .view-pill, .lang-toggle, .pagination, footer,
 .article-header, .match-line, .briefing-head, .briefing-meta, .feed-notice {

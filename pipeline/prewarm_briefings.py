@@ -1,26 +1,96 @@
-"""Pre-warm the AI briefing cache for the hot view/time combos so users never
-wait on generation. Hits the local non-streaming endpoint with refresh=1 to
-force regeneration + re-cache. Run on a schedule shorter than BRIEFING_TTL_S."""
-import urllib.request, time, sys
+"""Pre-warm the AI briefing cache for every view × time-range combo so the
+dashboard always serves pre-generated content (no "Generating…" skeletons).
 
-BASE = "http://localhost:8015"
-PILLS = ["ai-general", "ai-regulation", "supply-chain-alerts",
-         "medical-devices", "oss-vulnerabilities", "cyber-attacks"]
-# (view, hours) combos to keep warm. Global default is 3h (the page default),
-# so warm both 3h and 24h for global; pills snap to their 24h default_hours.
-COMBOS = [("", 3), ("", 24)] + [(v, 24) for v in PILLS]
+Hits the local non-streaming endpoint with ?refresh=1 to force regeneration
+and re-cache. Data-version-guarded: only runs when gdelt_ingest.py has written
+a new data_version.txt, skipping redundant cycles.
 
-def warm(view, hours):
-    url = f"{BASE}/api/briefing?hours={hours}&refresh=1" + (f"&view={view}" if view else "")
+Usage:
+    python prewarm_briefings.py            # defaults to port 8015 (prod)
+    python prewarm_briefings.py --port 8016  # dev instance
+"""
+
+import urllib.request, time, sys, argparse
+from pathlib import Path
+
+HOURS = [3, 6, 24, 72, 168, 720]
+VIEWS = [
+    "",                        # global / all topics
+]
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+VERSION_FILE = DATA_DIR / "data_version.txt"
+LAST_PREWARM_FILE = DATA_DIR / ".last_prewarm_version"
+STAGGER_S = 0.5
+
+
+def current_version():
+    try:
+        return VERSION_FILE.read_text().strip()
+    except OSError:
+        return ""
+
+
+def last_prewarmed_version():
+    try:
+        return LAST_PREWARM_FILE.read_text().strip()
+    except OSError:
+        return ""
+
+
+def warm(view, hours, base_url, timeout=120):
+    params = f"hours={hours}&refresh=1"
+    if view:
+        params += f"&view={view}"
+    url = f"{base_url}/api/briefing?{params}"
+    label = f"{view or 'global'}:{hours}h"
     t0 = time.time()
     try:
-        with urllib.request.urlopen(url, timeout=90) as r:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
             r.read()
-        print(f"[{time.strftime('%H:%M:%S')}] warmed {view or 'global'}:{hours} in {time.time()-t0:.1f}s", flush=True)
+        elapsed = time.time() - t0
+        print(f"[{time.strftime('%H:%M:%S')}] {label:30s} {elapsed:.1f}s", flush=True)
     except Exception as e:
-        print(f"[{time.strftime('%H:%M:%S')}] warm {view or 'global'}:{hours} FAILED: {e}", flush=True)
+        print(f"[{time.strftime('%H:%M:%S')}] {label:30s} FAILED ({e})", flush=True)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=8015, help="Dashboard port (default: 8015)")
+    parser.add_argument("--force", action="store_true", help="Skip version check, always regenerate")
+    args = parser.parse_args()
+
+    base_url = f"http://localhost:{args.port}"
+
+    ver = current_version()
+    if not ver:
+        print(f"[{time.strftime('%H:%M:%S')}] no data version — assuming first run", flush=True)
+    elif not args.force and ver == last_prewarmed_version():
+        print(f"[{time.strftime('%H:%M:%S')}] data unchanged (version {ver}) — skipping", flush=True)
+        return
+
+    total = len(VIEWS) * len(HOURS)
+    print(f"[{time.strftime('%H:%M:%S')}] pre-warming {total} briefing combos "
+          f"({len(VIEWS)} views × {len(HOURS)} windows) on port {args.port}", flush=True)
+
+    t_start = time.time()
+    count = 0
+    for view in VIEWS:
+        for hours in HOURS:
+            warm(view, hours, base_url)
+            count += 1
+            if STAGGER_S:
+                time.sleep(STAGGER_S)
+
+    elapsed = time.time() - t_start
+    print(f"[{time.strftime('%H:%M:%S')}] done: {count} combos in {elapsed:.1f}s", flush=True)
+
+    if ver:
+        try:
+            LAST_PREWARM_FILE.write_text(ver)
+        except OSError:
+            pass
+
 
 if __name__ == "__main__":
-    for v, h in COMBOS:
-        warm(v, h)
-        time.sleep(1)
+    main()

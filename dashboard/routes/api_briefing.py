@@ -12,6 +12,7 @@ from briefing import (
     BRIEFING_TTL_S, BRIEFING_EVENT_LIMIT, BRIEFING_MODEL,
     _build_briefing_prompt, _fetch_briefing_events,
     _generate_briefing, _generate_briefing_stream,
+    _normalize_briefing,
     get_threads, record_briefing_history, update_threads_async,
 )
 
@@ -138,7 +139,7 @@ def api_briefing():
                 return
 
             # Cache the completed briefing + its sources map
-            briefing = "".join(full_text).strip()
+            briefing = _normalize_briefing("".join(full_text).strip(), view_name, hours)
             if briefing:
                 generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
                 try:
@@ -165,7 +166,7 @@ def api_briefing():
         return Response(sse_stream(), mimetype="text/event-stream", headers={"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no"})
 
     # Non-streaming fallback
-    briefing = _generate_briefing(sources, view_name, view_desc, hours, prev=prev, threads=threads, prompt=prompt)
+    briefing = _normalize_briefing(_generate_briefing(sources, view_name, view_desc, hours, prev=prev, threads=threads, prompt=prompt), view_name, hours)
     if not briefing:
         return jsonify({"briefing": None, "error": "Briefing generation unavailable"}), 503
     update_threads_async(cache_key, threads, briefing)

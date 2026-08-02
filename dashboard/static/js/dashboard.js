@@ -720,6 +720,10 @@ function buildArticleParams(s) {
   return params;
 }
 
+function _viewLabel() {
+  return state.view && viewsById[state.view] ? viewsById[state.view].name : 'All topics';
+}
+
 async function fetchArticles() {
   renderActiveFilters();
 
@@ -806,7 +810,7 @@ async function fetchArticles() {
       return;
     }
 
-    meta.textContent = `${data.total.toLocaleString()} articles`;
+    meta.textContent = `${_viewLabel()} \u00b7 ${data.total.toLocaleString()} articles`;
 
     if (data.articles.length === 0) {
       // Auto-widen: an empty time window (with no custom date range) steps out to
@@ -958,35 +962,33 @@ async function fetchViews() {
     for (const group of orderedGroups) {
       const pills = groups[group];
       if (!pills || !pills.length) continue;
-      const label = document.createElement('div');
-      label.className = 'pill-group-label';
-      label.textContent = group;
-      bar.appendChild(label);
+      const row = document.createElement('div');
+      row.className = 'pill-row';
+      const rowLabel = document.createElement('div');
+      rowLabel.className = 'pill-row-label';
+      rowLabel.textContent = group;
+      row.appendChild(rowLabel);
+      const rowPills = document.createElement('div');
+      rowPills.className = 'pill-row-pills';
       for (const v of pills) {
       const btn = document.createElement('button');
       btn.className = 'view-pill' + (state.view === v.id ? ' active' : '');
-      // no-op; segmented control is rendered after the loop
       btn.textContent = v.name;
       if (v.description) btn.dataset.tip = v.description;
       btn.dataset.viewId = v.id;
 
-      // Hover-prefetch: warm the snapshot for what a click would actually
-      // select (mirrors the click handler's default_hours snap below).
       btn.addEventListener('pointerenter', () => {
-        if (state.view === v.id) return; // hovering the active pill == deselect, nothing to warm
+        if (state.view === v.id) return;
         prefetchCombo(v.id, v.default_hours ? String(v.default_hours) : state.hours);
       });
 
       btn.addEventListener('click', () => {
         if (state.view === v.id) {
           state.view = '';
-          // When deselecting a view, reset match_types to default.
           state.match_types = ['legal'];
           hideFdaPanel();
         } else {
           state.view = v.id;
-          // Snap to the view's default time window (e.g. 24h for sparse
-          // medical device news) so the first click isn't worst-case.
           if (v.default_hours) {
             state.hours = String(v.default_hours);
             state.date_from = '';
@@ -997,8 +999,6 @@ async function fetchViews() {
               p.classList.toggle('active', p.dataset.hours === state.hours);
             });
           }
-          // Apply the view's default match_types if the current state
-          // doesn't match any of its available profiles.
           if (Array.isArray(v.available_match_types) && v.available_match_types.length) {
             const currentSet = new Set(state.match_types);
             const matchesAny = v.available_match_types.some(p =>
@@ -1016,7 +1016,7 @@ async function fetchViews() {
         });
         renderMatchProfile();
         updateUrl();
-        window.scrollTo({ top: 0 }); // make the transition visible
+        window.scrollTo({ top: 0 });
         fetchArticles();
       });
       if (v.custom) {
@@ -1038,18 +1038,28 @@ async function fetchViews() {
         });
         btn.appendChild(delBtn);
       }
-      bar.appendChild(btn);
+      rowPills.appendChild(btn);
       }
+      row.appendChild(rowPills);
+      bar.appendChild(row);
     }
 
-    // Add [+ New] button if authenticated
     if (data.authenticated) {
+      const newRow = document.createElement('div');
+      newRow.className = 'pill-row';
+      const nl = document.createElement('div');
+      nl.className = 'pill-row-label';
+      newRow.appendChild(nl);
+      const nw = document.createElement('div');
+      nw.className = 'pill-row-pills';
       const newBtn = document.createElement('button');
       newBtn.className = 'new-pill-btn';
       newBtn.textContent = '+ New';
       newBtn.title = 'Create a custom monitoring pill';
       newBtn.addEventListener('click', showNewPillModal);
-      bar.appendChild(newBtn);
+      nw.appendChild(newBtn);
+      newRow.appendChild(nw);
+      bar.appendChild(newRow);
     }
 
     // After the pills are in the DOM, render the profile toggle for
@@ -1065,9 +1075,7 @@ async function fetchViews() {
         (data.user.is_admin ? ` <a href="/admin/users" style="color:var(--text-secondary);text-decoration:none;">Admin</a>` : '') +
         ` <a href="/logout" style="color:var(--text-tertiary);text-decoration:none;">Logout (${data.user.display_name})</a>`;
     } else {
-      // Discreet sign-in link — unlocks custom pills ("+ New" in the pill row).
-      navAuth.innerHTML =
-        `<a href="/login" style="color:var(--text-secondary);text-decoration:none;">Sign in</a>`;
+      navAuth.innerHTML = '';
     }
   } catch (err) {
     document.getElementById('viewsBar').innerHTML = '';

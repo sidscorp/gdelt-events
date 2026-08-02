@@ -94,13 +94,40 @@ def _age_label(generated_at: str) -> tuple[float, str]:
     return age_s, label
 
 
+# Mirror of normalizeBriefingText() in static/js/markdown.js — keep the two in
+# sync. Applied here so what lands in briefing_cache (and therefore the SSR
+# paint) is already clean; applied there so a *streaming* briefing, which never
+# passes through this function, looks the same as its cached replay.
+_CITE_BRACKETS = re.compile(r"[【〔［\[]{1,2}\s*(\d+(?:\s*[,，、]\s*\d+)*)\s*[】〕］\]]{1,2}")
+_CITE_TRAILING_PUNCT = re.compile(r"([.!?])\s*((?:\[\d+\])+)\s*$", re.M)
+_CITE_LEADING_SPACE = re.compile(r"[ \t]+((?:\[\d+\])+)")
+_LEAD_LABEL = re.compile(r"^\*\*(?:Executive Summary|Summary|Overview|Lead|TL;DR)\s*:?\*\*\s*:?\s*", re.I)
+
+
+def _normalize_text(text):
+    """Fold model formatting variance back to plain ASCII markdown.
+
+    The model cites [3] on one run and 【3】 the next, and sprinkles U+202F
+    narrow no-break spaces / U+2011 non-breaking hyphens that fall back to a
+    different font and open visible gaps mid-word."""
+    text = _CITE_BRACKETS.sub(
+        lambda m: "".join(f"[{n.strip()}]" for n in re.split(r"[,，、]", m.group(1))),
+        text,
+    )
+    text = text.translate({0x00A0: " ", 0x2009: " ", 0x202F: " ", 0x2011: "-"})
+    # Citation placement drifts too ("week[3]." vs "week. [3]"). Pull a
+    # line-final period back inside and drop any space before a marker.
+    text = _CITE_TRAILING_PUNCT.sub(r"\2\1", text)
+    return _CITE_LEADING_SPACE.sub(r"\1", text)
+
+
 def _normalize_briefing(text, view_name, hours):
     """Post-process a model-generated briefing for consistent structure.
 
     Small models produce variable formatting — stray bullets, duplicate
     text, missing headers. This pass enforces a clean, predictable shape
     before the briefing is cached, so the dashboard never shows mess."""
-    text = text.strip()
+    text = _normalize_text(text.strip())
 
     # Build the canonical header
     if hours <= 1:
@@ -145,6 +172,10 @@ def _normalize_briefing(text, view_name, hours):
         elif stripped.startswith("* ") and len(stripped) > 2:
             if not stripped[2:].startswith("**"):
                 stripped = "- " + stripped[2:]
+        # Some runs open the lead paragraph with a bold "**Executive Summary:**"
+        # label and some don't — the H2 above it already says as much.
+        elif stripped.startswith("**"):
+            stripped = _LEAD_LABEL.sub("", stripped)
         cleaned.append(stripped)
 
     # 3. Collapse repeated blank lines (max 1 blank between sections).

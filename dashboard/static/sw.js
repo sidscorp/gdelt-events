@@ -1,7 +1,7 @@
 // GDELT Monitor service worker — instant app-shell open via stale-while-revalidate.
 // The shell (HTML + static assets) is served from cache immediately and refreshed
 // in the background. API/data requests always go to the network (never stale).
-const CACHE = 'gdelt-shell-v18';
+const CACHE = 'gdelt-shell-v19';
 const SHELL = [
   '/',
   '/static/favicon.svg', '/static/icon-192.png', '/static/icon-512.png',

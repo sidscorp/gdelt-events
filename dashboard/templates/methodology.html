@@ -35,8 +35,9 @@
 <ol style="font-size:0.88rem; margin: 0 0 1rem 1.2rem;">
   <li>The system takes the <strong>top 50 events by the same Importance score as the feed</strong> — the briefing summarizes exactly what the feed shows.</li>
   <li>A prompt is built containing: the 50 numbered events (title + summary + outlet + source count, explicitly marked as importance-ranked), the titles the <em>previous</em> briefing covered (so the model writes progressions instead of re-explaining), any ongoing story threads it has been tracking, and a hard rule that the top-5 events must be covered.</li>
-  <li>The prompt is sent to <code>GLM-4.7</code> on Cerebras (a fast open-weights model via our self-hosted gateway). Citations like [3] link back to the exact numbered event.</li>
-  <li>The result is cached for 45 minutes per view/window — the "cached" label and timestamp are shown under each briefing.</li>
+  <li>The prompt is sent to <code>gpt-oss-120b</code> (an open-weights model, via our self-hosted gateway). Citations like [3] link back to the exact numbered event.</li>
+  <li>The result is cached for 60 minutes per view/window — the "cached" label and timestamp are shown under each briefing.</li>
+  <li>The model's formatting varies between runs — one briefing cites <code>[3]</code>, the next <code>【3】</code> — so the text is normalized before it is stored and again before it is drawn, and the citation markers are turned into the superscript links you see. The wording is never altered.</li>
 </ol>
 <p><strong>Click the ⓘ on any briefing</strong> to see everything that generation used: the model, the full ranked source list, the continuity context, and the <em>verbatim prompt</em>.</p>
 

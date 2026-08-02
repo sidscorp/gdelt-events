@@ -3,6 +3,7 @@ search, event detail, about."""
 
 import html
 import json
+import re
 import time
 from datetime import datetime
 
@@ -63,15 +64,51 @@ def _ssr_feed(view_id, hours):
         return None
 
 
+_MD_BOLD = re.compile(r"\*\*([^*]+)\*\*")
+_MD_ITAL = re.compile(r"\*([^*\n]+)\*")
+_MD_LI = re.compile(r"^(?:[-*•‣▪–]|\d+[.)])\s+(.*)$")
+_MD_H = re.compile(r"^#{1,4}\s+(.*)$")
+_MD_CITE = re.compile(r"\[(\d+)\]")
+
+
+def _md_inline(s, sources):
+    """Inline markdown + [N] citations. Mirrors _mdInline/linkifyCitations in
+    static/js/markdown.js — the SSR paint and the client re-render must be the
+    same HTML, or the briefing visibly reflows a beat after load."""
+    s = html.escape(s, quote=False)
+    s = _MD_BOLD.sub(r"<strong>\1</strong>", s)
+    s = _MD_ITAL.sub(r"<em>\1</em>", s)
+
+    def cite(m):
+        idx = int(m.group(1)) - 1
+        src = sources[idx] if 0 <= idx < len(sources) else None
+        if not src or not src.get("link"):
+            return m.group(0)
+        cnt = f" · {src['n_sources']} sources" if (src.get("n_sources") or 0) > 1 else ""
+        tip = html.escape(
+            (src.get("outlet") or "source") + cnt
+            + (f" — {src['title']}" if src.get("title") else ""),
+            quote=True,
+        )
+        link = html.escape(src["link"], quote=True)
+        return (f'<sup class="cite"><a href="{link}" target="_blank" '
+                f'rel="noopener" title="{tip}">{m.group(1)}</a></sup>')
+
+    return _MD_CITE.sub(cite, s)
+
+
 def _briefing_html(view_id, hours):
-    """Cached AI briefing rendered to minimal safe HTML. Read-only — never
-    generates. The client re-renders (and refreshes) it via markdown.js."""
+    """Cached AI briefing rendered to the same HTML markdown.js produces, so
+    the server's first paint and the client's re-render are identical. Read-only
+    — never generates. The client still refreshes it via markdown.js."""
     from models import get_user_db
+    from briefing import _normalize_text
     cache_key = f"{view_id or '_all'}:{hours}"
     try:
         con = get_user_db()
         row = con.execute(
-            "SELECT briefing, generated_at FROM briefing_cache WHERE cache_key = ?",
+            "SELECT briefing, generated_at, sources_json FROM briefing_cache "
+            "WHERE cache_key = ?",
             (cache_key,),
         ).fetchone()
         con.close()
@@ -84,25 +121,43 @@ def _briefing_html(view_id, hours):
     except Exception:
         return None
 
-    out, in_list = [], False
-    for line in row[0].splitlines():
+    try:
+        sources = json.loads(row[2]) if row[2] else []
+    except Exception:
+        sources = []
+
+    # Rows cached before the normalizer learned about 【N】 citations and
+    # non-breaking punctuation still hold the raw model text — clean on read.
+    out, items, para = [], [], []
+
+    def flush_para():
+        if para:
+            out.append(f"<p>{_md_inline(' '.join(para), sources)}</p>")
+            para.clear()
+
+    def flush_list():
+        if items:
+            out.append("<ul>" + "".join(items) + "</ul>")
+            items.clear()
+
+    for line in _normalize_text(row[0]).splitlines():
         line = line.strip()
         if not line:
+            flush_para(); flush_list()
             continue
-        if line.startswith("## "):
-            if in_list:
-                out.append("</ul>"); in_list = False
-            out.append(f"<h2>{html.escape(line[3:])}</h2>")
-        elif line.startswith(("- ", "* ", "• ")):
-            if not in_list:
-                out.append("<ul>"); in_list = True
-            out.append(f"<li>{html.escape(line[2:].strip())}</li>")
-        else:
-            if in_list:
-                out.append("</ul>"); in_list = False
-            out.append(f"<p>{html.escape(line)}</p>")
-    if in_list:
-        out.append("</ul>")
+        m = _MD_LI.match(line)
+        if m:
+            flush_para()
+            items.append(f"<li>{_md_inline(m.group(1), sources)}</li>")
+            continue
+        m = _MD_H.match(line)
+        if m:
+            flush_para(); flush_list()
+            out.append(f"<h4>{_md_inline(m.group(1), sources)}</h4>")
+            continue
+        flush_list()
+        para.append(line)
+    flush_para(); flush_list()
     return "".join(out) if out else None
 
 

@@ -1,21 +1,119 @@
-// Minimal markdown renderer
-function renderMd(text) {
-  // First pass: convert markdown to HTML tokens
-  let html = text
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/^### (.+)$/gm, '<h4 style="font-size:0.85rem;margin:0.5rem 0 0.15rem;font-weight:600;">$1</h4>')
-    .replace(/^## (.+)$/gm, '<h4 style="font-size:0.88rem;margin:0.6rem 0 0.15rem;font-weight:600;">$1</h4>')
-    .replace(/^[•\-\*] (.+)$/gm, '<<LI>>$1<</LI>>');
-  // Wrap consecutive LI tokens in a tight UL
-  html = html.replace(/(<<LI>>.*?<<\/LI>>\n?)+/g, (match) => {
-    const items = match.replace(/<<LI>>/g, '<li>').replace(/<<\/LI>>/g, '</li>');
-    return '<ul style="list-style:disc;padding-left:1.2rem;margin:0.2rem 0;">' + items + '</ul>';
-  });
-  // Clean up newlines — but not inside lists
-  html = html.replace(/\n\n/g, '<br>').replace(/\n/g, ' ');
-  return html;
+// ---------------------------------------------------------------------------
+// Briefing markdown renderer
+//
+// Briefing text reaches this file three ways — streamed raw from the model,
+// replayed from briefing_cache (already run through briefing._normalize_briefing),
+// or re-hydrated from a localStorage snapshot. They must all render identically,
+// so every quirk is smoothed out here rather than upstream.
+// ---------------------------------------------------------------------------
+
+// The model is inconsistent run to run: some briefings cite [3], others 【3】
+// (fullwidth brackets fall back to a CJK font, so they show as unlinked glyphs
+// with a wide gap before the sentence period). It also sprinkles U+202F narrow
+// no-break spaces and U+2011 non-breaking hyphens, which do the same thing
+// mid-word. Fold all of it back to plain ASCII before parsing.
+function normalizeBriefingText(text) {
+  return String(text == null ? '' : text)
+    // \u3010N\u3011 \u3014N\u3015 \uff3bN\uff3d [[N]] [N,M]  ->  [N] / [N][M]
+    .replace(/[\u3010\u3014\uff3b\[]{1,2}\s*(\d+(?:\s*[,\uff0c\u3001]\s*\d+)*)\s*[\u3011\u3015\uff3d\]]{1,2}/g,
+      (_m, nums) => nums.split(/[,\uff0c\u3001]/).map((n) => '[' + n.trim() + ']').join(''))
+    .replace(/[\u00a0\u2009\u202f]/g, ' ')   // nbsp / thin space / narrow no-break space
+    .replace(/\u2011/g, '-')                   // non-breaking hyphen
+    // Citation placement drifts too: one briefing writes "...this week[3].",
+    // the next "...this week. [3]". Pull a line-final period back inside and
+    // drop any space before a marker so citations always hug their clause.
+    .replace(/([.!?])\s*((?:\[\d+\])+)\s*$/gm, '$2$1')
+    .replace(/[ \t]+((?:\[\d+\])+)/g, '$1');
+}
+
+// While the briefing streams, its tail is always mid-token: "**at least nine"
+// has no closing "**" yet. Rendering that verbatim paints raw asterisks that
+// snap to bold a beat later — the flicker you see on every load. Drop the
+// dangling opener instead so the words keep flowing and the syntax never shows.
+function trimOpenMarkup(text) {
+  let s = text;
+  // Two passes: a closing "**" arrives one character at a time, so the frame
+  // where only its first "*" has landed leaves a lone "*" behind once the
+  // unmatched opener is removed.
+  for (let pass = 0; pass < 2; pass++) {
+    // Scan for runs of '*', ignoring any that are a list marker ("* item").
+    const runs = [];
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] !== '*') continue;
+      let j = i;
+      while (s[j] === '*') j++;
+      const len = j - i;
+      const atLineStart = i === 0 || s[i - 1] === '\n';
+      if (!(len === 1 && atLineStart && s[j] === ' ')) runs.push({ i: i, len: len });
+      i = j - 1;
+    }
+    let bold = 0, ital = 0, lastBold = -1, lastItal = -1;
+    for (const r of runs) {
+      if (r.len >= 2) { bold++; lastBold = r.i; } else { ital++; lastItal = r.i; }
+    }
+    if (bold % 2 === 1) s = s.slice(0, lastBold) + s.slice(lastBold + 2);
+    else if (ital % 2 === 1) s = s.slice(0, lastItal) + s.slice(lastItal + 1);
+    else break;
+  }
+  // A half-arrived citation marker or heading hash, likewise.
+  return s.replace(/[\[\u3010\u3014\uff3b][\d,\s]*$/, '').replace(/(^|\n)#{1,4}\s*$/, '$1');
+}
+
+function _mdEscape(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function _mdInline(s) {
+  return _mdEscape(s)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+}
+
+// Block-level render. Emits plain semantic tags with no inline styles — the
+// briefing's look lives entirely in .briefing-body CSS. (The old renderer
+// inline-styled its <ul> with list-style:disc, which beat the stylesheet's
+// list-style:none and drew a second bullet next to the ▸ marker.)
+function renderMd(text, opts) {
+  let src = normalizeBriefingText(text);
+  if (opts && opts.streaming) src = trimOpenMarkup(src);
+
+  const out = [];
+  let list = null;
+  let para = [];
+
+  const flushPara = () => {
+    if (para.length) { out.push('<p>' + _mdInline(para.join(' ')) + '</p>'); para = []; }
+  };
+  const flushList = () => {
+    if (list) { out.push('<ul>' + list.join('') + '</ul>'); list = null; }
+  };
+
+  for (const raw of src.split('\n')) {
+    const line = raw.trim();
+    if (!line) { flushPara(); flushList(); continue; }
+
+    const li = line.match(/^(?:[-*\u2022\u2023\u25aa\u2013]|\d+[.)])\s+(.*)$/);
+    if (li) {
+      flushPara();
+      (list || (list = [])).push('<li>' + _mdInline(li[1]) + '</li>');
+      continue;
+    }
+
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) {
+      flushPara(); flushList();
+      out.push('<h4>' + _mdInline(h[2]) + '</h4>');
+      continue;
+    }
+
+    // Prose. Consecutive non-blank lines are one paragraph, so a hard-wrapped
+    // paragraph doesn't shatter into a stack of one-line <p>s.
+    flushList();
+    para.push(line);
+  }
+  flushPara();
+  flushList();
+  return out.join('');
 }
 
 // Turn [N] citation markers into clickable superscripts linking to the source's
@@ -140,11 +238,16 @@ async function fetchBriefing() {
         if (data.text) {
           if (!briefFirstMarked && window.perfMark) { briefFirstMarked = true; window.perfMark('briefing_first', performance.now() - briefStart); }
           fullText += data.text;
-          textEl.innerHTML = linkifyCitations(renderMd(fullText), sourcesMap);
+          // streaming:true while tokens are still arriving — the trailing
+          // half-written **bold** is hidden rather than shown as raw asterisks.
+          textEl.innerHTML = linkifyCitations(
+            renderMd(fullText, { streaming: !data.done }), sourcesMap);
           textEl.dataset.key = wantKey; // this content now belongs to this view/window
         }
         if (data.article_count) articleCount = data.article_count;
         if (data.done) {
+          // Final repaint with markup complete, so nothing stays trimmed.
+          if (fullText) textEl.innerHTML = linkifyCitations(renderMd(fullText), sourcesMap);
           const label = data.cached ? 'cached' : 'just generated';
           metaEl.textContent = articleCount ? `From ${articleCount} articles · ${label}` : '';
           if (window.perfMark) { window.perfMark(data.cached ? 'briefing_done_cached' : 'briefing_done', performance.now() - briefStart); window.perfFlush(); }

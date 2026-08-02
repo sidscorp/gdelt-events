@@ -16,7 +16,7 @@ dashboard/
   db.py             DuckDB read connection (get_db), statement timeout, _hours_cutoff
   parsers.py        pure GDELT field parsers/formatters (parse_tone, parse_locations, format_timestamp, time_ago …)
   articles.py       the article-feed ENGINE: view/filter resolution, GAL/GKG WHERE builders, fetch strategies, row transformers, rollup/dedup, feed cache, _api_articles_inner
-  briefing.py       AI-briefing service: prompt build, OpenRouter SSE stream, Langfuse instrumentation, event fetch/dedup/cluster helpers
+  briefing.py       AI-briefing service: prompt build, gateway SSE stream, output normalization (_normalize_text — mirrored in static/js/markdown.js), Langfuse instrumentation, event fetch/dedup/cluster helpers
   webutil.py        _phase request-timing helper
   views.py models.py auth.py semantic_search.py serve.py _paths.py   (unchanged core)
   routes/           Flask blueprints (thin handlers calling services): pages, auth, api_feed, api_briefing, api_pills
@@ -31,6 +31,24 @@ deploy/       register_dashboard.ps1, register_task.ps1 (Windows — production)
 - Restart: `ssh siddh@rainbow-boi "powershell -ExecutionPolicy Bypass -File C:/Users/siddh/restart_dash.ps1"`.
 - Served by waitress on :8015 → Cloudflare Tunnel → gdeltmonitor.com. A dev instance can run on :8016 with `GDELT_DATA_DIR` pointing at a smaller data slice.
 
+## Recording changes (REQUIRED — do not skip)
+Deploying by `scp` makes it very easy to change production and leave no record. Twice now
+the working tree has accumulated weeks of uncommitted edits whose rationale is simply gone.
+So, for any change that reaches prod:
+
+1. **`CHANGELOG.md` entry first**, using the format at the top of that file. The **Why**
+   and **How it was verified** fields are the point — git already stores the diff. Write
+   the symptom that started it and the number you measured.
+2. **Commit it**, touching only the files your change touched. If the working tree already
+   holds someone else's uncommitted edits, do **not** sweep them into your commit — say so
+   and ask. No Co-Authored-By trailers; the user runs all `git config`/push themselves.
+3. **Check the user-facing docs in your area.** `templates/methodology.html` and
+   `templates/about.html` make concrete claims (models, cache TTLs, thresholds) that go
+   stale silently because nothing tests them. If you touched the thing a page describes,
+   re-read the page.
+4. **Post to the shared news feed** so other machines see it:
+   `ssh snambiar@snambiar-linux "~/news/news.sh claude-code '<what changed>'"`.
+
 ## Gotchas (learned the hard way)
 - **Jinja caches templates in prod** — a template or base.html change needs a dashboard **restart** to show. Static (css/js) serve fresh.
 - **DuckDB is single-writer** — stop the dashboard before any write/rebuild (ingest, cluster build). Read-only connections allow many readers.
@@ -40,7 +58,10 @@ deploy/       register_dashboard.ps1, register_task.ps1 (Windows — production)
 - Commits on this repo: **no Co-Authored-By trailers**; the user runs all `git config`/push themselves.
 
 ## Keys (under data/, gitignored)
-- `data/.openrouter_key` — OpenRouter key for AI briefings.
+- `data/.openrouter_key` — **misnamed**: holds a LiteLLM *virtual key* for the self-hosted
+  gateway at llm.snambiar.com, which routes briefings and the pill judge to Fireworks.
+  OpenRouter is not in the path at all (the real OpenRouter key is parked at
+  `.openrouter_key.orig`).
 - `data/.langfuse_key` — env-style `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY`/`LANGFUSE_HOST`. Briefing tracing is no-op if absent. Project: "GDELT Monitor" on langfuse.snambiar.com.
 
 ## Tests

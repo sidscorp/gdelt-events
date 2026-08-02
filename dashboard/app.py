@@ -72,12 +72,14 @@ from routes.auth import bp as auth_bp
 from routes.api_feed import bp as api_feed_bp
 from routes.api_briefing import bp as api_briefing_bp
 from routes.api_pills import bp as api_pills_bp
+from routes.sec_analysis import bp as sec_bp
 
 app.register_blueprint(pages_bp)
 app.register_blueprint(auth_bp)
 app.register_blueprint(api_feed_bp)
 app.register_blueprint(api_briefing_bp)
 app.register_blueprint(api_pills_bp)
+app.register_blueprint(sec_bp)
 
 
 if __name__ == "__main__":

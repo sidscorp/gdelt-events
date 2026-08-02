@@ -15,7 +15,7 @@ from parsers import (
     parse_enhanced_list, parse_locations, format_timestamp, time_ago,
 )
 from articles import (
-    _api_articles_inner, _feed_cache, _feed_cache_key, _data_version,
+    _api_articles_inner, _feed_cache, _feed_cache_key, _data_version, _BOOT_ID,
     _FEED_TTL_S, _FEED_CACHE_MAX, _parse_date_filters, GAL_COLS, _gal_table,
 )
 
@@ -330,6 +330,17 @@ def api_articles():
 _stats_cache = {"at": 0.0, "data": None, "version": None}
 _STATS_TTL_S = 1800  # fallback only — data_version is the real invalidator (see _feed_cache_key)
 
+
+
+@bp.route("/api/warmstate")
+def api_warmstate():
+    """Process identity + feed-cache occupancy, for pipeline/warm_feed.py.
+
+    Deliberately touches no database: /api/stats can return 503 while DuckDB is
+    busy, and a warm loop that can't tell "cache is cold" from "stats is busy"
+    is worse than no probe at all.
+    """
+    return jsonify({"boot": _BOOT_ID, "entries": len(_feed_cache)})
 
 @bp.route("/api/stats")
 def api_stats():

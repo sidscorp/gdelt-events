@@ -300,6 +300,12 @@ def _gal_row_to_article(row):
 # stays valid until NEW DATA actually lands (the TTL is just a fallback), and a
 # new ingest cycle invalidates every stale key at once.
 _feed_cache: dict = {}
+# Identity of THIS process. The feed cache above is process-local, so it dies on
+# every restart while data_version stays put — which silently left all 16 curated
+# pills cold (and their SSR first paint empty) until the next ingest. warm_feed.py
+# keys its "already warmed" marker on this as well as the data version, so a
+# restart re-warms regardless of why the process went away.
+_BOOT_ID = str(int(time.time()))
 _FEED_TTL_S = 1800  # fallback only — the data_version cache-key component is the real invalidator
 _FEED_CACHE_MAX = 256
 _FEED_KEYS = (

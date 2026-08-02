@@ -21,6 +21,50 @@ Newest first.
 
 ---
 
+## 2026-08-02 — Fix empty SSR on curated view pages (#6)
+
+**What** — `warm_feed.py`'s "already warmed" marker now keys on the dashboard's process
+identity as well as the data version. New DB-free endpoint `/api/warmstate` reports
+`{boot, entries}`; `articles._BOOT_ID` identifies the process that owns the feed cache.
+
+**Why** — `_ssr_feed` serves the server-rendered first paint out of `articles._feed_cache`,
+which is an **in-process dict**. `warm_feed.py` skipped warming all 16 curated pills
+whenever `data_version` was unchanged — an assumption that only holds if the cache
+outlives the process. It doesn't. Every dashboard restart emptied the cache while the
+marker still read "warmed", so all 16 pills stayed cold until the next ingest bumped the
+version, and their SSR first paint was **empty HTML**.
+
+That is not cosmetic: `sitemap.xml` advertises 520 URLs including these view pages, and
+Cloudflare shows BingBot and GoogleBot actively crawling them. Crawlers were being served
+blank documents from a large fraction of the site — the exact problem #6 was opened to
+fix, still live on views after being fixed for `/`. Measured before the fix, on prod:
+`/` and `?view=ai-general` had 50 articles in raw HTML; `?view=geopolitics-conflict` and
+`?view=public-health` had **0**.
+
+**How it was verified** — On prod, straight after a restart: `/api/warmstate` reported
+`entries: 0` and both views served 0 articles. Run 1 of `warm_feed.py` warmed the pills;
+run 2 printed **"pills: data + process unchanged — skipping"**, confirming the guard still
+suppresses redundant work; cache settled at **18 entries** (2 global + 16 pills). View
+pages then served 50 / 50 / 50 articles. `tests/test_ssr.py` against prod went from
+**10 passed / 1 failed to 11 passed / 0 failed**.
+
+**Files** — `dashboard/articles.py`, `dashboard/routes/api_feed.py`,
+`pipeline/warm_feed.py`.
+
+**Notes**
+- `/api/warmstate` deliberately touches no database. `/api/stats` returns 503 while
+  DuckDB is busy, and a warm loop that cannot distinguish "cache is cold" from "stats is
+  busy" is worse than no probe.
+- Fixing this in `restart_dash.ps1` (deleting the marker) was rejected: it would only
+  cover restarts that go through that script, not crashes, reboots or OOM kills.
+- Re-warming all 16 pills on every 2-minute cycle was also rejected — the original author
+  guarded it deliberately, and the guard is right, it was just keyed on the wrong thing.
+- Low counts on some pills (`va-news` 1, `medical-devices` 25) are genuine 24h article
+  volumes, not cache misses. `test_view_raw_html_has_articles` samples
+  `geopolitics-conflict`, which is well populated.
+
+---
+
 ## 2026-08-02 — Documentation facts injected from code; /about and /methodology rewritten
 
 **What** — `pages.py::_doc_facts()` gathers `BRIEFING_MODEL`, `BRIEFING_EVENT_LIMIT`,

@@ -53,10 +53,19 @@ def api_briefing():
     view_id = (request.args.get("view") or "").strip()
     hours = request.args.get("hours", 24, type=int)
     stream = request.args.get("stream", "0") == "1"
+    # Two non-visitor modes, deliberately different:
+    #   refresh=1  force regeneration, ignoring freshness (manual / debugging)
+    #   prewarm=1  scheduled warm — regenerate ONLY if stale for this window
+    # The scheduled job uses prewarm=1 so fresh_s() governs it. With refresh=1 it
+    # rewrote every combo on every run, which for a 30-day briefing (fresh 24h)
+    # meant five regenerations a day of content that had barely moved.
     refresh = request.args.get("refresh") == "1"
+    prewarm = request.args.get("prewarm") == "1"
 
     cache_key = f"{view_id or '_all'}:{hours}"
-    history_trigger = "prewarm" if refresh else "visit"
+    # Both modes tag history as 'prewarm', which also suppresses the thread
+    # update and keeps prewarm's own writes out of the demand signal.
+    history_trigger = "prewarm" if (refresh or prewarm) else "visit"
 
     from models import get_user_db
 

@@ -1,8 +1,8 @@
 """Pre-warm the AI briefing cache for every view × time-range combo so the
 dashboard always has pre-generated content to serve instantly (no "Generating…" skeletons).
 
-Hits the local non-streaming endpoint with ?refresh=1 to force regeneration
-and re-cache. Data-version-guarded: only runs when gdelt_ingest.py has written
+Hits the local non-streaming endpoint with ?prewarm=1, which regenerates only
+when the cache is stale for that window (see briefing.fresh_s). Data-version-guarded: only runs when gdelt_ingest.py has written
 a new data_version.txt, skipping redundant cycles.
 
 DEMAND-DRIVEN: the combo list is not the 17x6=102 cross-product. It is read
@@ -68,7 +68,9 @@ def last_prewarmed_version():
 
 
 def warm(view, hours, base_url, timeout=120):
-    params = f"hours={hours}&refresh=1"
+    # prewarm=1 (not refresh=1): regenerate only if the cache is stale for THIS
+    # window, so a 30-day briefing warms once a day instead of on every run.
+    params = f"hours={hours}&prewarm=1"
     if view:
         params += f"&view={view}"
     url = f"{base_url}/api/briefing?{params}"
@@ -76,9 +78,18 @@ def warm(view, hours, base_url, timeout=120):
     t0 = time.time()
     try:
         with urllib.request.urlopen(url, timeout=timeout) as r:
-            r.read()
+            body = r.read()
         elapsed = time.time() - t0
-        print(f"[{time.strftime('%H:%M:%S')}]  OK  {label:30s} {elapsed:.1f}s", flush=True)
+        # cached=True with no regeneration means fresh_s() said "still good" —
+        # no LLM call was made. Worth seeing in the log; it is the whole saving.
+        try:
+            import json as _json
+            skipped = bool(_json.loads(body).get("cached"))
+        except Exception:
+            skipped = False
+        tag = "SKIP" if skipped else " OK "
+        print(f"[{time.strftime('%H:%M:%S')}] {tag} {label:30s} {elapsed:.1f}s", flush=True)
+        return skipped
     except Exception as e:
         print(f"[{time.strftime('%H:%M:%S')}] FAIL {label:30s} ({e})", flush=True)
 
@@ -143,11 +154,15 @@ def main():
     t_start = time.time()
     ok_count = 0
     fail_count = 0
+    skipped_count = 0
     for view, hours in combos:
-        warm(view, hours, base_url)
+        if warm(view, hours, base_url):
+            skipped_count += 1
         ok_count += 1  # failure is logged but not fatal; count all attempts
         if STAGGER_S:
             time.sleep(STAGGER_S)
+    print(f"[{time.strftime('%H:%M:%S')}] still-fresh, no LLM call: "
+          f"{skipped_count}/{total}", flush=True)
 
     elapsed = time.time() - t_start
     print(f"[{time.strftime('%H:%M:%S')}] done: {total} combos in {elapsed:.1f}s", flush=True)

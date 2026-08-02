@@ -21,6 +21,40 @@ Newest first.
 
 ---
 
+## 2026-08-02 — Deploy lock for the shared production tree
+
+**What** — `scripts/deploy_guard.ps1` (`status` / `claim` / `release`), plus a check at
+the top of `restart_dash.ps1` that shouts when another agent holds the lock or when the
+tree has uncommitted files. Documented as required in CLAUDE.md.
+
+**Why** — Several agents (claude-code, OpenCode/DeepSeek) deploy into this one working
+tree by `scp` with no coordination. Earlier today two of them overwrote each other ten
+minutes apart: the second reverted a completed renderer fix and left `routes/pages.py`
+importing a `briefing._normalize_text` that no longer existed, so gdeltmonitor.com
+returned **500** until it was restored. Nothing was permanently lost only because the
+work had already been committed to a branch. The changelog discipline added earlier
+records history after the fact; it does nothing to prevent the collision itself.
+
+**How it was verified** — Simulated the exact scenario: agent A claims, agent B's claim
+is **refused with exit 1** naming the holder and the reason, `restart_dash.ps1` surfaces
+`LOCK ACTIVE owner=... reason=...`, a release by the wrong owner is refused, and a
+release by the rightful owner succeeds. `status` against the live tree correctly reported
+the branch, HEAD and the 3 uncommitted files.
+
+**Files** — `scripts/deploy_guard.ps1` (new), `C:\Users\siddh\restart_dash.ps1`
+(outside the repo; backed up to `restart_dash.ps1.bak_20260802`), `CLAUDE.md`.
+
+**Notes**
+- **The lock is advisory.** `scp` cannot be intercepted, so an agent that ignores the
+  guard still overwrites whatever it likes. This makes collisions loud, not impossible.
+  Committing before deploying remains the only thing that makes them recoverable.
+- `restart_dash.ps1` warns but never blocks — refusing to restart during an incident
+  would be worse than the collision being warned about.
+- It also now reminds you that it killed the :8016 dev instance, which is true of every
+  run and has bitten repeatedly.
+
+---
+
 ## 2026-08-02 — Prewarm respects freshness (`prewarm=1`)
 
 **What** — New `prewarm=1` request mode. It tags history as `prewarm` and suppresses the

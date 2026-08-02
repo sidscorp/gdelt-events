@@ -31,6 +31,25 @@ deploy/       register_dashboard.ps1, register_task.ps1 (Windows — production)
 - Restart: `ssh siddh@rainbow-boi "powershell -ExecutionPolicy Bypass -File C:/Users/siddh/restart_dash.ps1"`.
 - Served by waitress on :8015 → Cloudflare Tunnel → gdeltmonitor.com. A dev instance can run on :8016 with `GDELT_DATA_DIR` pointing at a smaller data slice.
 
+## Deploying: take the lock first (REQUIRED)
+Multiple agents deploy into this ONE working tree by `scp`. On 2026-08-02 two of them
+overwrote each other ten minutes apart — the second reverted a finished fix and left
+`routes/pages.py` importing a function that no longer existed, so the site returned
+**500** until it was restored. Nothing was lost only because it had been committed first.
+
+```powershell
+powershell -File scripts\deploy_guard.ps1 status                      # who else is in here?
+powershell -File scripts\deploy_guard.ps1 claim <agent> "<reason>"    # exits 1 if refused
+#   ... scp, restart, verify ...
+powershell -File scripts\deploy_guard.ps1 release <agent>
+```
+
+`restart_dash.ps1` runs `status` on entry and shouts if someone else holds the lock —
+it warns but never blocks, since refusing to restart mid-incident would be worse.
+The lock is advisory: `scp` cannot be intercepted. It makes collisions loud, not
+impossible. **Committing before you deploy is still the only thing that makes them
+recoverable.**
+
 ## Recording changes (REQUIRED — do not skip)
 Deploying by `scp` makes it very easy to change production and leave no record. Twice now
 the working tree has accumulated weeks of uncommitted edits whose rationale is simply gone.

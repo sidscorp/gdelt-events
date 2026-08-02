@@ -1,57 +1,104 @@
 {% extends "base.html" %}
 {% block title %}{% if company %}{{ company.name }} financials{% else %}SEC Financials{% endif %} — GDELT Monitor{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/about.css?v=3">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/about.css?v=4">{% endblock %}
 {% block content %}
 
-<h1>SEC Financials</h1>
-<p class="subtitle">Filed figures from SEC EDGAR, collected and served locally — no live lookup.</p>
+<h1>Company Financials</h1>
+<p class="subtitle">Filed figures from SEC EDGAR, with the context that makes them mean something. Collected locally — no live lookup.</p>
 
 <form class="sec-form" method="get" action="/sec-analysis" autocomplete="off">
-  <input type="text" name="ticker" value="{{ ticker }}" placeholder="Ticker, e.g. AAPL"
-         maxlength="10" aria-label="Ticker symbol">
-  <button type="submit">Analyze</button>
+  <input type="text" name="ticker" value="{{ ticker }}" maxlength="60"
+         placeholder="Ticker or company name" aria-label="Ticker or company name">
+  <button type="submit">Look up</button>
 </form>
 
 {% if not ticker and not error %}
 <p class="sec-hint">Try
-  {% for s in suggested %}<a href="/sec-analysis?ticker={{ s }}">{{ s }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+  {% for t, n in suggested %}<a href="/sec-analysis?ticker={{ t }}">{{ n }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
 </p>
 {% endif %}
 
-{% if error %}
-<p class="sec-error">{{ error }}</p>
-{% endif %}
+{% if error %}<p class="sec-error">{{ error }}</p>{% endif %}
 
 {% if company and latest %}
-<h2>{{ company.name }} {% if company.ticker %}<span class="sec-tick">{{ company.ticker }}</span>{% endif %}</h2>
-{% if matched_by_name %}
-<p class="sec-hint">Matched on company name — no filer files under the ticker
-  <strong>{{ ticker }}</strong>.{% if other_matches %} Also:
-  {% for m in other_matches %}<a href="/sec-analysis?ticker={{ m.name.split(' ')[0] }}">{{ m.name }}</a>{% if not loop.last %} · {% endif %}{% endfor %}{% endif %}
+<h2>{{ company.name }}{% if company.ticker %} <span class="sec-tick">{{ company.ticker }}</span>{% endif %}</h2>
+<p class="sec-meta">
+  {% if company.sic_description %}{{ company.sic_description }}{% endif %}
+  {% if matched_by and matched_by != 'ticker' %}<br><span class="sec-matchnote">Matched on {{ matched_by.replace('-', ' ') }} — you typed “{{ ticker }}”.</span>{% endif %}
+</p>
+
+{% if alternatives %}
+<p class="sec-hint">Did you mean
+  {% for a in alternatives %}<a href="/sec-analysis?ticker={{ a.ticker or a.name }}">{{ a.name[:34] }}</a>{% if not loop.last %} · {% endif %}{% endfor %}?
 </p>
 {% endif %}
 
-<p class="sec-basis">
-  <strong>{{ latest.label }}</strong><br>
-  Source: {{ latest.form }} filing. Quarterly figures are the quarter alone, not
-  year-to-date.
-</p>
+<p class="sec-basis"><strong>{{ latest.label }}</strong><br>
+  From the {{ latest.form }} filing. Quarterly figures are the quarter alone, not year-to-date.</p>
 
+{% if observations %}
+<h2>What stands out</h2>
+<ul class="sec-obs">
+  {% for o in observations %}<li class="sec-obs-{{ o.kind }}">{{ o.text }}</li>{% endfor %}
+</ul>
+<p class="sec-note">Every sentence above is computed from the filed figures — no model writes them, so none can state a number that was not filed.</p>
+{% endif %}
+
+<h2>The quarter in numbers</h2>
 <ul class="tech-list sec-metrics">
-  <li><span>Revenue</span> <span>{{ fmt_usd(latest.revenue) }}</span></li>
-  <li><span>Gross Profit</span> <span>{{ fmt_usd(latest.gross_profit) }}</span></li>
-  <li><span>Operating Income</span> <span>{{ fmt_usd(latest.operating_income) }}</span></li>
-  <li><span>Net Income</span> <span>{{ fmt_usd(latest.net_income) }}</span></li>
-  <li><span>EPS (Basic)</span> <span>{% if latest.eps_basic is not none %}${{ '%.2f'|format(latest.eps_basic) }}{% else %}—{% endif %}</span></li>
-  <li><span>Shares Outstanding</span> <span>{{ fmt_num(latest.shares_outstanding) }}</span></li>
+  <li><span>Revenue</span> <span>{{ fmt_usd(latest.revenue) }}
+    {% if latest.revenue_yoy is not none %}<em class="{{ 'up' if latest.revenue_yoy >= 0 else 'down' }}">{{ fmt_signed_pct(latest.revenue_yoy) }} YoY</em>{% endif %}</span></li>
+  <li><span>Gross profit</span> <span>{{ fmt_usd(latest.gross_profit) }}
+    {% if latest.gross_margin is not none %}<em>{{ fmt_pct(latest.gross_margin) }} margin</em>{% endif %}</span></li>
+  <li><span>Operating income</span> <span>{{ fmt_usd(latest.operating_income) }}
+    {% if latest.operating_margin is not none %}<em>{{ fmt_pct(latest.operating_margin) }} margin</em>{% endif %}</span></li>
+  <li><span>Net income</span> <span>{{ fmt_usd(latest.net_income) }}
+    {% if latest.net_income_yoy is not none %}<em class="{{ 'up' if latest.net_income_yoy >= 0 else 'down' }}">{{ fmt_signed_pct(latest.net_income_yoy) }} YoY</em>{% endif %}</span></li>
+  <li><span>EPS (basic)</span> <span>{% if latest.eps_basic is not none %}${{ '%.2f'|format(latest.eps_basic) }}{% else %}—{% endif %}</span></li>
+  <li><span>Shares outstanding</span> <span>{{ fmt_num(latest.shares_outstanding) }}</span></li>
 </ul>
 
-<h2>Margins</h2>
-<ul class="tech-list">
-  <li><span>Gross margin</span> <span>{{ fmt_pct(latest.gross_margin) }}</span></li>
-  <li><span>Operating margin</span> <span>{{ fmt_pct(latest.operating_margin) }}</span></li>
-  <li><span>Net margin</span> <span>{{ fmt_pct(latest.net_margin) }}</span></li>
+{% macro barchart(c, title, cls) %}
+{% if c %}
+<figure class="sec-fig">
+  <figcaption>{{ title }}</figcaption>
+  <svg viewBox="0 0 {{ c.width }} {{ c.height }}" class="sec-chart {{ cls }}" role="img" aria-label="{{ title }}">
+    {% if c.show_zero %}<line x1="0" y1="{{ c.zero_y }}" x2="{{ c.width }}" y2="{{ c.zero_y }}" class="axis"/>{% endif %}
+    {% for b in c.bars %}
+      <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"
+            class="bar{% if b.neg %} neg{% endif %}{% if b.annual %} annual{% endif %}"><title>{{ b.label }}: {{ b.value }}</title></rect>
+      {% if loop.index0 % 2 == 0 or loop.last %}<text x="{{ b.cx }}" y="{{ c.height - 4 }}" class="tick">{{ b.label }}</text>{% endif %}
+    {% endfor %}
+  </svg>
+</figure>
+{% endif %}
+{% endmacro %}
+
+<h2>Trend</h2>
+{{ barchart(rev_chart, 'Revenue by period — taller bars are annual filings', 'rev') }}
+{{ barchart(ni_chart, 'Net income by period — bars below the line are losses', 'ni') }}
+
+{% if margin_chart %}
+<figure class="sec-fig">
+  <figcaption>Operating margin ({{ margin_chart.lo }} – {{ margin_chart.hi }})</figcaption>
+  <svg viewBox="0 0 {{ margin_chart.width }} {{ margin_chart.height }}" class="sec-chart line" role="img" aria-label="Operating margin trend">
+    {% if margin_chart.zero_y %}<line x1="0" y1="{{ margin_chart.zero_y }}" x2="{{ margin_chart.width }}" y2="{{ margin_chart.zero_y }}" class="axis dashed"/>{% endif %}
+    <polyline points="{{ margin_chart.points }}" class="trend"/>
+    {% for d in margin_chart.dots %}<circle cx="{{ d.x }}" cy="{{ d.y }}" r="2.5" class="dot"><title>{{ d.label }}: {{ d.value }}</title></circle>{% endfor %}
+  </svg>
+</figure>
+{% endif %}
+
+{% if news %}
+<h2>In the news</h2>
+<p class="sec-note">Recent coverage from this site's own feed of ~44,000 sources. Note this is <em>current</em> news, not the filing period — the feed keeps a rolling 60-day window, so older quarters have no coverage left to show.</p>
+<ul class="sec-news">
+  {% for n in news %}
+  <li><a href="{{ n.url }}" target="_blank" rel="noopener">{{ n.title }}</a>
+      <span class="sec-news-meta">{{ n.outlet }}{% if n.date %} · {{ n.date }}{% endif %}</span></li>
+  {% endfor %}
 </ul>
+{% endif %}
 
 <h2>Balance sheet <span class="sec-instant">as of {{ latest.period_end }}</span></h2>
 <ul class="tech-list">
@@ -59,35 +106,28 @@
   <li><span>Total liabilities</span> <span>{{ fmt_usd(latest.total_liabilities) }}</span></li>
   <li><span>Stockholders' equity</span> <span>{{ fmt_usd(latest.stockholders_equity) }}</span></li>
   <li><span>Cash &amp; equivalents</span> <span>{{ fmt_usd(latest.cash) }}</span></li>
-  <li><span>Current ratio</span> <span>{% if latest.current_ratio %}{{ '%.2f'|format(latest.current_ratio) }}{% else %}—{% endif %}</span></li>
 </ul>
 
 {% if periods|length > 1 %}
 <h2>History</h2>
 <div class="sec-scroll">
 <table class="sec-table">
-  <thead>
-    <tr><th>Period</th><th>Form</th><th>Revenue</th><th>Operating</th><th>Net income</th><th>EPS</th></tr>
-  </thead>
+  <thead><tr><th>Period</th><th>Revenue</th><th>YoY</th><th>Operating</th><th>Net income</th><th>Net margin</th></tr></thead>
   <tbody>
   {% for p in periods %}
     <tr>
-      <td>{{ p.fp }} {{ p.fy }}<span class="sec-end">{{ p.period_end }}</span></td>
-      <td class="sec-form-cell">{{ p.form }}</td>
+      <td>{{ p.short }}<span class="sec-end">{{ p.period_end }}</span></td>
       <td>{{ fmt_usd(p.revenue) }}</td>
+      <td class="{{ 'up' if p.revenue_yoy and p.revenue_yoy >= 0 else ('down' if p.revenue_yoy else '') }}">{{ fmt_signed_pct(p.revenue_yoy) or '—' }}</td>
       <td>{{ fmt_usd(p.operating_income) }}</td>
       <td>{{ fmt_usd(p.net_income) }}</td>
-      <td>{% if p.eps_basic is not none %}${{ '%.2f'|format(p.eps_basic) }}{% else %}—{% endif %}</td>
+      <td>{{ fmt_pct(p.net_margin) }}</td>
     </tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
-<p class="sec-note">
-  Quarters are discrete periods, so they sum toward the fiscal year rather than
-  repeating it. A blank cell means the company did not tag that concept in that
-  filing — it is not a zero.
-</p>
+<p class="sec-note">Quarters are discrete periods and sum toward the fiscal year rather than repeating it. A blank cell means the company did not tag that concept — it is not a zero.</p>
 {% endif %}
 {% endif %}
 

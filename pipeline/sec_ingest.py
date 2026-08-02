@@ -39,6 +39,7 @@ LOG_DIR = DATA_DIR / "logs"
 
 UA = "gdeltmonitor.com sidd@snambiar.com"
 BULK_URL = "https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip"
+SUBMISSIONS_ZIP = "https://www.sec.gov/Archives/edgar/daily-index/bulkdata/submissions.zip"
 DAILY_IDX = "https://www.sec.gov/Archives/edgar/daily-index/{yr}/QTR{q}/form.{ymd}.idx"
 FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
@@ -131,6 +132,65 @@ def backfill(con, tickers: dict, limit: int | None = None) -> tuple[int, int]:
     return companies, rows
 
 
+
+def submissions(con, limit: int | None = None) -> tuple[int, int]:
+    """Company profiles from SEC's bulk submissions archive.
+
+    companyfacts has the numbers but not the industry, the exchange, or the full
+    ticker list. Without SIC there is no peer group, and a figure with no peer
+    group is a number rather than a judgement. Without every ticker, GOOG resolves
+    to nothing while GOOGL works.
+
+    Streams the archive; the per-CIK files also contain a long filing history we
+    do not need, so only the header fields are read.
+    """
+    log.info("downloading submissions.zip (~1.6 GB) ...")
+    blob = _get(SUBMISSIONS_ZIP, binary=True)
+    log.info("downloaded %.1f MB; reading profiles", len(blob) / 1e6)
+    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    companies = tick = 0
+    with zipfile.ZipFile(io.BytesIO(blob)) as z:
+        # Per-company files are CIK##########.json; the -submissions-### shards are
+        # continuation pages of the filing history and carry no profile fields.
+        names = [n for n in z.namelist()
+                 if n.startswith("CIK") and n.endswith(".json") and "-submissions-" not in n]
+        if limit:
+            names = names[:limit]
+        log.info("%d profiles in archive", len(names))
+        for i, name in enumerate(names, 1):
+            try:
+                with z.open(name) as fh:
+                    d = json.load(fh)
+                cik = int(d.get("cik") or name[3:-5])
+                tk = [t for t in (d.get("tickers") or []) if t]
+                ex = (d.get("exchanges") or [None])[0]
+                sec_schema.upsert_profile(
+                    con, cik, d.get("name"), d.get("sic"), d.get("sicDescription"),
+                    ex, d.get("fiscalYearEnd"), tk, ts)
+                companies += 1
+                tick += len(tk)
+            except Exception as e:
+                log.debug("skip %s: %s", name, e)
+            if i % 2000 == 0:
+                con.commit()
+                log.info("  %d/%d profiles, %d tickers", i, len(names), tick)
+    con.commit()
+
+    # The archive contains every entity that ever filed ANYTHING - overwhelmingly
+    # individuals filing Forms 3/4/5 (961,471 of 979,405 on the first run). They
+    # have no financial statements and no ticker, and left in place they bury
+    # real companies in search results. Keep only filers we can actually show.
+    pruned = con.execute(
+        "DELETE FROM companies WHERE cik NOT IN (SELECT cik FROM snapshots) "
+        "AND cik NOT IN (SELECT cik FROM tickers)").rowcount
+    con.commit()
+    log.info("pruned %d profile-only filers (no financials, no ticker)", pruned)
+    kept = con.execute("SELECT count(*) FROM companies").fetchone()[0]
+    log.info("companies retained: %d", kept)
+    return kept, tick
+
+
 def ciks_that_filed(day: date) -> set[int]:
     """CIKs with a 10-K/10-Q in the daily index - the change feed."""
     url = DAILY_IDX.format(yr=day.year, q=(day.month - 1) // 3 + 1,
@@ -182,12 +242,14 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--backfill", action="store_true", help="full bulk rebuild")
     ap.add_argument("--daily", action="store_true", help="refresh only recent filers")
+    ap.add_argument("--submissions", action="store_true",
+                    help="refresh company profiles (SIC, exchange, all tickers)")
     ap.add_argument("--days-back", type=int, default=1)
     ap.add_argument("--limit", type=int, help="backfill only N filers (testing)")
     ap.add_argument("--data-dir", default=str(DATA_DIR))
     args = ap.parse_args()
-    if not (args.backfill or args.daily):
-        ap.error("choose --backfill or --daily")
+    if not (args.backfill or args.daily or args.submissions):
+        ap.error("choose --backfill, --daily or --submissions")
 
     _setup_logging()
     data_dir = Path(args.data_dir)
@@ -196,13 +258,17 @@ def main() -> int:
     sec_schema.create(con)
 
     t0 = time.time()
-    mode = "backfill" if args.backfill else "daily"
+    mode = ("backfill" if args.backfill else
+            "submissions" if args.submissions else "daily")
     try:
-        tickers = load_ticker_map()
-        if args.backfill:
-            companies, rows = backfill(con, tickers, limit=args.limit)
+        if args.submissions:
+            companies, rows = submissions(con, limit=args.limit)
         else:
-            companies, rows = daily(con, tickers, days_back=args.days_back)
+            tickers = load_ticker_map()
+            if args.backfill:
+                companies, rows = backfill(con, tickers, limit=args.limit)
+            else:
+                companies, rows = daily(con, tickers, days_back=args.days_back)
         note = "ok"
     except Exception as e:
         companies = rows = 0

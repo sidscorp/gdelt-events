@@ -21,6 +21,61 @@ Newest first.
 
 ---
 
+## 2026-08-02 — /sec-analysis explains the numbers instead of listing them
+
+**What** — The financials page now says what the figures mean, shows their shape, and
+finds the company you meant. New `pipeline/sec_derive.py` (growth, margins, streaks,
+composition, sector percentiles), `pipeline/sec_explain.py` (deterministic observations),
+`dashboard/sec_search.py` (ranked search cascade), inline-SVG charts, and SIC/multi-class
+tickers from SEC's bulk submissions archive.
+
+**Why** — The page was a correct table, and a correct table is still just numbers. It
+showed GOOGL Q2 net income of $112.19B and said nothing about the fact that most of it
+did not come from operating the business. It also required knowing the exact ticker.
+
+**Explanations are computed, never generated.** No LLM anywhere in this feature: zero
+cost, zero latency, and a page that exists to be correct cannot hallucinate a figure.
+The trade is plainer prose.
+
+**How it was verified**
+- **13 tests** in `tests/test_sec_explain.py`, including a guard that no observation may
+  state a number absent from the inputs — mutation-checked by inserting a fabricated
+  `$4.44B`, which it caught. `tests/test_sec_normalize.py` stays 10/10; `smoke.sh` 20/20.
+- Search resolves all of: `AAPL`, `goog`→Alphabet (multi-class), `apple`→Apple Inc. (not
+  Applied Materials — size-ranked), `exxon`→XOM, `microsft`→MSFT (fuzzy),
+  `jp morgan`→JPM (punctuation-squashed), `berkshire`→BRK-B.
+- Charts render **server-side**: 3 `<svg>`, 20 bars and a polyline present in raw HTML
+  with JS disabled.
+- Backfill: 17,934 companies with SIC, 10,065 tickers, 289,153 derived rows, 14,201
+  sector buckets.
+
+**Files** — new `pipeline/sec_derive.py`, `pipeline/sec_explain.py`,
+`dashboard/sec_search.py`, `tests/test_sec_explain.py`; modified `pipeline/sec_ingest.py`
+(`--submissions`), `pipeline/sec_schema.py`, `dashboard/routes/sec_analysis.py`,
+`dashboard/templates/sec_analysis.html`, `dashboard/static/css/about.css`,
+`scripts/register_sec_task.ps1`.
+
+**Notes**
+- **Two bugs caught in review before shipping.** The composition sentence originally said
+  `$71.42B came from outside normal operations`; that figure is net income minus operating
+  income, which nets non-operating income *against tax*, so it now says "net of tax".
+  And Intel's **$11.03B net loss was being suppressed** — the loss and composition rules
+  shared a `kind`, and the dedup dropped the lower-scoring one. A net loss now has its own
+  kind and always leads.
+- The submissions archive holds **979,405 entities** — overwhelmingly individuals filing
+  Forms 3/4/5. Ingesting them all buried real companies in search, so the pipeline now
+  prunes any filer with neither financials nor a ticker (961,471 removed, 17,934 kept).
+- `sec_derive` is chained after `sec_ingest` in the daily task; a refresh that skipped it
+  would show new numbers with stale context.
+- **News pairing is deferred, not abandoned** — it is the actual differentiator. Two
+  blockers, both recorded in `routes/sec_analysis.py`: `_api_articles_inner` reads
+  `g._req_phases` and raises under a synthetic request context, and the feed's rolling
+  60-day window means only *recent* coverage can ever be shown, never the filing period.
+- **`?org=` is broken** and needs its own issue: `source=gkg` alone returns 80 results,
+  `source=gkg&org=Alphabet` returns 1,046,175 — a filter that increases the result count.
+
+---
+
 ## 2026-08-02 — SEC financials: correct the numbers, then pre-collect them
 
 **What** — Rewrote SEC XBRL extraction and turned `/sec-analysis` from a live per-request

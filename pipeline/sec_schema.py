@@ -71,18 +71,89 @@ def create(con: sqlite3.Connection) -> None:
             key TEXT PRIMARY KEY,
             val TEXT
         );
+
+        -- One CIK files under several tickers (GOOGL/GOOG, BRK-A/BRK-B). Keeping
+        -- only one meant half of a company's share classes resolved to nothing.
+        CREATE TABLE IF NOT EXISTS tickers (
+            ticker     TEXT NOT NULL,
+            cik        INTEGER NOT NULL,
+            is_primary INTEGER DEFAULT 0,
+            exchange   TEXT,
+            PRIMARY KEY (ticker, cik)
+        );
+        CREATE INDEX IF NOT EXISTS ix_tickers_cik ON tickers(cik);
+
+        -- Everything a sentence on the page can be built from. Computed, never
+        -- generated: if a number is not in here, no observation may state it.
+        CREATE TABLE IF NOT EXISTS derived (
+            cik INTEGER NOT NULL, period_end TEXT NOT NULL, fp TEXT NOT NULL,
+            revenue_yoy REAL, revenue_qoq REAL,
+            net_income_yoy REAL, operating_income_yoy REAL,
+            gross_margin REAL, operating_margin REAL, net_margin REAL,
+            operating_margin_yoy_pp REAL, net_margin_yoy_pp REAL,
+            nonop_income REAL, nonop_share_pretax REAL,
+            rev_growth_rank_n INTEGER, rev_growth_is_best INTEGER,
+            rev_growth_is_worst INTEGER, decline_streak INTEGER,
+            sector_gross_margin_pct REAL, sector_net_margin_pct REAL,
+            sector_peers INTEGER,
+            PRIMARY KEY (cik, period_end, fp)
+        );
+
+        CREATE TABLE IF NOT EXISTS sector_stats (
+            sic TEXT NOT NULL, period_end TEXT NOT NULL, metric TEXT NOT NULL,
+            p25 REAL, p50 REAL, p75 REAL, n INTEGER,
+            PRIMARY KEY (sic, period_end, metric)
+        );
     """)
+
+    # Columns added after the first release; ALTER is the migration path since
+    # the table already exists in production with 15,909 rows.
+    have = {r[1] for r in con.execute("PRAGMA table_info(companies)")}
+    for col, decl in (("sic", "TEXT"), ("sic_description", "TEXT"),
+                      ("exchange", "TEXT"), ("fiscal_year_end", "TEXT")):
+        if col not in have:
+            con.execute(f"ALTER TABLE companies ADD COLUMN {col} {decl}")
+    con.execute("CREATE INDEX IF NOT EXISTS ix_companies_sic ON companies(sic)")
+
+    # FTS5 over company names so "alphabet" and a typo both find something. Kept
+    # as a plain table rebuilt by sec_derive rather than trigger-synced: the
+    # ingest writes in bulk and triggers would fire 289k times.
+    con.execute("CREATE VIRTUAL TABLE IF NOT EXISTS companies_fts "
+                "USING fts5(name, ticker, cik UNINDEXED, tokenize='porter unicode61')")
     con.commit()
 
 
 def upsert_company(con: sqlite3.Connection, cik: int, ticker: str | None,
                    name: str | None, ts: str) -> None:
+    # COALESCE so a companyfacts-only refresh never wipes SIC/exchange that the
+    # submissions pass supplied.
     con.execute(
         "INSERT INTO companies (cik, ticker, name, updated_at) VALUES (?,?,?,?) "
-        "ON CONFLICT(cik) DO UPDATE SET ticker=excluded.ticker, "
-        "name=excluded.name, updated_at=excluded.updated_at",
+        "ON CONFLICT(cik) DO UPDATE SET "
+        "  ticker=COALESCE(excluded.ticker, companies.ticker), "
+        "  name=COALESCE(excluded.name, companies.name), "
+        "  updated_at=excluded.updated_at",
         (cik, ticker, name, ts),
     )
+
+
+def upsert_profile(con: sqlite3.Connection, cik: int, name: str | None,
+                   sic: str | None, sic_desc: str | None, exchange: str | None,
+                   fye: str | None, tickers: list[str], ts: str) -> None:
+    """Company profile from SEC submissions: industry, exchange, all tickers."""
+    con.execute(
+        "INSERT INTO companies (cik, ticker, name, sic, sic_description, exchange, "
+        "  fiscal_year_end, updated_at) VALUES (?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(cik) DO UPDATE SET "
+        "  ticker=COALESCE(excluded.ticker, companies.ticker), "
+        "  name=COALESCE(excluded.name, companies.name), sic=excluded.sic, "
+        "  sic_description=excluded.sic_description, exchange=excluded.exchange, "
+        "  fiscal_year_end=excluded.fiscal_year_end, updated_at=excluded.updated_at",
+        (cik, (tickers[0] if tickers else None), name, sic, sic_desc, exchange, fye, ts),
+    )
+    for i, t in enumerate(tickers):
+        con.execute("INSERT OR REPLACE INTO tickers (ticker, cik, is_primary, exchange) "
+                    "VALUES (?,?,?,?)", (t.upper(), cik, 1 if i == 0 else 0, exchange))
 
 
 def upsert_snapshots(con: sqlite3.Connection, cik: int, rows: list[dict]) -> int:

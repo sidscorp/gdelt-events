@@ -77,3 +77,43 @@ footer { margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border
 .sec-end { display: block; font-size: 0.68rem; color: var(--text-tertiary); }
 .sec-form-cell { color: var(--text-tertiary); font-size: 0.72rem; }
 .sec-note { font-size: 0.75rem; color: var(--text-tertiary); margin-top: 0.6rem; }
+
+/* Observations, charts and news on the financials page. Charts are hand-built
+   inline SVG (the site loads no charting library); colours come from the theme
+   vars so light and dark both work without a second stylesheet. */
+.sec-meta { font-size: 0.78rem; color: var(--text-tertiary); margin: -0.3rem 0 0.8rem; }
+.sec-matchnote { font-style: italic; }
+.sec-obs { list-style: none; padding: 0; margin: 0.4rem 0 0.6rem; }
+.sec-obs li {
+  font-size: 0.88rem; line-height: 1.6; padding: 0.55rem 0 0.55rem 0.85rem;
+  border-left: 2px solid var(--border); margin-bottom: 0.35rem;
+}
+.sec-obs li.sec-obs-loss, .sec-obs li.sec-obs-composition { border-left-color: var(--accent-brand); }
+.sec-metrics li span:last-child em {
+  font-style: normal; font-size: 0.72rem; margin-left: 0.5rem; color: var(--text-tertiary);
+}
+.sec-metrics li span:last-child em.up { color: #4a9d8f; }
+.sec-metrics li span:last-child em.down { color: #c2604f; }
+td.up { color: #4a9d8f; } td.down { color: #c2604f; }
+
+.sec-fig { margin: 0 0 1.1rem; }
+.sec-fig figcaption {
+  font-size: 0.72rem; color: var(--text-tertiary); margin-bottom: 0.3rem;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.sec-chart { width: 100%; height: auto; overflow: visible; }
+.sec-chart .bar { fill: var(--accent-brand); opacity: 0.72; }
+.sec-chart .bar.annual { opacity: 1; }
+.sec-chart .bar.neg { fill: #c2604f; opacity: 0.85; }
+.sec-chart.ni .bar { fill: #5b7fb9; }
+.sec-chart.ni .bar.neg { fill: #c2604f; }
+.sec-chart .axis { stroke: var(--text-tertiary); stroke-width: 1; opacity: 0.5; }
+.sec-chart .axis.dashed { stroke-dasharray: 3 3; }
+.sec-chart .tick { font-size: 8px; fill: var(--text-tertiary); text-anchor: middle; }
+.sec-chart .trend { fill: none; stroke: var(--accent-brand); stroke-width: 1.8; }
+.sec-chart .dot { fill: var(--accent-brand); }
+
+.sec-news { list-style: none; padding: 0; margin: 0.4rem 0 0.8rem; }
+.sec-news li { font-size: 0.84rem; margin-bottom: 0.5rem; line-height: 1.45; }
+.sec-news a { color: var(--text); }
+.sec-news-meta { display: block; font-size: 0.7rem; color: var(--text-tertiary); }

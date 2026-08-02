@@ -20,7 +20,11 @@ $vbs  = 'C:\Users\siddh\bin\gdelt_sec_ingest_hidden.vbs'
 Q = Chr(34)
 py = "$py"
 script = "$repo\pipeline\sec_ingest.py"
-cmd = "cmd /c " & Q & " " & Q & py & Q & " -u " & Q & script & Q & " --daily --days-back 3" & Q
+' Ingest THEN derive: the observations, growth rates and sector percentiles are
+' computed from the snapshots, so a refresh that skips the derive step leaves the
+' page showing new numbers with stale context.
+cmd = "cmd /c " & Q & " " & Q & py & Q & " -u " & Q & script & Q & " --daily --days-back 3" & _
+      " && " & Q & py & Q & " -u -m pipeline.sec_derive" & Q
 CreateObject("WScript.Shell").Run cmd, 0, False
 "@ | Set-Content -Path $vbs -Encoding ASCII
 

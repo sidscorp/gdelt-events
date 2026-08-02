@@ -1,6 +1,7 @@
 """AI briefing + FDA events API routes."""
 
 import json
+import threading
 from datetime import datetime, timedelta
 
 from flask import Blueprint, request, jsonify
@@ -9,7 +10,7 @@ import time as _time
 
 from db import get_db
 from briefing import (
-    BRIEFING_TTL_S, BRIEFING_EVENT_LIMIT, BRIEFING_MODEL,
+    BRIEFING_FRESH_S, BRIEFING_EVENT_LIMIT, BRIEFING_MODEL,
     _build_briefing_prompt, _fetch_briefing_events,
     _generate_briefing, _generate_briefing_stream,
     _normalize_briefing,
@@ -18,43 +19,73 @@ from briefing import (
 
 bp = Blueprint("api_briefing", __name__)
 
+# Concurrent regeneration guard: at most one fresh generation per cache_key
+# at a time. Subsequent requests for the same stale key serve cached content
+# only (no duplicate LLM calls).
+_regen_lock = threading.Lock()
+_regen_in_flight: set = set()
+
+
+def _try_start_regen(cache_key: str) -> bool:
+    """Acquire regeneration slot. Returns True if this caller should generate."""
+    with _regen_lock:
+        if cache_key in _regen_in_flight:
+            return False
+        _regen_in_flight.add(cache_key)
+        return True
+
+
+def _finish_regen(cache_key: str):
+    """Release regeneration slot."""
+    with _regen_lock:
+        _regen_in_flight.discard(cache_key)
+
 
 @bp.route("/api/briefing")
 def api_briefing():
-    """AI-generated briefing with optional SSE streaming."""
+    """AI-generated briefing with SSE streaming.
+
+    Serve cached content immediately (even if stale), then if the cache is
+    older than BRIEFING_FRESH_S, generate fresh content on the same SSE
+    connection so the user sees old text instantly with a seamless update."""
     from flask import Response
 
     view_id = (request.args.get("view") or "").strip()
     hours = request.args.get("hours", 24, type=int)
     stream = request.args.get("stream", "0") == "1"
-    refresh = request.args.get("refresh") == "1"  # pre-warm: force regeneration
+    refresh = request.args.get("refresh") == "1"
 
     cache_key = f"{view_id or '_all'}:{hours}"
-    # Distinguish organic visits from forced refreshes in the permanent record
-    # so a future bot reader can filter synthetic generations if desired.
     history_trigger = "prewarm" if refresh else "visit"
 
-    # Check cache first (both streaming and non-streaming)
     from models import get_user_db
+
+    # ── phase 0: read cache (used by both streaming and non-streaming paths) ──
     ucon = get_user_db()
     cached = ucon.execute(
         "SELECT briefing, article_count, generated_at, sources_json FROM briefing_cache WHERE cache_key = ?",
         (cache_key,),
     ).fetchone()
+    ucon.close()
+
+    is_stale = False
+    cached_sources = []
     if cached and not refresh:
+        try:
+            cached_sources = json.loads(cached["sources_json"]) if cached["sources_json"] else []
+        except Exception:
+            cached_sources = []
         age_s = (datetime.utcnow() - datetime.strptime(cached["generated_at"], "%Y-%m-%d %H:%M:%S")).total_seconds()
-        if age_s < BRIEFING_TTL_S:
-            ucon.close()
-            try:
-                cached_sources = json.loads(cached["sources_json"]) if cached["sources_json"] else []
-            except Exception:
-                cached_sources = []
-            if stream:
-                # Send cached sources + briefing as SSE events
-                def cached_stream():
-                    yield f"data: {json.dumps({'sources': cached_sources})}\n\n"
-                    yield f"data: {json.dumps({'text': cached['briefing'], 'done': True, 'cached': True, 'article_count': cached['article_count']})}\n\n"
-                return Response(cached_stream(), mimetype="text/event-stream", headers={"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no"})
+        is_stale = age_s >= BRIEFING_FRESH_S
+    elif not cached:
+        is_stale = True  # no cache at all — must generate
+
+    needs_regen = is_stale or refresh
+    should_regen = needs_regen and _try_start_regen(cache_key)
+
+    # ── non-streaming path ──
+    if not stream:
+        if cached and not needs_regen:
             return jsonify({
                 "briefing": cached["briefing"],
                 "sources": cached_sources,
@@ -64,92 +95,176 @@ def api_briefing():
                 "view": view_id or None,
                 "hours": hours,
             })
-    ucon.close()
+        if not should_regen:
+            # Another request is already regenerating; just return stale content
+            if cached:
+                return jsonify({
+                    "briefing": cached["briefing"],
+                    "sources": cached_sources,
+                    "article_count": cached["article_count"],
+                    "generated_at": cached["generated_at"],
+                    "cached": True,
+                    "stale": True,
+                    "view": view_id or None,
+                    "hours": hours,
+                })
+            return jsonify({"briefing": None, "error": "Generation in progress, no cache yet"}), 503
 
-    # Continuity: the previous briefing for this key (even if expired) anchors
-    # the next one, and persistent story threads carry multi-day narratives.
-    prev = None
-    if cached:
+        prev = None
+        if cached:
+            try:
+                prev = {"briefing": cached["briefing"], "generated_at": cached["generated_at"],
+                        "sources": cached_sources}
+            except Exception:
+                prev = None
+        threads = get_threads(cache_key)
+        sources, view_name, view_desc = _fetch_briefing_events(view_id, hours)
         try:
-            prev = {
-                "briefing": cached["briefing"],
-                "generated_at": cached["generated_at"],
-                "sources": json.loads(cached["sources_json"]) if cached["sources_json"] else [],
-            }
-        except Exception:
+            if len(sources) < 2:
+                if cached:
+                    return jsonify({
+                        "briefing": cached["briefing"],
+                        "sources": cached_sources,
+                        "article_count": cached["article_count"],
+                        "generated_at": cached["generated_at"],
+                        "cached": True,
+                        "stale": True,
+                        "view": view_id or None,
+                        "hours": hours,
+                    })
+                return jsonify({"briefing": None, "error": "Not enough articles", "found": len(sources)})
+
+            sources = sources[:BRIEFING_EVENT_LIMIT]
+            sources_payload = [{"n": i + 1, "link": s["link"], "outlet": s.get("outlet"),
+                                "title": s.get("title"), "n_sources": s.get("n_sources", 1)}
+                               for i, s in enumerate(sources)]
+            sources_json = json.dumps(sources_payload)
+            prompt = _build_briefing_prompt(sources, view_name, view_desc, hours,
+                                            prev=prev, threads=threads)
+            gen_t0 = _time.time()
+
+            briefing = _normalize_briefing(_generate_briefing(sources, view_name, view_desc, hours,
+                                                               prev=prev, threads=threads, prompt=prompt), view_name, hours)
+            if not briefing:
+                if cached:
+                    return jsonify({
+                        "briefing": cached["briefing"], "sources": cached_sources,
+                        "article_count": cached["article_count"],
+                        "generated_at": cached["generated_at"], "cached": True, "stale": True,
+                        "view": view_id or None, "hours": hours,
+                    })
+                return jsonify({"briefing": None, "error": "Briefing generation unavailable"}), 503
+
+            generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            meta_json = json.dumps({
+                "model": BRIEFING_MODEL, "prompt": prompt, "n_sources": len(sources),
+                "elapsed_s": round(_time.time() - gen_t0, 2),
+                "briefing_chars": len(briefing), "cache_ttl_s": BRIEFING_FRESH_S,
+            })
+            uc = get_user_db()
+            uc.execute(
+                "INSERT OR REPLACE INTO briefing_cache "
+                "(cache_key, briefing, article_count, generated_at, sources_json, meta_json) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (cache_key, briefing, len(sources), generated_at, sources_json, meta_json),
+            )
+            uc.commit()
+            uc.close()
+            record_briefing_history(cache_key, view_id or "_all", hours, briefing,
+                                    sources_json, len(sources), meta_json, generated_at,
+                                    trigger=history_trigger)
+            update_threads_async(cache_key, threads, briefing)
+            return jsonify({
+                "briefing": briefing, "sources": sources_payload,
+                "article_count": len(sources), "generated_at": generated_at,
+                "cached": False, "view": view_id or None, "hours": hours,
+            })
+        finally:
+            _finish_regen(cache_key)
+
+    # ── SSE streaming path ──
+    def sse_stream():
+        # Phase 1: serve cached content IMMEDIATELY (even stale)
+        if cached and not refresh:
+            yield f"data: {json.dumps({'sources': cached_sources})}\n\n"
+            yield f"data: {json.dumps({'text': cached['briefing'], 'done': False, 'cached': True, 'stale': is_stale, 'article_count': cached['article_count']})}\n\n"
+            if not needs_regen:
+                yield f"data: {json.dumps({'done': True, 'cached': True, 'article_count': cached['article_count']})}\n\n"
+                return
+
+        # Phase 2: if stale or no cache, attempt regeneration
+        if not should_regen:
+            # Another request is regenerating — serve stale and be done
+            if cached:
+                meta_label = "Updating — another request is refreshing this briefing"
+                yield f"data: {json.dumps({'done': True, 'cached': True, 'stale': True, 'meta': meta_label, 'article_count': cached['article_count']})}\n\n"
+            else:
+                yield f"data: {json.dumps({'error': 'Generation in progress', 'done': True})}\n\n"
+            return
+
+        try:
             prev = None
-    threads = get_threads(cache_key)
+            if cached:
+                try:
+                    prev = {"briefing": cached["briefing"], "generated_at": cached["generated_at"],
+                            "sources": cached_sources}
+                except Exception:
+                    prev = None
+            threads = get_threads(cache_key)
+            sources, view_name, view_desc = _fetch_briefing_events(view_id, hours)
 
-    # Fetch deduped EVENTS for the selected window (no auto-widen — stays
-    # consistent with the feed). If too sparse, "Not enough articles".
-    sources, view_name, view_desc = _fetch_briefing_events(view_id, hours)
-    if len(sources) < 2:
-        _found = len(sources)
-        if stream:
-            def empty_stream(_f=_found):
-                yield f"data: {json.dumps({'error': 'Not enough articles', 'found': _f, 'done': True})}\n\n"
-            return Response(empty_stream(), mimetype="text/event-stream", headers={"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no"})
-        return jsonify({"briefing": None, "error": "Not enough articles", "found": _found})
+            if len(sources) < 2:
+                if cached:
+                    yield f"data: {json.dumps({'done': True, 'cached': True, 'stale': True, 'article_count': cached['article_count']})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'error': 'Not enough articles', 'found': len(sources), 'done': True})}\n\n"
+                return
 
-    sources = sources[:BRIEFING_EVENT_LIMIT]
-    # Compact map sent to the client to resolve [N] citation markers -> links.
-    sources_payload = [
-        {"n": i + 1, "link": s["link"], "outlet": s.get("outlet"),
-         "title": s.get("title"), "n_sources": s.get("n_sources", 1)}
-        for i, s in enumerate(sources)
-    ]
-    sources_json = json.dumps(sources_payload)
+            sources = sources[:BRIEFING_EVENT_LIMIT]
+            sources_payload = [{"n": i + 1, "link": s["link"], "outlet": s.get("outlet"),
+                                "title": s.get("title"), "n_sources": s.get("n_sources", 1)}
+                               for i, s in enumerate(sources)]
+            sources_json = json.dumps(sources_payload)
+            prompt = _build_briefing_prompt(sources, view_name, view_desc, hours,
+                                            prev=prev, threads=threads)
+            gen_t0 = _time.time()
 
-    # Transparency: build the prompt HERE (not inside the generator) so the
-    # exact text sent to the model can be stored with the cached briefing and
-    # served via /api/briefing_meta.
-    prompt = _build_briefing_prompt(sources, view_name, view_desc, hours,
-                                    prev=prev, threads=threads)
-    gen_t0 = _time.time()
-
-    def _meta_json(briefing_len):
-        return json.dumps({
-            "model": BRIEFING_MODEL,
-            "prompt": prompt,
-            "n_sources": len(sources),
-            "continuity_titles": [
-                (s.get("title") or "")[:110] for s in (prev or {}).get("sources", [])[:8]
-            ] if prev else [],
-            "threads_used": [
-                {"title": t.get("title"), "first_seen": t.get("first_seen"),
-                 "summary": t.get("summary")}
-                for t in (threads or []) if (t.get("status") or "active") == "active"
-            ],
-            "elapsed_s": round(_time.time() - gen_t0, 2),
-            "briefing_chars": briefing_len,
-            "cache_ttl_s": BRIEFING_TTL_S,
-        })
-
-    if stream:
-        # Stream tokens via SSE (sources first so the client can linkify [N]).
-        def sse_stream():
+            # Send fresh sources map (may differ from cached)
             yield f"data: {json.dumps({'sources': sources_payload})}\n\n"
+
             full_text = []
             try:
-                for chunk in _generate_briefing_stream(sources, view_name, view_desc, hours, prev=prev, threads=threads, prompt=prompt):
+                for chunk in _generate_briefing_stream(sources, view_name, view_desc, hours,
+                                                        prev=prev, threads=threads, prompt=prompt):
                     full_text.append(chunk)
                     yield f"data: {json.dumps({'text': chunk})}\n\n"
             except Exception as e:
                 yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
                 return
 
-            # Cache the completed briefing + its sources map
             briefing = _normalize_briefing("".join(full_text).strip(), view_name, hours)
             if briefing:
                 generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+                meta_json = json.dumps({
+                    "model": BRIEFING_MODEL, "prompt": prompt, "n_sources": len(sources),
+                    "continuity_titles": [
+                        (s.get("title") or "")[:110] for s in (prev or {}).get("sources", [])[:8]
+                    ] if prev else [],
+                    "threads_used": [
+                        {"title": t.get("title"), "first_seen": t.get("first_seen"),
+                         "summary": t.get("summary")}
+                        for t in (threads or []) if (t.get("status") or "active") == "active"
+                    ],
+                    "elapsed_s": round(_time.time() - gen_t0, 2),
+                    "briefing_chars": len(briefing), "cache_ttl_s": BRIEFING_FRESH_S,
+                })
                 try:
                     uc = get_user_db()
                     uc.execute(
                         "INSERT OR REPLACE INTO briefing_cache "
                         "(cache_key, briefing, article_count, generated_at, sources_json, meta_json) "
                         "VALUES (?, ?, ?, ?, ?, ?)",
-                        (cache_key, briefing, len(sources), generated_at, sources_json,
-                         _meta_json(len(briefing))),
+                        (cache_key, briefing, len(sources), generated_at, sources_json, meta_json),
                     )
                     uc.commit()
                     uc.close()
@@ -157,44 +272,16 @@ def api_briefing():
                     pass
                 record_briefing_history(
                     cache_key, view_id or "_all", hours, briefing,
-                    sources_json, len(sources), _meta_json(len(briefing)),
-                    generated_at, trigger=history_trigger,
+                    sources_json, len(sources), meta_json, generated_at,
+                    trigger=history_trigger,
                 )
                 update_threads_async(cache_key, threads, briefing)
-            yield f"data: {json.dumps({'done': True, 'article_count': len(sources)})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'refreshed': is_stale, 'article_count': len(sources)})}\n\n"
+        finally:
+            _finish_regen(cache_key)
 
-        return Response(sse_stream(), mimetype="text/event-stream", headers={"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no"})
-
-    # Non-streaming fallback
-    briefing = _normalize_briefing(_generate_briefing(sources, view_name, view_desc, hours, prev=prev, threads=threads, prompt=prompt), view_name, hours)
-    if not briefing:
-        return jsonify({"briefing": None, "error": "Briefing generation unavailable"}), 503
-    update_threads_async(cache_key, threads, briefing)
-
-    generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-    ucon = get_user_db()
-    ucon.execute(
-        "INSERT OR REPLACE INTO briefing_cache (cache_key, briefing, article_count, generated_at, sources_json, meta_json) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
-        (cache_key, briefing, len(sources), generated_at, sources_json, _meta_json(len(briefing))),
-    )
-    ucon.commit()
-    ucon.close()
-    record_briefing_history(
-        cache_key, view_id or "_all", hours, briefing,
-        sources_json, len(sources), _meta_json(len(briefing)),
-        generated_at, trigger=history_trigger,
-    )
-
-    return jsonify({
-        "briefing": briefing,
-        "sources": sources_payload,
-        "article_count": len(sources),
-        "generated_at": generated_at,
-        "cached": False,
-        "view": view_id or None,
-        "hours": hours,
-    })
+    return Response(sse_stream(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no"})
 
 
 @bp.route("/api/briefing_meta")
@@ -239,7 +326,7 @@ def api_briefing_meta():
         "age_s": age_s,
         "article_count": row["article_count"],
         "sources": sources,
-        "meta": meta,  # empty for briefings cached before meta capture shipped
+        "meta": meta,
         "methodology": "/methodology",
     })
 

@@ -24,8 +24,8 @@ req_log = logging.getLogger("dashboard.requests")
 # Routed through the self-hosted LLM gateway (LiteLLM @ llm.snambiar.com). The key
 # file now holds the gateway virtual key, and the model is a gateway alias.
 OPENROUTER_URL = "https://llm.snambiar.com/v1/chat/completions"
-BRIEFING_MODEL = "accounts/fireworks/models/gpt-oss-120b"  # Cerebras GLM-4.7 via the gateway; local-fast available for testing
-BRIEFING_TTL_S = 3600  # 60 minutes (hourly ingest + pre-warm cycle)
+BRIEFING_MODEL = "cerebras-fast"  # free Cerebras tier; if 402s (credits exhausted), prewarm skips and on-demand visit retries on next poll
+BRIEFING_FRESH_S = 3600  # cache age that triggers background regeneration (60 minutes)
 _OPENROUTER_KEY_PATH = OPENROUTER_KEY_PATH
 
 
@@ -94,10 +94,10 @@ def _age_label(generated_at: str) -> tuple[float, str]:
     return age_s, label
 
 
-# Mirror of normalizeBriefingText() in static/js/markdown.js — keep the two in
-# sync. Applied here so what lands in briefing_cache (and therefore the SSR
-# paint) is already clean; applied there so a *streaming* briefing, which never
-# passes through this function, looks the same as its cached replay.
+# Normalize citation formatting variance across model outputs: the same model
+# writes [3] on one run and 【3】 the next. These patterns convert exotic
+# brackets back to plain [N] so SSR (_briefing_html in pages.py) and the
+# streaming client (markdown.js) produce identical HTML.
 _CITE_BRACKETS = re.compile(r"[【〔［\[]{1,2}\s*(\d+(?:\s*[,，、]\s*\d+)*)\s*[】〕］\]]{1,2}")
 _CITE_TRAILING_PUNCT = re.compile(r"([.!?])\s*((?:\[\d+\])+)\s*$", re.M)
 _CITE_LEADING_SPACE = re.compile(r"[ \t]+((?:\[\d+\])+)")
@@ -172,10 +172,6 @@ def _normalize_briefing(text, view_name, hours):
         elif stripped.startswith("* ") and len(stripped) > 2:
             if not stripped[2:].startswith("**"):
                 stripped = "- " + stripped[2:]
-        # Some runs open the lead paragraph with a bold "**Executive Summary:**"
-        # label and some don't — the H2 above it already says as much.
-        elif stripped.startswith("**"):
-            stripped = _LEAD_LABEL.sub("", stripped)
         cleaned.append(stripped)
 
     # 3. Collapse repeated blank lines (max 1 blank between sections).
@@ -242,9 +238,9 @@ def _build_briefing_prompt(sources: list[dict], view_name: str, view_desc: str,
     def _fmt(s):
         outlet = s.get("outlet") or "source"
         n = s.get("n_sources") or 1
-        tag = f"{outlet} · {n} sources" if n > 1 else outlet
+        tag = f"{outlet} × {n} sources" if n > 1 else outlet
         if prev_links and s.get("link") not in prev_links:
-            tag = f"NEW · {tag}"
+            tag = f"NEW × {tag}"
         line = f"[{tag}] {s.get('title') or ''}"
         desc = (s.get("description") or "").strip()
         if desc:

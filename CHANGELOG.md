@@ -21,6 +21,74 @@ Newest first.
 
 ---
 
+## 2026-08-02 — Serve-cached-then-regenerate briefings; all 17 views pre-warmed
+
+**What** — Model switched to `cerebras-fast`; `BRIEFING_TTL_S` renamed to
+`BRIEFING_FRESH_S` (it gates background regeneration, not eviction). `/api/briefing`
+rewritten to always serve cached content immediately and then, if that cache is stale,
+stream a freshly generated briefing on the same connection, with a concurrency guard so
+two visitors can't trigger duplicate generations for one key. `prewarm_briefings.py`
+expanded from the global view to all 17 pills, still version-guarded.
+
+**Why** — Briefings were slow to first paint on a cache miss, and a stale cache showed
+nothing while regenerating. Serving the stale copy first makes the panel useful instantly.
+
+**How it was verified** — Author reported homepage, API, pill briefing and SSE stream all
+200. Note that this was status-code verification only; it did not exercise the two-phase
+stream's rendering, and two defects survived it (see the entry below).
+
+**Files** — `dashboard/briefing.py`, `dashboard/routes/api_briefing.py`,
+`pipeline/prewarm_briefings.py`, `dashboard/static/js/markdown.js`.
+
+**Notes**
+- Authored by a separate agent session (OpenCode/DeepSeek) working the same tree
+  concurrently; summary supplied by Sidd and used as the basis for this entry.
+- **Still pending, deliberately not done:** `GDELT-BriefingPrewarm` is still DISABLED in
+  Task Scheduler. Enabling it for all 17 views is a cost decision, not a code one — see
+  the open question at the bottom of this entry's follow-up in the next entry.
+
+## 2026-08-02 — Reconcile the concurrent briefing deploys
+
+**What** — Re-applied the markdown renderer rewrite on top of the concurrent session's
+backend changes, and fixed two defects that its deploy introduced.
+
+**Why** — Two agents deployed to the same production tree within ten minutes. The second
+`scp` of `markdown.js` and `briefing.py` reverted the renderer to the old version, and for
+a window left `pages.py` importing a `_normalize_text` that no longer existed — the
+homepage returned **500** until `_normalize_text` was restored. Beyond that:
+
+1. **Duplicated briefings.** The new flow emits the full cached briefing
+   (`done:false`) and then streams a fresh one on the same connection, but the client did
+   `fullText += data.text` with no reset — so a stale briefing rendered *twice*, cached
+   copy with the regenerated one appended. The server re-sends `sources` to open phase
+   two; the client now treats that as "what follows replaces what I have".
+2. **Encoding damage.** `markdown.js` came back with the `•` in the list-marker character
+   class mangled to replacement characters, and `·` changed to `×` in the source-count
+   separator. The renderer now spells those as `•` etc. escapes so the file is
+   pure ASCII and cannot be corrupted by an editor round-trip again.
+
+**How it was verified** — Replayed the exact SSE event sequence `api_briefing.py` emits
+for a stale cache: **2 briefings rendered before the fix, 1 after**, and the one shown is
+the regenerated text. Re-ran the streaming scan (0 of 1969 and 0 of 1662 frames leak raw
+syntax) and the SSR-vs-client diff (byte-identical). Prod: `/`, `/api/stats`,
+`/methodology`, `/?view=ai_sector`, `/?hours=24` all 200, renderer confirmed live, visual
+check in dark mode.
+
+**Files** — `dashboard/static/js/markdown.js` (merge), `dashboard/templates/index.html`
+(`?v=20`), `dashboard/static/sw.js` (`gdelt-shell-v20`).
+
+**Notes**
+- Asset version went to v20 because `?v=19` was served with two *different* contents
+  during the collision, so some clients hold a bad copy under that key.
+- Kept from the other session: the `data.meta` / `refreshed` / `cached` meta label and the
+  `\\'` escaping fix in the FDA row. Reverted: the `×` separator (restored `·`).
+- Commit `85f94c7` describes those edits as drift "whose rationale was not recorded". That
+  was written before it was known they were live, in-flight work from an active session —
+  the characterization is unfair and the entry above supplies the missing rationale.
+- **The real lesson is not in the code.** Two agents `scp`-ing into one working tree with
+  no lock is what caused both the outage and the lost work. A deploy lock is proposed but
+  not built.
+
 ## 2026-08-02 — Briefing markdown renderer rewrite
 
 **What** — Replaced the AI briefing's markdown rendering. `renderMd` in

@@ -234,7 +234,16 @@ async function fetchBriefing() {
           }
           return true;
         }
-        if (data.sources) sourcesMap = data.sources;
+        // /api/briefing streams in two phases: the cached briefing in full
+        // (done:false), then — if that cache was stale — a freshly generated
+        // one on the same connection. The server re-sends `sources` to open
+        // phase two, which is the only signal that what follows REPLACES what
+        // we have rather than continuing it. Without this reset the reader
+        // sees the cached briefing with the new one appended to it.
+        if (data.sources) {
+          if (fullText) fullText = '';
+          sourcesMap = data.sources;
+        }
         if (data.text) {
           if (!briefFirstMarked && window.perfMark) { briefFirstMarked = true; window.perfMark('briefing_first', performance.now() - briefStart); }
           fullText += data.text;
@@ -248,7 +257,12 @@ async function fetchBriefing() {
         if (data.done) {
           // Final repaint with markup complete, so nothing stays trimmed.
           if (fullText) textEl.innerHTML = linkifyCitations(renderMd(fullText), sourcesMap);
-          const label = data.cached ? 'cached' : 'just generated';
+          // 'refreshed' means stale cached text was just replaced in place.
+          let label;
+          if (data.meta) label = data.meta;
+          else if (data.refreshed) label = 'just refreshed';
+          else if (data.cached) label = 'cached';
+          else label = 'just generated';
           metaEl.textContent = articleCount ? `From ${articleCount} articles · ${label}` : '';
           if (window.perfMark) { window.perfMark(data.cached ? 'briefing_done_cached' : 'briefing_done', performance.now() - briefStart); window.perfFlush(); }
           if (typeof saveSnapshot === 'function') saveSnapshot();
@@ -341,7 +355,7 @@ async function loadFdaEvents(hours) {
       const classLabel = e.recall_class ? ` ${e.recall_class.replace(/^Class\s*/i, 'Class ')}` : '';
       return `<div class="fda-event-row">
         <span class="fda-event-badge ${_fdaBadgeClass(e.event_type)}">${_fdaBadgeLabel(e.event_type)}${classLabel}</span>
-        <span class="fda-event-firm" title="${(e.firm_name||'').replace(/"/g,'&quot;')}" onclick="applyFilter('org','${firm.replace(/'/g,"\'")}') ">${firm}</span>
+        <span class="fda-event-firm" title="${(e.firm_name||'').replace(/"/g,'&quot;')}" onclick="applyFilter('org','${firm.replace(/'/g,"\\'")}') ">${firm}</span>
         <span class="fda-event-desc" title="${(desc||'').replace(/"/g,'&quot;')}">${desc}</span>
         <span class="fda-event-date">${_fdaDateFmt(e.event_date)}</span>
       </div>`;

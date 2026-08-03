@@ -21,6 +21,62 @@ Newest first.
 
 ---
 
+## 2026-08-02 — Financials page: stop misleading, adapt to the business, add light theme
+
+**What** — Charts no longer mix period lengths; search ranks listed parents above
+subsidiaries; the metric set adapts to the kind of filer; ROE/ROA added; a theme toggle now
+appears on every page; balance sheet shown as proportions.
+
+**Why** — Reviewing the live JPMorgan page found three things that actively mislead, which
+matters more than polish on a page whose purpose is understanding:
+
+1. **Metrics banks never report led the page.** For SIC 6021 (4,226 periods) gross profit
+   is tagged **0.2%** of the time and operating income **3.2%**, against net income
+   **99.4%** and equity **98.0%**. The most prominent section was three empty headings with
+   a paragraph of definition each.
+2. **Charts mixed annual and quarterly bars on one axis** — a full year at 4x the height of
+   its neighbours reads as a spectacular quarter. On JPM the revenue chart showed *only*
+   annual bars while its caption described "the quarters beside them".
+3. **Search sent users to a financing subsidiary.** Both JPMorgan CIKs hold 24 periods, and
+   the tiebreak was `max(revenue)` — NULL for banks — so ranking collapsed.
+
+**How it was fixed**
+- `_bar_chart` picks quarters *or* annual, never both, and labels which basis it plotted.
+- Search ranks **listed → size (revenue or assets/10) → …**; `jp morgan`, `jpmorgan`, `JPM`,
+  `wells fargo` and `citigroup` all now reach the listed parent.
+- Filer class from SIC picks the metric set. Banks lead with net income, EPS, **ROE/ROA**
+  (97.4% / 93.3% coverage), assets and equity — six filled rows where there were three
+  dashes — plus a framing sentence explaining *why* a bank has no revenue line.
+- New observation rules that work without a revenue line: return on equity, leverage, and
+  net-income growth. JPM went from one sentence to three.
+
+**How it was verified** — Prod: JPM, Apple, Intel, Prologis each get the right class and
+metric set; charts report a single basis; light theme resolves (`bg rgb(255,255,248)`,
+`--pos #1f7a68`). `test_sec_explain.py` 13/13. Dashboard checked for regression at runtime:
+exactly **one** toggle, header button still `position: static`, feed still renders 50 rows.
+
+**Files** — `dashboard/sec_search.py`, `dashboard/routes/sec_analysis.py`,
+`dashboard/sec_explain.py` + `pipeline/sec_explain.py`, `pipeline/sec_derive.py`,
+`pipeline/sec_schema.py`, `dashboard/templates/sec_analysis.html`,
+`dashboard/templates/base.html`, `dashboard/static/css/sec.css`, `static/css/base.css`.
+
+**Notes**
+- **Caught a self-inflicted regression before it shipped.** The global toggle was first
+  written as `.theme-toggle` — the class the dashboard header already uses and
+  `dashboard.css` already styles. `position: fixed` in `base.css` would have yanked the
+  dashboard's own button into the corner. Renamed `.page-theme-toggle`, and the script
+  removes itself when `#themeBtn` is present so no page shows two.
+- ROE for a quarter is the **quarter's** return. Deliberately not annualised; the sentence
+  says so, because multiplying by four would overstate it.
+- `derived` needed an ALTER migration for the new columns — `CREATE TABLE IF NOT EXISTS`
+  does not add columns to an existing table (same trap as `companies` earlier today).
+- The "filer does not tag revenue" observation is suppressed once the framing box says the
+  same thing; two consecutive paragraphs making one point reads as padding.
+- Colour tokens (`--pos`, `--neg`, `--ni-bar`) now differ per theme; the originals were
+  picked against dark only and were muddy on white.
+
+---
+
 ## 2026-08-02 — Financials page: widescreen, and it explains the metrics
 
 **What** — `/sec-analysis` gets its own stylesheet (`static/css/sec.css`), a two-column

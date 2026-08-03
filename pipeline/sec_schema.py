@@ -94,6 +94,7 @@ def create(con: sqlite3.Connection) -> None:
             nonop_income REAL, nonop_share_pretax REAL,
             rev_growth_rank_n INTEGER, rev_growth_is_best INTEGER,
             rev_growth_is_worst INTEGER, decline_streak INTEGER,
+            return_on_equity REAL, return_on_assets REAL,
             sector_gross_margin_pct REAL, sector_net_margin_pct REAL,
             sector_peers INTEGER,
             PRIMARY KEY (cik, period_end, fp)
@@ -108,6 +109,13 @@ def create(con: sqlite3.Connection) -> None:
 
     # Columns added after the first release; ALTER is the migration path since
     # the table already exists in production with 15,909 rows.
+    # Same story for `derived`: ROE/ROA were added after the table shipped, and
+    # CREATE TABLE IF NOT EXISTS does not add columns to an existing table.
+    have_d = {r[1] for r in con.execute("PRAGMA table_info(derived)")}
+    for col in ("return_on_equity", "return_on_assets"):
+        if col not in have_d:
+            con.execute(f"ALTER TABLE derived ADD COLUMN {col} REAL")
+
     have = {r[1] for r in con.execute("PRAGMA table_info(companies)")}
     for col, decl in (("sic", "TEXT"), ("sic_description", "TEXT"),
                       ("exchange", "TEXT"), ("fiscal_year_end", "TEXT")):

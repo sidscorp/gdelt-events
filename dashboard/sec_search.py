@@ -29,9 +29,20 @@ def _rows(con: sqlite3.Connection, sql: str, *params) -> list[sqlite3.Row]:
 
 
 def _size_sql(alias: str = "c") -> str:
-    """Latest revenue for a company, as a ranking signal."""
-    return (f"(SELECT max(s.revenue) FROM snapshots s "
-            f"WHERE s.cik = {alias}.cik AND s.revenue IS NOT NULL)")
+    """How big is this filer, for tiebreaking.
+
+    Revenue alone does not work: banks barely tag it (24.8% of periods for SIC
+    6021, versus 93.9% for total assets), so ranking by revenue collapsed to NULL
+    for every bank and sent a search for "jp morgan" to JPMorgan Chase Financial
+    Co. LLC instead of JPMORGAN CHASE & CO. Fall back to assets.
+    """
+    return (f"(SELECT max(COALESCE(s.revenue, s.total_assets / 10.0)) FROM snapshots s "
+            f"WHERE s.cik = {alias}.cik)")
+
+
+def _has_ticker_sql(alias: str = "c") -> str:
+    """A listed parent outranks an unlisted financing subsidiary."""
+    return f"(SELECT count(*) FROM tickers t WHERE t.cik = {alias}.cik)"
 
 
 def search(con: sqlite3.Connection, term: str, limit: int = 8) -> list[dict]:
@@ -48,18 +59,22 @@ def search(con: sqlite3.Connection, term: str, limit: int = 8) -> list[dict]:
             if d["cik"] in seen:
                 continue
             d["match"] = why
-            d["score"] = base + min((d.get("size") or 0) / 1e12, 0.9)
+            # Listed entities win by a clear margin, then size. Without the
+            # ticker term a subsidiary with a big balance sheet can outrank its
+            # own listed parent.
+            listed = 3.0 if (d.get("has_ticker") or 0) else 0.0
+            d["score"] = base + listed + min((d.get("size") or 0) / 1e12, 0.9)
             seen[d["cik"]] = d
 
-    size = _size_sql()
+    size, listed = _size_sql(), _has_ticker_sql()
     # 1. exact ticker, any share class
-    add(_rows(con, f"""SELECT c.cik, c.name, t.ticker, c.sic_description, {size} AS size
+    add(_rows(con, f"""SELECT c.cik, c.name, t.ticker, c.sic, c.sic_description, {size} AS size, {listed} AS has_ticker
                        FROM tickers t JOIN companies c ON c.cik = t.cik
                        WHERE t.ticker = ? ORDER BY t.is_primary DESC""", up),
         "ticker", 100)
     # 2. ticker prefix - "goog" should reach GOOGL
     if len(seen) < limit:
-        add(_rows(con, f"""SELECT c.cik, c.name, t.ticker, c.sic_description, {size} AS size
+        add(_rows(con, f"""SELECT c.cik, c.name, t.ticker, c.sic, c.sic_description, {size} AS size, {listed} AS has_ticker
                            FROM tickers t JOIN companies c ON c.cik = t.cik
                            WHERE t.ticker LIKE ? ORDER BY length(t.ticker) LIMIT 20""",
                   up + "%"), "ticker-prefix", 80)
@@ -68,13 +83,13 @@ def search(con: sqlite3.Connection, term: str, limit: int = 8) -> list[dict]:
         clean = _FTS_UNSAFE.sub(" ", term).strip()
         if clean:
             fts = " ".join(f'"{w}"*' for w in clean.split())
-            add(_rows(con, f"""SELECT c.cik, c.name, c.ticker, c.sic_description, {size} AS size
+            add(_rows(con, f"""SELECT c.cik, c.name, c.ticker, c.sic, c.sic_description, {size} AS size, {listed} AS has_ticker
                                FROM companies_fts f JOIN companies c ON c.cik = f.cik
                                WHERE companies_fts MATCH ? LIMIT 40""", fts),
                 "name", 60)
     # 4. last resort: substring, for names FTS tokenisation splits differently
     if len(seen) < limit:
-        add(_rows(con, f"""SELECT c.cik, c.name, c.ticker, c.sic_description, {size} AS size
+        add(_rows(con, f"""SELECT c.cik, c.name, c.ticker, c.sic, c.sic_description, {size} AS size, {listed} AS has_ticker
                            FROM companies c WHERE upper(c.name) LIKE ? LIMIT 40""",
                   f"%{up}%"), "name-loose", 40)
 
@@ -83,7 +98,7 @@ def search(con: sqlite3.Connection, term: str, limit: int = 8) -> list[dict]:
     if len(seen) < limit:
         squashed = re.sub(r"[^A-Z0-9]", "", up)
         if len(squashed) >= 3:
-            add(_rows(con, f"""SELECT c.cik, c.name, c.ticker, c.sic_description, {size} AS size
+            add(_rows(con, f"""SELECT c.cik, c.name, c.ticker, c.sic, c.sic_description, {size} AS size, {listed} AS has_ticker
                                FROM companies c
                                WHERE replace(replace(replace(replace(upper(c.name),' ',''),
                                      '.',''),',',''),'&','') LIKE ? LIMIT 20""",
@@ -93,7 +108,7 @@ def search(con: sqlite3.Connection, term: str, limit: int = 8) -> list[dict]:
     #    scans every name - "microsft" has no prefix or token in common with
     #    "MICROSOFT CORP", so no index can help.
     if not seen and len(up) >= 4:
-        names = _rows(con, f"""SELECT c.cik, c.name, c.ticker, c.sic_description, {size} AS size
+        names = _rows(con, f"""SELECT c.cik, c.name, c.ticker, c.sic, c.sic_description, {size} AS size, {listed} AS has_ticker
                                FROM companies c WHERE {size} IS NOT NULL""")
         lookup = {}
         for r in names:

@@ -96,6 +96,18 @@ def compute_for_company(rows: list[dict]) -> list[dict]:
             d["net_margin_yoy_pp"] = (
                 (d["net_margin"] - pn) * 100 if None not in (d["net_margin"], pn) else None)
 
+        # Return on equity and assets. These are how a bank is actually judged -
+        # revenue and gross profit are tagged by 24.8% and 0.2% of bank filings
+        # respectively, while equity and assets are tagged by 98% and 94%.
+        # NOTE: for a quarter this is the QUARTER'S return, not an annualised
+        # one. It is deliberately not multiplied by four; the page says which
+        # period it covers and silently annualising would overstate it.
+        eq, at = r.get("stockholders_equity"), r.get("total_assets")
+        if ni is not None and eq:
+            d["return_on_equity"] = ni / eq
+        if ni is not None and at:
+            d["return_on_assets"] = ni / at
+
         # Where profit actually came from. GOOGL Q2 FY2026: operating income
         # $40.77B but net income $112.19B, because $97.98B arrived from
         # non-operating gains. A table of totals hides exactly this.

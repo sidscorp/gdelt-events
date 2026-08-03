@@ -11,6 +11,11 @@
 
 body { max-width: 1180px; margin: 48px auto; padding: 0 2rem; line-height: 1.65; }
 
+/* Semantic colours as tokens. The originals were chosen against the dark
+   background only and were muddy on white. */
+:root { --pos: #1f7a68; --neg: #a8412f; --ni-bar: #3f6398; --bs-liab: #8a8f99; }
+body.dark { --pos: #4a9d8f; --neg: #c2604f; --ni-bar: #5b7fb9; --bs-liab: #6f757f; }
+
 h1 { font-size: 1.7rem; margin-bottom: 0.25rem; }
 h2 {
   font-size: 1rem; margin: 2rem 0 0.6rem; color: var(--text);
@@ -86,8 +91,8 @@ footer {
   line-height: 1.45; margin-top: 0.1rem;
 }
 .m-delta { font-size: 0.72rem; margin-left: 0.45rem; }
-.m-delta.up, td.up { color: #4a9d8f; }
-.m-delta.down, td.down { color: #c2604f; }
+.m-delta.up, td.up { color: var(--pos); }
+.m-delta.down, td.down { color: var(--neg); }
 .m-sub { font-size: 0.72rem; color: var(--text-tertiary); margin-left: 0.45rem; }
 
 /* ── charts ────────────────────────────────────────────────────────────── */
@@ -101,10 +106,10 @@ footer {
   color: var(--text-tertiary); font-size: 0.72rem;
 }
 .sec-chart { width: 100%; height: auto; overflow: visible; }
-.sec-chart .bar { fill: var(--accent-brand); opacity: 0.72; }
+.sec-chart .bar { fill: var(--accent-brand); opacity: 0.85; }
 .sec-chart .bar.annual { opacity: 1; }
-.sec-chart .bar.neg, .sec-chart.ni .bar.neg { fill: #c2604f; opacity: 0.9; }
-.sec-chart.ni .bar { fill: #5b7fb9; }
+.sec-chart .bar.neg, .sec-chart.ni .bar.neg { fill: var(--neg); opacity: 0.9; }
+.sec-chart.ni .bar { fill: var(--ni-bar); }
 .sec-chart .axis { stroke: var(--text-tertiary); stroke-width: 1; opacity: 0.55; }
 .sec-chart .axis.dashed { stroke-dasharray: 3 3; }
 .sec-chart .tick { font-size: 8px; fill: var(--text-tertiary); text-anchor: middle; }
@@ -136,4 +141,21 @@ footer {
 .sec-glossary dd {
   margin: 0.15rem 0 0; font-size: 0.78rem; color: var(--text-secondary);
   line-height: 1.5; break-inside: avoid;
+}
+
+/* Business-type framing and the balance-sheet proportion bar. */
+.sec-framing {
+  font-size: 0.86rem; line-height: 1.6; color: var(--text-secondary);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 0.7rem 0.9rem; margin: 1rem 0 1.4rem;
+}
+.sec-framing strong { color: var(--text); }
+.sec-bs { width: 100%; height: auto; margin: 0.2rem 0 0.1rem; }
+.sec-bs .bs-liab { fill: var(--bs-liab); }
+.sec-bs .bs-eq { fill: var(--accent-brand); }
+.sec-bs .bs-lab { font-size: 9px; fill: var(--text-tertiary); }
+.cap-basis {
+  font-size: 0.62rem; border: 1px solid var(--border); border-radius: 999px;
+  padding: 0.05rem 0.4rem; margin-left: 0.4rem; color: var(--text-tertiary);
+  letter-spacing: 0.05em;
 }

@@ -21,6 +21,72 @@ Newest first.
 
 ---
 
+## 2026-08-02 — The daily SEC job could not have run; leverage sentence stopped reassuring the wrong companies
+
+**What** — Fixed `GDELT-SecIngest`, whose derive stage would have failed on its first
+firing. `sec_derive.py` now logs to a file and records its own `ingest_log` row.
+`rule_leverage` no longer tells over-levered operating companies that their leverage is
+normal. `/sec-analysis` is now linked from the header and present in `sitemap.xml`.
+
+**Why** — Three things, found reviewing the feature the day it shipped:
+
+1. **The task's second stage could not start.** The VBS ran `python -m pipeline.sec_derive`,
+   but a scheduled task inherits `C:\Windows\System32` as its working directory, so the
+   package was not importable — confirmed directly: `ModuleNotFoundError: No module named
+   'pipeline'`. The task had never fired (`LastRunTime` 11/30/1999), so nothing had surfaced
+   it. `&&` would have passed after a successful ingest and derive would have died on import,
+   leaving **fresh snapshots with stale derived context** — precisely the failure the wrapper's
+   own comment says it exists to prevent. Nothing would have reported it: this was the only
+   wrapper in `C:\Users\siddh\bin\` with no output redirect, and `ingest_log` only ever
+   recorded the ingest stage.
+2. **`rule_leverage` reassured the wrong filers.** The "that is normal for a lender" clause
+   fired on the ratio alone. Boeing, SIC 3721, sits at **96%** liabilities-to-assets — the page
+   would have told a reader that was normal for a lender and not a warning sign. The rule also
+   had no guard above 100%, where the known unverified data tail sits (~10% of tickered rows
+   report liabilities > assets).
+3. **The page was unreachable.** No link from anywhere, and absent from a `sitemap.xml` that
+   advertises 520 other URLs — a week after #6 was closed for serving crawlers blank documents.
+
+**How it was verified** — Task re-registered and **run on demand**: both stages completed and
+wrote `ingest_log` rows — `daily` 416 companies / 9,384 rows / 236.8s, then `derive` 15,909
+companies / 289,153 rows / 16.1s, both `ok`, with `derived_at` correctly newer than
+`data_version`. On dev: Boeing keeps "96% of its $165.87B balance sheet is funded by
+liabilities" and loses the lender clause; JPMorgan keeps both. `sitemap.xml` serves 7
+`/sec-analysis` URLs; the header link renders. Tests **26 passed** (was 23). `smoke.sh` 20/20
+against dev.
+
+**Files** — `scripts/register_sec_task.ps1`, `pipeline/sec_derive.py`,
+`pipeline/sec_explain.py` + `dashboard/sec_explain.py`, `dashboard/routes/sec_analysis.py`,
+`dashboard/routes/pages.py`, `dashboard/templates/index.html`, `tests/test_sec_explain.py`.
+
+**Notes**
+- Derive is now called by **absolute path**, matching every other wrapper here. `-m` is the
+  odd one out and should stay that way; `sec_derive.py` puts the repo root on `sys.path` itself.
+- The redirect wraps **both** stages in parentheses so a failure occurring before logging is
+  configured still lands in `data/logs/sec_task.log`. That is the only reason this class of bug
+  would be visible next time.
+- The lender clause now keys on a `leveraged_by_design` flag on the bank and insurer specs in
+  `routes/sec_analysis.py`, not on the label string — renaming a label should not silently
+  disable a sentence.
+- Added `test_sec_explain_copies_have_not_diverged`: the two `sec_explain.py` files are
+  duplicates, tests import the pipeline copy and prod serves the dashboard one. The guard is a
+  stopgap; deduplicating them is its own issue.
+- **`sync_dev.ps1` syncs the git ref, not the working tree.** Uncommitted edits do not reach
+  dev — scp them across or commit first. Cost a confused minute here; worth knowing.
+- **`scripts/restart_dash.ps1` did not exist.** It had been renamed to
+  `~\restart_dash.ps1.bak_20260802` and never replaced, so the restart path the gdelt-ops skill
+  documents was dead. Rewritten on the `restart_dev.ps1` pattern: it stops the
+  `GDELT-Dashboard` task and whatever holds :8015, and nothing else. The old one killed **every**
+  `python.exe` on the box — dev, ingest, embedder and Ollama along with prod — which is why the
+  skill carried a warning never to aim it at dev. Verified: dev's pid was unchanged across a
+  prod restart.
+- SEC returns **403**, not 404, for a daily index on a day it published none (weekends).
+  `ciks_that_filed` already treats any fetch failure as empty, so `--days-back 3` covers it.
+- Not addressed: the derive stage rewrites `derived` wholesale while the site serves reads from
+  the same SQLite file. Nothing observed, but it is a daily write burst against a live reader.
+
+---
+
 ## 2026-08-02 — Financials page: stop misleading, adapt to the business, add light theme
 
 **What** — Charts no longer mix period lengths; search ranks listed parents above

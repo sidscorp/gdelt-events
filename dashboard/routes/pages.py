@@ -238,8 +238,15 @@ def sitemap():
     entries = [(f"{CANON_BASE}/", feed_mod, "hourly", "1.0")]
     for v in VIEWS:
         entries.append((f"{CANON_BASE}/?view={v['id']}", feed_mod, "hourly", "0.8"))
-    for path in ("/about", "/methodology", "/search"):
+    for path in ("/about", "/methodology", "/search", "/sec-analysis"):
         entries.append((f"{CANON_BASE}{path}", None, "monthly", "0.3"))
+
+    # /sec-analysis is a search form until it is given a ticker, so the bare URL
+    # shows a crawler nothing. Seed the handful the page itself suggests; the store
+    # holds 17,934 filers and listing them would be sitemap spam, not coverage.
+    from routes.sec_analysis import SUGGESTED
+    for tick, _name in SUGGESTED:
+        entries.append((f"{CANON_BASE}/sec-analysis?ticker={tick}", None, "weekly", "0.4"))
 
     # Recent event permalinks: substantial (size>=3), newest first, capped.
     con = get_db()

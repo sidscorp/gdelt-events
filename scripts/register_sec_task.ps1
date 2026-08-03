@@ -16,15 +16,26 @@ $vbs  = 'C:\Users\siddh\bin\gdelt_sec_ingest_hidden.vbs'
 
 # VBS shim so the task never flashes a console window (house convention here).
 @"
-' Runs the SEC financials ingest hidden. Output appended to data/logs/sec_ingest.log.
+' Runs the SEC financials ingest hidden. Both stages log to data/logs/sec_ingest.log
+' themselves; sec_task.log catches whatever escapes Python logging entirely.
 Q = Chr(34)
 py = "$py"
 script = "$repo\pipeline\sec_ingest.py"
+derive = "$repo\pipeline\sec_derive.py"
+logf = "$repo\data\logs\sec_task.log"
 ' Ingest THEN derive: the observations, growth rates and sector percentiles are
 ' computed from the snapshots, so a refresh that skips the derive step leaves the
 ' page showing new numbers with stale context.
-cmd = "cmd /c " & Q & " " & Q & py & Q & " -u " & Q & script & Q & " --daily --days-back 3" & _
-      " && " & Q & py & Q & " -u -m pipeline.sec_derive" & Q
+'
+' Derive is called by ABSOLUTE PATH, never "-m pipeline.sec_derive". A scheduled task
+' inherits C:\Windows\System32 as its working directory, so -m cannot find the package
+' and the stage died on import with ModuleNotFoundError - silently, because nothing
+' redirected its output and ingest_log only recorded the ingest. Every other wrapper in
+' this directory calls its script by absolute path; sec_derive.py puts the repo root on
+' sys.path itself. The parentheses put BOTH stages inside the redirect, so a failure
+' that happens before logging is configured still lands somewhere readable.
+cmd = "cmd /c " & Q & " ( " & Q & py & Q & " -u " & Q & script & Q & " --daily --days-back 3" & _
+      " && " & Q & py & Q & " -u " & Q & derive & Q & " ) >> " & Q & logf & Q & " 2>&1 " & Q
 CreateObject("WScript.Shell").Run cmd, 0, False
 "@ | Set-Content -Path $vbs -Encoding ASCII
 

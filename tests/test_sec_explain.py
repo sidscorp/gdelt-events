@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pipeline.sec_derive import compute_for_company, _pct_change, _percentile  # noqa: E402
 from pipeline.sec_explain import (  # noqa: E402
-    observations, rule_decline_streak, rule_loss, rule_margin_move,
+    observations, rule_decline_streak, rule_leverage, rule_loss, rule_margin_move,
     rule_nonoperating, rule_revenue_growth, rule_sector_position,
 )
 
@@ -157,6 +157,41 @@ def test_no_observation_invents_a_number():
     for o in observations(s, d, GOOGL_CO, limit=6):
         for num in re.findall(r"\d[\d,]*(?:\.\d+)?", o.text):
             assert num in allowed, f"unexplained number {num!r} in: {o.text}"
+
+
+def test_leverage_reassures_only_actual_lenders():
+    """The sentence used to fire on the ratio alone, so a distressed operating
+    company was told 93% leverage is "normal for a lender"."""
+    s = _snap(total_assets=4_900_000_000_000, total_liabilities=4_557_000_000_000)
+
+    bank = rule_leverage(s, {}, {"leveraged_by_design": True})
+    assert "normal for a lender" in bank.text
+
+    opco = rule_leverage(s, {}, {"leveraged_by_design": False})
+    assert opco is not None, "the leverage figure itself is still worth stating"
+    assert "normal for a lender" not in opco.text
+    assert "93%" in opco.text
+
+
+def test_leverage_silent_when_liabilities_exceed_assets():
+    """Negative equity is a louder story than leverage, and it is where the
+    unverified data-quality tail sits. >100% funded by liabilities is not a
+    sentence this page should print."""
+    s = _snap(total_assets=100_000_000, total_liabilities=115_000_000)
+    assert rule_leverage(s, {}, {"leveraged_by_design": False}) is None
+    assert rule_leverage(s, {}, {"leveraged_by_design": True}) is None
+
+
+def test_sec_explain_copies_have_not_diverged():
+    """pipeline/sec_explain.py and dashboard/sec_explain.py are duplicates. These
+    tests import the pipeline copy; the dashboard serves its own. Until they are
+    deduplicated, an edit to one and not the other is invisible - so assert it."""
+    root = Path(__file__).resolve().parent.parent
+    pipe = (root / "pipeline" / "sec_explain.py").read_bytes()
+    dash = (root / "dashboard" / "sec_explain.py").read_bytes()
+    assert pipe == dash, (
+        "pipeline/sec_explain.py and dashboard/sec_explain.py have diverged - "
+        "prod serves the dashboard copy, these tests cover the pipeline one")
 
 
 def test_missing_revenue_explains_itself():

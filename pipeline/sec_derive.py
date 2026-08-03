@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -215,43 +216,76 @@ def rebuild_fts(con) -> int:
     return con.execute("SELECT count(*) FROM companies_fts").fetchone()[0]
 
 
+def _setup_logging(data_dir: Path) -> None:
+    """Log to the same file the ingest uses. The two stages run strictly in
+    sequence, so a single appender is ever open, and keeping one file means the
+    daily run reads as one story."""
+    log_dir = data_dir / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        handlers=[logging.FileHandler(log_dir / "sec_ingest.log", encoding="utf-8"),
+                  logging.StreamHandler(sys.stdout)],
+        force=True,
+    )
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--data-dir", default=str(Path(__file__).resolve().parent.parent / "data"))
     args = ap.parse_args()
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s: %(message)s",
-                        force=True)
+    data_dir = Path(args.data_dir)
+    _setup_logging(data_dir)
 
-    con = sec_schema.connect(Path(args.data_dir))
+    con = sec_schema.connect(data_dir)
     sec_schema.create(con)
     con.row_factory = __import__("sqlite3").Row
 
-    ciks = [r[0] for r in con.execute("SELECT DISTINCT cik FROM snapshots")]
-    log.info("deriving for %d companies", len(ciks))
-    con.execute("DELETE FROM derived")
+    t0 = time.time()
+    ciks: list = []
     written = 0
-    for i, cik in enumerate(ciks, 1):
-        rows = [dict(r) for r in con.execute(
-            "SELECT * FROM snapshots WHERE cik=? ORDER BY period_end DESC", (cik,))]
-        for d in compute_for_company(rows):
-            cols = [k for k in d if d[k] is not None]
-            con.execute(f"INSERT OR REPLACE INTO derived ({','.join(cols)}) "
-                        f"VALUES ({','.join('?' * len(cols))})", [d[k] for k in cols])
-            written += 1
-        if i % 2000 == 0:
-            con.commit()
-            log.info("  %d/%d companies", i, len(ciks))
-    con.commit()
-    log.info("derived rows: %d", written)
+    try:
+        ciks = [r[0] for r in con.execute("SELECT DISTINCT cik FROM snapshots")]
+        log.info("deriving for %d companies", len(ciks))
+        con.execute("DELETE FROM derived")
+        for i, cik in enumerate(ciks, 1):
+            rows = [dict(r) for r in con.execute(
+                "SELECT * FROM snapshots WHERE cik=? ORDER BY period_end DESC", (cik,))]
+            for d in compute_for_company(rows):
+                cols = [k for k in d if d[k] is not None]
+                con.execute(f"INSERT OR REPLACE INTO derived ({','.join(cols)}) "
+                            f"VALUES ({','.join('?' * len(cols))})", [d[k] for k in cols])
+                written += 1
+            if i % 2000 == 0:
+                con.commit()
+                log.info("  %d/%d companies", i, len(ciks))
+        con.commit()
+        log.info("derived rows: %d", written)
 
-    log.info("sector stats: %d", build_sector_stats(con))
-    log.info("sector positions: %d", attach_sector_position(con))
-    log.info("fts rows: %d", rebuild_fts(con))
-    sec_schema.set_meta(con, "derived_at",
-                        datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S"))
+        log.info("sector stats: %d", build_sector_stats(con))
+        log.info("sector positions: %d", attach_sector_position(con))
+        log.info("fts rows: %d", rebuild_fts(con))
+        sec_schema.set_meta(con, "derived_at",
+                            datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S"))
+        note = "ok"
+    except Exception as e:
+        note = f"error: {e}"
+        log.exception("derive failed")
+
+    # The ingest writes its own row; without this one a derive that never ran -
+    # or never finished - looked identical to a healthy day. That is exactly how
+    # the -m invocation failed unnoticed.
+    elapsed = time.time() - t0
+    con.execute("INSERT INTO ingest_log (ts, mode, ciks_touched, rows_written, "
+                "elapsed_s, note) VALUES (?,?,?,?,?,?)",
+                (datetime.now(timezone.utc).isoformat(timespec="seconds"), "derive",
+                 len(ciks), written, round(elapsed, 1), note))
     con.commit()
     con.close()
-    return 0
+
+    log.info("derive: %d companies, %d rows in %.1fs (%s)", len(ciks), written, elapsed, note)
+    return 0 if note == "ok" else 1
 
 
 if __name__ == "__main__":

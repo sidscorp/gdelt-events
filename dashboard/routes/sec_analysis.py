@@ -86,6 +86,11 @@ FILER_CLASSES = {
     "bank": {
         "test": lambda sic: 6020 <= sic <= 6199,
         "label": "bank",
+        # Deposits and borrowing ARE the raw material here, so 90% leverage is the
+        # business model. sec_explain.rule_leverage reads this flag rather than
+        # inferring "must be a lender" from the ratio, which had it reassuring
+        # over-levered operating companies.
+        "leveraged_by_design": True,
         "framing": ("Banks earn from interest and fees rather than selling a product, so "
                     "they file no revenue or gross-profit line. What matters instead is "
                     "the return they make on the money entrusted to them."),
@@ -95,6 +100,7 @@ FILER_CLASSES = {
     "insurer": {
         "test": lambda sic: 6300 <= sic <= 6411,
         "label": "insurer",
+        "leveraged_by_design": True,
         "framing": ("Insurers take in premiums and pay out claims, so their economics show "
                     "up in investment returns and reserves rather than in a gross margin."),
         "metrics": ["revenue", "net_income", "eps_basic", "return_on_equity",
@@ -373,6 +379,7 @@ def sec_analysis():
         # Tell the rules what the page already explains, so they do not repeat it.
         best = dict(best)
         best["framed"] = bool(spec.get("framing"))
+        best["leveraged_by_design"] = bool(spec.get("leveraged_by_design"))
         ctx["observations"] = observations(periods[0], der.get(
             (periods[0]["period_end"], periods[0]["fp"]), {}), best, limit=4)
         ctx["news"] = _news_for(best["name"])

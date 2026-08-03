@@ -162,16 +162,30 @@ def rule_return_on_equity(s: dict, d: dict, company: dict) -> Observation | None
 
 def rule_leverage(s: dict, d: dict, company: dict) -> Observation | None:
     """How much of the balance sheet is other people's money. Banks run near 90%
-    by design, which is the single most surprising fact about how they work."""
+    by design, which is the single most surprising fact about how they work.
+
+    The reassuring half of this sentence used to fire on the ratio alone, so ANY
+    filer above 85% was told its leverage was "normal for a lender" - including
+    operating companies, for which it is the opposite of normal, and the page would
+    have been comforting a reader about the very thing they should look at. It now
+    keys on the filer class the page has already established from SIC, which the
+    route passes in as `leveraged_by_design`.
+    """
     a, li = s.get("total_assets"), s.get("total_liabilities")
     if not a or li is None or a <= 0:
         return None
     share = li / a
     if share < 0.6:
         return None
+    if share > 1:
+        # Liabilities above assets means negative equity - a different and much
+        # louder story than leverage, and one this sentence would badly understate.
+        # It is also where the known data-quality tail sits (~10% of tickered rows
+        # report liabilities > assets, unverified). Say nothing over saying wrong.
+        return None
     text = (f"{_pct(share, 0)} of its {_usd(a)} balance sheet is funded by liabilities "
             f"rather than shareholders.")
-    if share > 0.85:
+    if share > 0.85 and company.get("leveraged_by_design"):
         text += (" That is normal for a lender: deposits and borrowing are the raw "
                  "material, not a warning sign on their own.")
     return Observation(text, 66, "leverage")

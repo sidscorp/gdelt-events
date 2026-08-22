@@ -858,6 +858,22 @@
     border-top: 1px solid var(--surface-border);
   }
 
+  .briefing-freshness {
+    font-size: 0.72rem; color: var(--text-secondary);
+    margin-top: 0.65rem; padding-top: 0.5rem;
+    border-top: 1px solid var(--surface-border);
+    display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap;
+    transition: color 0.5s ease;
+  }
+  .briefing-freshness .bf-sep { color: var(--surface-border); }
+  .briefing-freshness .bf-elapsed { font-variant-numeric: tabular-nums; }
+  .briefing-freshness .bf-next { color: var(--accent-brand); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .briefing-freshness .bf-count { color: var(--text-tertiary); }
+  .briefing-freshness.bf-aging .bf-elapsed { color: #b8860b; }
+  .briefing-freshness.bf-aging .bf-next { color: #b8860b; }
+  .briefing-freshness.bf-stale .bf-elapsed { color: #c44; }
+  .briefing-freshness.bf-stale .bf-next { color: #c44; }
+
   /* Citations: legible accent superscripts */
   sup.cite { line-height: 0; white-space: nowrap; }
   sup.cite a { color: var(--accent-brand); text-decoration: none; font-weight: 700; font-size: 0.62rem; padding: 0 1.5px; }

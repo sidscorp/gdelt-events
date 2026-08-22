@@ -520,6 +520,25 @@ function _snapKey(overrides) {
   const ord = state.order === 'date' ? 'date-' + state.sort : 'importance';
   return `snap:${view}|${hours}|${state.en_only ? 1 : 0}|${ord}`;
 }
+let _lastBeacon = { key: '', ts: 0 };
+
+function beaconPageview() {
+  const key = (state.view || '_all') + '|' + (state.hours || 24);
+  const now = Date.now();
+  if (key === _lastBeacon.key && now - _lastBeacon.ts < 120000) return;
+  _lastBeacon = { key, ts: now };
+  const payload = {
+    path: location.pathname + location.search,
+    view_id: state.view || '',
+    hours: parseInt(state.hours) || 0,
+    briefing_key: (state.view || '_all') + ':' + (state.hours || 24),
+    screen_w: screen.width,
+    referrer: document.referrer || '',
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+  };
+  navigator.sendBeacon('/api/pageview', JSON.stringify(payload));
+}
+
 function saveSnapshot() {
   const k = _snapKey(); if (!k) return;
   try {
@@ -529,6 +548,7 @@ function saveSnapshot() {
       feed: document.getElementById('articleList').innerHTML,
       briefing: (document.getElementById('briefingText') || {}).innerHTML || '',
       briefingMeta: (document.getElementById('briefingMeta') || {}).textContent || '',
+      briefingFreshness: (document.getElementById('briefingFreshness') || {}).innerHTML || '',
       briefingShown: bp ? bp.style.display !== 'none' : false,
     }));
   } catch (e) {}
@@ -549,6 +569,8 @@ function restoreSnapshot() {
       bt.innerHTML = s.briefing;
       bt.dataset.key = `${state.view}|${state.hours}`; // lets fetchBriefing keep it visible
       document.getElementById('briefingMeta').textContent = s.briefingMeta || '';
+      const fr = document.getElementById('briefingFreshness');
+      if (fr && s.briefingFreshness) fr.innerHTML = s.briefingFreshness;
     }
     return true;
   } catch (e) { return false; }
@@ -857,6 +879,7 @@ async function fetchArticles() {
     }
 
     renderPagination(data);
+    beaconPageview();
   } catch (err) {
     if (myGen !== currentFetchGen) return; // a newer fetch superseded us
     // If content is already on screen (SSR first paint or a kept snapshot),

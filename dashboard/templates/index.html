@@ -14,7 +14,7 @@
 <meta name="twitter:description" content="{{ meta_desc }}">
 <meta name="twitter:image" content="{{ og_image }}">
 {% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/dashboard.css?v=19">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/dashboard.css?v=20">{% endblock %}
 {% block content %}
 <div id="topProgress"></div>
 
@@ -74,6 +74,7 @@
     <button class="briefing-dismiss" onclick="dismissBriefing()">dismiss</button>
   </div>
   <div id="briefingText" class="briefing-body"{% if ssr_briefing %} data-key="{{ ssr_briefing_key }}"{% endif %}>{% if ssr_briefing %}{{ ssr_briefing|safe }}{% endif %}</div>
+  <div id="briefingFreshness" class="briefing-freshness"></div>
   <div id="briefingMeta" class="briefing-meta"></div>
 </div>
 <button id="briefingRestore" class="briefing-restore" style="display:none;" onclick="restoreBriefing()" title="Bring the AI briefing back">✦ Show AI Briefing</button>
@@ -204,7 +205,7 @@
 </footer>
 {% endblock %}
 {% block scripts %}
-<script src="/static/js/rum.js?v=17"></script>
-<script src="/static/js/dashboard.js?v=17"></script>
-<script src="/static/js/markdown.js?v=20"></script>
+<script src="/static/js/rum.js?v=18"></script>
+<script src="/static/js/dashboard.js?v=20"></script>
+<script src="/static/js/markdown.js?v=21"></script>
 {% endblock %}

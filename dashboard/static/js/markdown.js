@@ -136,14 +136,59 @@ let _briefingView = null;
 let _briefingHours = null;
 let _briefingAbort = null;
 
+// Live freshness bar ticker
+let _freshnessTimer = null;
+let _freshnessData = null;
+
+function stopFreshnessTicker() {
+  if (_freshnessTimer) { clearInterval(_freshnessTimer); _freshnessTimer = null; }
+  _freshnessData = null;
+}
+
+function updateFreshnessBar() {
+  if (!_freshnessData) return;
+  const el = document.getElementById('briefingFreshness');
+  if (!el) return;
+  const { generatedAt, ttlS, articleCount } = _freshnessData;
+  const now = Date.now();
+  const gen = new Date(generatedAt + 'Z');
+  if (isNaN(gen.getTime())) { el.innerHTML = ''; return; }
+  const elapsed = Math.max(0, Math.floor((now - gen.getTime()) / 1000));
+  const remaining = Math.max(0, ttlS - elapsed);
+
+  const elapsedLabel = elapsed < 60 ? `${elapsed}s` : elapsed < 3600 ? `${Math.floor(elapsed / 60)}m ago` : `${Math.floor(elapsed / 3600)}h ago`;
+  const remainLabel = remaining <= 0 ? 'any moment' : remaining < 60 ? `~${remaining}s` : remaining < 3600 ? `~${Math.floor(remaining / 60)}m` : `~${Math.floor(remaining / 3600)}h`;
+
+  const ratio = ttlS > 0 ? Math.min(1, elapsed / ttlS) : 0;
+  let cls = '';
+  if (ratio > 0.9) cls = 'bf-stale';
+  else if (ratio > 0.5) cls = 'bf-aging';
+
+  el.className = 'briefing-freshness ' + cls;
+  el.innerHTML = '<span class="bf-elapsed">Generated ' + elapsedLabel + '</span>'
+    + (ttlS > 0 ? ' <span class="bf-sep">·</span> <span class="bf-next">Next update in ' + remainLabel + '</span>' : '')
+    + (articleCount ? ' <span class="bf-sep">·</span> <span class="bf-count">From ' + articleCount + ' articles</span>' : '');
+}
+
+function startFreshnessTicker(generatedAt, ttlS, articleCount) {
+  if (!generatedAt) return;
+  stopFreshnessTicker();
+  _freshnessData = { generatedAt, ttlS: ttlS || 0, articleCount: articleCount || 0 };
+  updateFreshnessBar();
+  _freshnessTimer = setInterval(updateFreshnessBar, 15000);
+}
+
 // Dismiss collapses the panel into a small restore pill instead of hiding it
 // outright, so there's always a way back without switching views or waiting
 // on the 15-min auto-refresh.
 function dismissBriefing() {
   const p = document.getElementById('briefingPanel');
   const r = document.getElementById('briefingRestore');
+  const f = document.getElementById('briefingFreshness');
   if (p) p.style.display = 'none';
   if (r) r.style.display = '';
+  if (f) f.innerHTML = '';
+  stopFreshnessTicker();
 }
 function restoreBriefing() {
   const p = document.getElementById('briefingPanel');
@@ -171,6 +216,9 @@ async function fetchBriefing() {
   if (_briefingView !== null && view === _briefingView && hours === _briefingHours) return;
   _briefingView = view;
   _briefingHours = hours;
+  stopFreshnessTicker();
+  const frEl = document.getElementById('briefingFreshness');
+  if (frEl) frEl.innerHTML = '';
 
   // Abort any in-flight briefing
   if (_briefingAbort) { _briefingAbort.abort(); _briefingAbort = null; }
@@ -266,6 +314,10 @@ async function fetchBriefing() {
           metaEl.textContent = articleCount ? `From ${articleCount} articles · ${label}` : '';
           if (window.perfMark) { window.perfMark(data.cached ? 'briefing_done_cached' : 'briefing_done', performance.now() - briefStart); window.perfFlush(); }
           if (typeof saveSnapshot === 'function') saveSnapshot();
+          // Start the live freshness countdown: generated_at in UTC, TTL from server
+          if (data.generated_at || data.cache_ttl_s) {
+            startFreshnessTicker(data.generated_at, data.cache_ttl_s, data.article_count);
+          }
         }
       } catch (_) {}
       return false;

@@ -2,6 +2,7 @@
 
 import json
 import threading
+import hashlib
 from datetime import datetime, timedelta
 
 from flask import Blueprint, request, jsonify
@@ -101,6 +102,7 @@ def api_briefing():
                 "sources": cached_sources,
                 "article_count": cached["article_count"],
                 "generated_at": cached["generated_at"],
+                "cache_ttl_s": fresh_s(hours),
                 "cached": True,
                 "view": view_id or None,
                 "hours": hours,
@@ -113,6 +115,7 @@ def api_briefing():
                     "sources": cached_sources,
                     "article_count": cached["article_count"],
                     "generated_at": cached["generated_at"],
+                    "cache_ttl_s": fresh_s(hours),
                     "cached": True,
                     "stale": True,
                     "view": view_id or None,
@@ -137,6 +140,7 @@ def api_briefing():
                         "sources": cached_sources,
                         "article_count": cached["article_count"],
                         "generated_at": cached["generated_at"],
+                        "cache_ttl_s": fresh_s(hours),
                         "cached": True,
                         "stale": True,
                         "view": view_id or None,
@@ -160,7 +164,9 @@ def api_briefing():
                     return jsonify({
                         "briefing": cached["briefing"], "sources": cached_sources,
                         "article_count": cached["article_count"],
-                        "generated_at": cached["generated_at"], "cached": True, "stale": True,
+                        "generated_at": cached["generated_at"],
+                        "cache_ttl_s": fresh_s(hours),
+                        "cached": True, "stale": True,
                         "view": view_id or None, "hours": hours,
                     })
                 return jsonify({"briefing": None, "error": "Briefing generation unavailable"}), 503
@@ -169,7 +175,7 @@ def api_briefing():
             meta_json = json.dumps({
                 "model": BRIEFING_MODEL, "prompt": prompt, "n_sources": len(sources),
                 "elapsed_s": round(_time.time() - gen_t0, 2),
-                "briefing_chars": len(briefing), "cache_ttl_s": BRIEFING_FRESH_S,
+                "briefing_chars": len(briefing), "cache_ttl_s": fresh_s(hours),
             })
             uc = get_user_db()
             uc.execute(
@@ -188,6 +194,7 @@ def api_briefing():
             return jsonify({
                 "briefing": briefing, "sources": sources_payload,
                 "article_count": len(sources), "generated_at": generated_at,
+                "cache_ttl_s": fresh_s(hours),
                 "cached": False, "view": view_id or None, "hours": hours,
             })
         finally:
@@ -198,9 +205,9 @@ def api_briefing():
         # Phase 1: serve cached content IMMEDIATELY (even stale)
         if cached and not refresh:
             yield f"data: {json.dumps({'sources': cached_sources})}\n\n"
-            yield f"data: {json.dumps({'text': cached['briefing'], 'done': False, 'cached': True, 'stale': is_stale, 'article_count': cached['article_count']})}\n\n"
+            yield f"data: {json.dumps({'text': cached['briefing'], 'done': False, 'cached': True, 'stale': is_stale, 'article_count': cached['article_count'], 'generated_at': cached['generated_at']})}\n\n"
             if not needs_regen:
-                yield f"data: {json.dumps({'done': True, 'cached': True, 'article_count': cached['article_count']})}\n\n"
+                yield f"data: {json.dumps({'done': True, 'cached': True, 'article_count': cached['article_count'], 'generated_at': cached['generated_at'], 'cache_ttl_s': fresh_s(hours)})}\n\n"
                 return
 
         # Phase 2: if stale or no cache, attempt regeneration
@@ -208,7 +215,7 @@ def api_briefing():
             # Another request is regenerating — serve stale and be done
             if cached:
                 meta_label = "Updating — another request is refreshing this briefing"
-                yield f"data: {json.dumps({'done': True, 'cached': True, 'stale': True, 'meta': meta_label, 'article_count': cached['article_count']})}\n\n"
+                yield f"data: {json.dumps({'done': True, 'cached': True, 'stale': True, 'meta': meta_label, 'article_count': cached['article_count'], 'generated_at': cached['generated_at'], 'cache_ttl_s': fresh_s(hours)})}\n\n"
             else:
                 yield f"data: {json.dumps({'error': 'Generation in progress', 'done': True})}\n\n"
             return
@@ -226,7 +233,7 @@ def api_briefing():
 
             if len(sources) < 2:
                 if cached:
-                    yield f"data: {json.dumps({'done': True, 'cached': True, 'stale': True, 'article_count': cached['article_count']})}\n\n"
+                    yield f"data: {json.dumps({'done': True, 'cached': True, 'stale': True, 'article_count': cached['article_count'], 'generated_at': cached['generated_at'], 'cache_ttl_s': fresh_s(hours)})}\n\n"
                 else:
                     yield f"data: {json.dumps({'error': 'Not enough articles', 'found': len(sources), 'done': True})}\n\n"
                 return
@@ -267,7 +274,7 @@ def api_briefing():
                         for t in (threads or []) if (t.get("status") or "active") == "active"
                     ],
                     "elapsed_s": round(_time.time() - gen_t0, 2),
-                    "briefing_chars": len(briefing), "cache_ttl_s": BRIEFING_FRESH_S,
+                    "briefing_chars": len(briefing), "cache_ttl_s": fresh_s(hours),
                 })
                 try:
                     uc = get_user_db()
@@ -290,7 +297,7 @@ def api_briefing():
                 # costs ~0.84x the briefing itself (measured). Prewarm skips it.
                 if history_trigger != "prewarm":
                     update_threads_async(cache_key, threads, briefing)
-            yield f"data: {json.dumps({'done': True, 'refreshed': is_stale, 'article_count': len(sources)})}\n\n"
+            yield f"data: {json.dumps({'done': True, 'refreshed': is_stale, 'article_count': len(sources), 'generated_at': generated_at, 'cache_ttl_s': fresh_s(hours)})}\n\n"
         finally:
             _finish_regen(cache_key)
 
@@ -408,3 +415,75 @@ def api_fda_events():
         })
 
     return jsonify({"events": events, "days": days, "total": len(events)})
+
+
+# --- Pageview tracking (privacy-safe: daily-salted IP hash, no raw IP) ---
+
+def _ip_hash():
+    ip = (request.headers.get("CF-Connecting-IP")
+          or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+          or request.remote_addr or "?")
+    # Static salt: same IP always maps to the same hash, so we can count
+    # returning visitors across days. Never stores raw IP.
+    return hashlib.sha256(f"gdelt-pageview:{ip}".encode()).hexdigest()[:32]
+
+
+@bp.route("/api/pageview", methods=["POST"])
+def api_pageview():
+    """Record a lightweight, privacy-safe pageview. Fire-and-forget — the
+    client sends this via sendBeacon and never waits for a response."""
+    from models import get_user_db
+    payload = request.get_json(force=True, silent=True) or {}
+    try:
+        uc = get_user_db()
+        uc.execute("""CREATE TABLE IF NOT EXISTS pageview_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT DEFAULT (datetime('now')),
+            path TEXT,
+            view_id TEXT,
+            hours INTEGER,
+            briefing_key TEXT,
+            ip_hash TEXT,
+            ua TEXT,
+            screen_w INTEGER,
+            referrer TEXT,
+            country TEXT,
+            region TEXT,
+            city TEXT,
+            timezone TEXT
+        )""")
+        cols = {r[1] for r in uc.execute("PRAGMA table_info(pageview_log)")}
+        for col, sql in [
+            ("country", "ALTER TABLE pageview_log ADD COLUMN country TEXT"),
+            ("region", "ALTER TABLE pageview_log ADD COLUMN region TEXT"),
+            ("city", "ALTER TABLE pageview_log ADD COLUMN city TEXT"),
+            ("timezone", "ALTER TABLE pageview_log ADD COLUMN timezone TEXT"),
+        ]:
+            if col not in cols:
+                uc.execute(sql)
+        uc.execute(
+            "INSERT INTO pageview_log "
+            "(ts, path, view_id, hours, briefing_key, ip_hash, ua, screen_w, referrer, country, region, city, timezone) "
+            "VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                (payload.get("path") or "")[:300],
+                (payload.get("view_id") or "")[:80],
+                payload.get("hours"),
+                (payload.get("briefing_key") or "")[:120],
+                _ip_hash(),
+                (request.headers.get("User-Agent") or "")[:200],
+                payload.get("screen_w"),
+                (payload.get("referrer") or "")[:300],
+                (request.headers.get("CF-IPCountry") or "")[:10],
+                (request.headers.get("CF-Region-Code") or "")[:20],
+                (request.headers.get("CF-IPCity") or "")[:60],
+                (payload.get("timezone") or "")[:60],
+            ),
+        )
+        uc.execute("DELETE FROM pageview_log WHERE id < "
+                   "(SELECT max(id) - 100000 FROM pageview_log)")
+        uc.commit()
+        uc.close()
+    except Exception:
+        pass  # never affect the user's experience
+    return jsonify({"ok": True})

@@ -21,6 +21,76 @@ Newest first.
 
 ---
 
+## 2026-08-22 — The LLM judge had never seen a single keyword-tagged article
+
+**What** — `pill_scorer.stage_batch` now gates the judge on *judged* status
+(`matched_via='judge'`) instead of *tagged* status. Added `_judged_tags()`. A verdict on a
+keyword-tagged article now replaces its keyword row (approved → judge row stands, keyword row
+dropped; irrelevant → dropped outright). The demotion DELETE gained `matched_via <> 'judge'`,
+and `score_new` no longer advances the watermark through a judge outage.
+
+**Why** — The pill judge has been a no-op for keyword matches since the 2026-07-09 flip, so
+`/methodology`'s central claim ("Only judge-approved articles get in") has been false for six
+weeks and is falsifiable from the UI by anyone who clicks an inclusion badge.
+
+When `SUFFIX` became `""`, `target_cat` became identical to the live category, which made
+`already = _existing_tags(con, target_cat, urls)` the *same query* as
+`kw_tagged = _existing_tags(con, k, urls)`. So `to_judge = cand - already` could only ever
+contain semantic-net-only URLs — every keyword hit was its own skip set. Two consequences:
+keyword false positives entered pills unjudged and permanently, and the demotion path that
+exists to remove them within one cycle was unreachable dead code (`demoted` has been 0 since
+the flip).
+
+Measured on production, last 7 days: articles carrying **both** a keyword and a judge row in
+the same category — which the intended design would produce constantly — numbered **0 across
+all 16 categories**. Supply Chain, the pill whose keyword-only precision was measured at 25%
+in July, was 6,582 unjudged keyword articles out of 6,787 (97%). Public Health 2,013/2,123
+(95%). A grocery-store fire ("Fire outbreak rocks SPAR outlet in Calabar") reached the Public
+Health briefing on the keyword "outbreak".
+
+Two further defects fixed in the same pass, both found while tracing the first:
+
+1. **The demotion DELETE had no `matched_via` predicate.** Inserts are applied before deletes
+   in `score_new`, so once approvals started producing both a delete (of the keyword row) and
+   a fresh judge row, the unqualified DELETE would have taken the judge row with it and
+   dropped the article from the pill entirely — a data-loss bug that only becomes reachable
+   *because* of this fix.
+2. **The watermark advanced through gateway outages.** `score_new` wrote `WATERMARK`
+   unconditionally, while a judge failure merely `continue`d. Since the watermark is a
+   monotonic store `row_index` with no rewind, every article embedded during an outage was
+   silently condemned to keyword-only membership forever, with nothing reporting it. It now
+   halts without advancing and logs at WARNING; the next run retries those rows (idempotent —
+   `_judged_tags` skips anything already ruled on).
+
+**How it was verified** — A/B dry-run against live production data. `stage_batch` stages on a
+read-only connection and writes nothing, so the old and new modules were run over the *same*
+1,500-article chunk from the embedding store, with real judge calls:
+
+| | judged | inserts | keyword rows replaced/demoted |
+|---|---|---|---|
+| OLD | 4 | 0 | 0 |
+| NEW | 77 | 44 (supply_chain 36, public_health 8) | 67 (supply_chain 58, public_health 9) |
+
+The 4 the old path judged were the semantic-net-only leftovers; the other 73 were keyword
+articles it had never looked at. A 43% rejection rate on those two pills is consistent with
+the 25% keyword precision measured in July. Backfill of the preceding 14 days via
+`rescore_pills` + `flip_pills --mode replace` is tracked separately.
+
+**Files** — `pipeline/pill_scorer.py`.
+
+**Notes** — Judging keyword candidates costs roughly **$0.06–0.08/day** more (~2–3k additional
+articles at ~$0.000026 each), which about doubles judge spend; GDELT's measured total was
+$1.40/7d before this. Expect curated pills — Supply Chain most visibly — to shrink. That is
+the feature working, not a regression.
+
+Rejected: adding a `matched_via` index. The judged lookup rides the existing
+`(source_type, article_id)` index with an IN-list of ≤400, and the dry-run's 27s for 1,500
+articles is dominated by judge latency, not the lookup.
+
+Not fixed here, deliberately: `calibrate_pills.py` parses `matched_detail` as a float, which
+only works for `matched_via='semantic'` rows — judge rows store `"verdict|score"` and are
+silently skipped, so calibration currently sees almost nothing on judged pills.
+
 ## 2026-08-02 — The daily SEC job could not have run; leverage sentence stopped reassuring the wrong companies
 
 **What** — Fixed `GDELT-SecIngest`, whose derive stage would have failed on its first

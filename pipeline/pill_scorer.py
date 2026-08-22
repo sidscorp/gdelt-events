@@ -218,6 +218,29 @@ def _existing_tags(con, category: str, urls: list[str]) -> set[str]:
     return found
 
 
+def _judged_tags(con, category: str, urls: list[str]) -> set[str]:
+    """Articles the judge has ALREADY ruled on for this category.
+
+    Distinct from _existing_tags: a keyword tag means "a candidate was found",
+    not "membership was decided". Gating the judge on _existing_tags is what
+    silently disabled it for every keyword hit once SUFFIX became "" (target
+    category == live category, so the candidate set and the skip set were the
+    same query). Only a judge row means the question has been answered.
+    """
+    found: set[str] = set()
+    for i in range(0, len(urls), IN_BATCH):
+        chunk = urls[i:i + IN_BATCH]
+        ph = ",".join(["?"] * len(chunk))
+        for (u,) in con.execute(
+            f"SELECT DISTINCT article_id FROM article_tags "
+            f"WHERE category = ? AND source_type='gal' AND matched_via = 'judge' "
+            f"AND article_id IN ({ph})",
+            [category] + chunk,
+        ).fetchall():
+            found.add(u)
+    return found
+
+
 def _fda_candidates(con, urls: list[str]) -> set[str]:
     found: set[str] = set()
     for i in range(0, len(urls), IN_BATCH):
@@ -348,7 +371,10 @@ def stage_batch(con, urls: list[str], vectors: np.ndarray,
             cand = set(kw_tagged)
             cand.update(urls[i] for i in np.nonzero(s >= SEM_NET)[0])
 
-        already = _existing_tags(con, target_cat, urls)
+        # Skip only what the judge has ALREADY ruled on. Using _existing_tags
+        # here meant keyword hits were their own skip set once suffix was ""
+        # and they were never judged at all.
+        already = _judged_tags(con, target_cat, urls)
         to_judge = sorted(cand - already)
         if not to_judge:
             continue
@@ -357,23 +383,41 @@ def stage_batch(con, urls: list[str], vectors: np.ndarray,
                  for u in to_judge if u in titles]
         verdicts = pill_judge.judge(target_cat, items)
         if verdicts is None:
-            continue  # gateway down: leave keyword tags as-is, no demotion
+            # Gateway down: keyword tags stay as-is and nothing is demoted.
+            # Flag it so score_new refuses to advance the watermark past these
+            # rows — otherwise they are never judged again (the watermark is a
+            # monotonic row_index with no rewind).
+            counters["judge_failed"] = True
+            continue
         counters["judged"] += len(verdicts)
 
         accept = {"relevant"} if p.get("strict") else pill_judge.ACCEPT
         approved = [u for u, v in verdicts.items() if v in accept]
+        # An article with no crawled_at cannot be inserted (the column is the
+        # feed's time index), so track what actually got a judge row rather
+        # than what was merely approved — the delete below keys off this.
+        inserted = {u for u in approved if crawled.get(u)}
         inserts.extend(
             (u, "gal", target_cat, "judge",
              f"{verdicts[u]}|{s[idx_of[u]]:.3f}" if u in idx_of else verdicts[u],
              crawled.get(u))
-            for u in approved if crawled.get(u))
+            for u in inserted)
 
-        # Demote judged-irrelevant keyword tags from the LIVE category so a
-        # keyword false-positive shows for at most one cycle (post-flip,
-        # suffix == "" makes live and target the same category).
         if suffix == "":
-            deletes.extend((k, u) for u, v in verdicts.items()
-                           if v == "irrelevant" and u in kw_tagged)
+            # Post-flip the live and target categories are the same, so a
+            # verdict on a keyword-tagged article REPLACES its keyword row:
+            #   approved + inserted -> drop the keyword row, judge row stands
+            #   irrelevant          -> drop it (the demotion this gate exists for)
+            # Leaving the keyword row in place on approval would double-tag the
+            # article, and _attach_inclusion_reason picks the badge with
+            # any_value() — so the card would advertise 'keyword' at random.
+            # Approved-but-not-inserted is deliberately left alone: dropping its
+            # keyword row would remove the article from the pill with nothing
+            # replacing it.
+            deletes.extend(
+                (k, u) for u, v in verdicts.items()
+                if u in kw_tagged and (v == "irrelevant" or u in inserted)
+            )
     return inserts, deletes, counters
 
 
@@ -408,6 +452,19 @@ def score_new(suffix: str = SUFFIX) -> dict:
             all_deletes.extend(dels)
             totals["judged"] += c["judged"]
             totals["articles"] += len(urls)
+            if c.get("judge_failed"):
+                # The gateway was down for at least one pill in this chunk.
+                # Stop here WITHOUT advancing past it: the watermark is a
+                # monotonic row_index with no rewind, so advancing would leave
+                # these articles permanently unjudged (keyword-only forever)
+                # with nothing reporting it. Next run retries the same rows.
+                totals["halted_on_judge_failure"] = True
+                log.warning(
+                    "pill_scorer: judge unavailable at row %s — holding watermark "
+                    "at %s so these articles are retried, not skipped",
+                    last_row, max_row + 1,
+                )
+                break
             max_row = last_row
     finally:
         rcon.close()
@@ -429,9 +486,14 @@ def score_new(suffix: str = SUFFIX) -> dict:
                 for i in range(0, len(del_urls), IN_BATCH):
                     chunk = del_urls[i:i + IN_BATCH]
                     ph = ",".join(["?"] * len(chunk))
+                    # matched_via <> 'judge' is load-bearing: inserts are applied
+                    # BEFORE deletes, and an approved article gets both a delete
+                    # (of its keyword row) and a fresh judge row. Without this
+                    # predicate the delete would take the judge row with it and
+                    # silently drop the article from the pill entirely.
                     wcon.execute(
                         f"DELETE FROM article_tags WHERE category = ? AND source_type='gal' "
-                        f"AND article_id IN ({ph})",
+                        f"AND matched_via <> 'judge' AND article_id IN ({ph})",
                         [cat] + chunk,
                     )
             wcon.execute("CHECKPOINT")

@@ -398,7 +398,67 @@ def _doc_facts():
         facts["view_groups"] = by_group
     except Exception:
         pass
+    # The judge is a DIFFERENT model from the briefing writer. The page used to
+    # render BRIEFING_MODEL for both; that was only correct by coincidence and
+    # would have gone quietly wrong the first time either was repointed.
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+        _repo = str(_Path(__file__).resolve().parent.parent.parent)
+        if _repo not in _sys.path:
+            _sys.path.insert(0, _repo)
+        from pipeline.pill_eval import JUDGE_MODEL
+        facts["judge_model"] = JUDGE_MODEL.rsplit("/", 1)[-1]
+    except Exception:
+        pass
+    facts.update(_pill_precision_facts())
     return facts
+
+
+# Precision claims on /methodology are the ones most likely to rot, because they
+# are measurements rather than constants — and stale ones are worse than none:
+# the "75-94%" figure survived six weeks during which the judge was not running
+# at all. Read them from the newest pill_eval report so the page states what was
+# last actually measured, and degrades to the template defaults if none exists.
+def _pill_precision_facts():
+    out = {}
+    try:
+        import glob
+        import json as _json
+        from _paths import DATA_DIR
+        reports = sorted(glob.glob(str(DATA_DIR / "pill_eval" / "*.json")))
+        if not reports:
+            return out
+        data = _json.loads(open(reports[-1], encoding="utf-8").read())
+        scored = {r["category"]: r["precision"] for r in data.get("results", [])
+                  if r.get("precision") is not None
+                  # 'fda' samples the raw FDA name-match cache, which no longer
+                  # backs any live pill — including it would report a 10% floor
+                  # for something no reader can open.
+                  and r["category"] != "fda"}
+        if not scored:
+            return out
+        vals = sorted(scored.values())
+        mid = len(vals) // 2
+        median = vals[mid] if len(vals) % 2 else (vals[mid - 1] + vals[mid]) / 2
+        pct = lambda v: f"{round(v * 100)}%"
+        out["eval_min"], out["eval_max"] = pct(vals[0]), pct(vals[-1])
+        out["eval_median"] = pct(median)
+        out["eval_pills"] = len(vals)
+        out["eval_n"] = data.get("n")
+        ran = (data.get("ran_at") or "")[:10]
+        if ran:
+            # Build the day number by hand: '%-d' is glibc-only and this runs on
+            # Windows, where it raises.
+            d = datetime.strptime(ran, "%Y-%m-%d")
+            out["eval_date"] = f"{d.day} {d.strftime('%B %Y')}"
+        for key, cat in (("eval_supply", "supply_chain"), ("eval_semi", "semiconductors"),
+                         ("eval_aireg", "ai_regulation"), ("eval_cyber", "cyber_attacks")):
+            if cat in scored:
+                out[key] = pct(scored[cat])
+    except Exception:
+        pass
+    return out
 
 
 @bp.route("/about")

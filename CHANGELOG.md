@@ -21,6 +21,73 @@ Newest first.
 
 ---
 
+## 2026-08-26 — Measuring pill precision took the site down; the page reported numbers nobody had checked
+
+**What** — `pill_eval` now opens a **read-only** DuckDB connection instead of a read-write one,
+and its default pill list covers all 17 categories that have intents (seven were never
+measured). `/methodology` now states precision measured from the newest `pill_eval` report,
+injected via `_doc_facts()`, rather than hand-written prose.
+
+**Why** — Two problems, one causing the other.
+
+1. **The eval held the write lock through every LLM call.** `main()` opened
+   `_open_connection(DB_PATH)` (read-write) and kept it for the whole run while `eval_pill`
+   made judge calls taking minutes. DuckDB is single-writer, so measuring precision 503'd the
+   live feed for the entire run — and the more pills you measured, the longer the site stayed
+   down. This is exactly the failure the repo's own rule warns about ("never hold a write
+   connection through LLM calls"). The eval only ever SELECTs, so read-only is correct.
+   Verified during a 17-pill run: `/api/stats` answered in 0.11s throughout.
+
+2. **The page's numbers were unverifiable and, once checked, wrong.** `/methodology` claimed
+   "every pill measures roughly 75–94%". Those figures were hand-copied in July and survived
+   the six weeks during which the judge was not running at all (see the 2026-08-22 entry). The
+   first full measurement after the fix says otherwise:
+
+   | | precision |
+   |---|---|
+   | Geopolitics & Conflict, FDA | 0.950 |
+   | Energy & Climate | 0.912 |
+   | Supply Chain | 0.725 (was 0.25 under keywords) |
+   | **Cybersecurity** | **0.613** |
+   | **AI Governance** | **0.600** |
+   | **Semiconductors** | **0.562** |
+
+   Range 56–95%, median 76% across 16 live pills. The claimed 75% floor was wrong for four
+   pills. The page now publishes the real spread and names the three weakest, because a
+   transparency page that flatters is worse than no page.
+
+   Precision facts are now read from the newest report in `data/pill_eval/` at render time, so
+   they cannot drift from what was last measured. Seven pills that had `PILL_INTENTS` but were
+   missing from `DEFAULT_PILLS` — including `geopolitics_conflict`, `public_health` and
+   `energy_climate`, three of the busiest — had never been measured once.
+
+Also corrected on the page: it rendered `BRIEFING_MODEL` where it meant the **judge** model
+(correct only by coincidence — both are `gpt-oss-120b` today, and it would have gone quietly
+wrong the first time either was repointed); it described "Medical Device Companies" as a live
+pill, which it has not been since `meddev_companies` was removed; and it implied judging is
+instantaneous, when tagging runs at ingest and judging a cycle behind it, so the newest cards
+can briefly show a `keyword` badge.
+
+**How it was verified** — 17-pill eval run end to end while polling the live site (0.11s
+responses throughout, no 503s). `_pill_precision_facts()` exercised against the real report
+before deploy. Live page re-fetched after restart: renders "56% to 95%, median 76% across 16
+pills"; the strings "75–94" and "Medical Device Companies" are gone. `tests/smoke.sh` 20/20.
+
+**Files** — `pipeline/pill_eval.py`, `dashboard/routes/pages.py`,
+`dashboard/templates/methodology.html`.
+
+**Notes** — `fda` is deliberately excluded from the published range: it samples the raw FDA
+name-match cache, which no longer backs any live pill, and scores 0.100. Including it would
+advertise a 10% floor for something no reader can open.
+
+Not fixed: `pill_eval`'s "worst offenders" summary crashes with `UnicodeEncodeError` on
+Windows' cp1252 console when a title contains a non-breaking hyphen. It fires *after* the JSON
+report is written, so no data is lost — but the traceback makes a successful run look failed.
+
+The three weak pills (Semiconductors, AI Governance, Cybersecurity) are a tuning problem in
+their `PILL_INTENTS` wording and thresholds, not a mechanism problem, and are the obvious next
+piece of work.
+
 ## 2026-08-22 — The LLM judge had never seen a single keyword-tagged article
 
 **What** — `pill_scorer.stage_batch` now gates the judge on *judged* status

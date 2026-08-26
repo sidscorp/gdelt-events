@@ -25,7 +25,6 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from .config import DATA_DIR, DB_PATH
-from .loader import _open_connection
 
 GATEWAY_URL = "https://llm.snambiar.com/v1/chat/completions"
 # Fireworks gpt-oss-120b: ~10x cheaper than Cerebras GLM at observed blended
@@ -267,7 +266,40 @@ DEFAULT_PILLS = [
     "supply_chain", "medical_devices", "fda", "ai_general", "ai_regulation",
     "ai_defense", "ai_sector_impact", "semiconductors",
     "oss_vulnerabilities", "cyber_attacks",
+    # These five have had PILL_INTENTS all along but were never in this list,
+    # so they had never once been precision-measured — while /methodology
+    # claimed "every pill measures roughly 75-94%".
+    "geopolitics_conflict", "energy_climate", "public_health",
+    "fda_agency", "nih_news", "cms_news", "va_news",
 ]
+
+
+def _read_con(retries: int = 30):
+    """Read-only connection for the eval.
+
+    This eval only ever SELECTs, and it interleaves those reads with judge
+    calls that take minutes. Opening it read-WRITE (as it did) held DuckDB's
+    single writer lock across every LLM call, which 503s the live dashboard
+    for the whole run — so measuring precision took the site down, and the
+    more pills you measured the longer it stayed down.
+
+    Retries through the ingest/scorer write windows, and sets the Windows
+    spill dir: without temp_directory a read-only connection that hits its
+    memory limit fails the spill and poisons every later query on it.
+    """
+    import duckdb
+    last = None
+    for _ in range(retries):
+        try:
+            con = duckdb.connect(str(DB_PATH), read_only=True)
+            con.execute("SET threads = 2")
+            con.execute("SET memory_limit = '4GB'")
+            con.execute(f"SET temp_directory='{(DB_PATH.parent / 'duckdb_tmp').as_posix()}'")
+            return con
+        except duckdb.IOException as e:
+            last = e
+            time.sleep(2)
+    raise RuntimeError(f"could not open read-only connection: {last}")
 
 
 def main():
@@ -279,7 +311,7 @@ def main():
     args = parser.parse_args()
 
     pills = [p.strip() for p in args.pills.split(",")] if args.pills else DEFAULT_PILLS
-    con = _open_connection(DB_PATH)
+    con = _read_con()
 
     results = []
     try:

@@ -21,6 +21,88 @@ Newest first.
 
 ---
 
+## 2026-08-26 — Briefings get an editor, and say who they passed over
+
+**What** — The briefing is now two LLM calls. An **editor** reads 40 candidates (up from 12)
+and picks ~10, recording one line on why each was chosen and why anything that is not a news
+article was rejected; a **writer** then composes from that selection. Briefings roughly doubled
+in length (3-5 sentence lede, 8-12 two-sentence highlights, a "What to watch" paragraph and a
+"Quieter but notable" pick). The ⓘ panel shows the whole selection — chosen, rejected, and
+considered-but-not-selected. Story threads were unfrozen and re-keyed per view. New
+`pipeline/textfilters.py` drops pages that are not articles at all.
+
+**Why** — Selection was pure arithmetic: the Importance score took the top 12 and the model
+narrated them in order. There was no editorial judgement anywhere in the product, and on the
+global view slots 7-12 were routinely a section index ("Food and drink - Hull Live"), a job
+posting, and an evergreen ETF listicle — all visible to any visitor through the ⓘ panel.
+
+The 12 was itself a cost cut (50 → 20 → 12, commit `1aabb80`, "Cut briefing LLM spend ~30x").
+That commit's savings came from four other changes — leaving Cerebras, demand-driven prewarm,
+skipping thread updates, scaling freshness. Measured against seven real stored prompts a source
+line is ~64 tokens, so 12 → 40 costs about **$0.24/month**. It was a bad trade made under
+8×-worse pricing, and it starved the model of anything to choose between.
+
+Deliberately NOT filtered: low-salience *real* news. A High Court ruling in Allahabad or a fatal
+crash near Middlesbrough is a real event, and keeping such stories in the pool is what makes the
+briefing worth reading twice. Only structural non-articles are hard-dropped; the editor is asked
+to include at least one consequential but under-covered story.
+
+Threads were frozen: updates were switched off during prewarm in that same commit and organic
+visits are rare, so several lists had not moved since 30 July while every prompt still described
+them as "ongoing story threads you have been tracking". They now update on prewarm too, gated to
+once per view per 3h and, for prewarm, only for views a human has actually opened in 30 days
+(the same demand signal `prewarm_briefings.py` already uses). Re-keyed from `cache_key`
+(view×hours) to `view_id`: a storyline belongs to a topic, not a time window, and one view was
+carrying up to six divergent thread lists — 106 rows collapsed to 18.
+
+**How it was verified** — End to end against live production data in a throwaway copy of the
+dashboard (prod untouched, real data read-only):
+
+- **Citation integrity**, the highest-risk regression: the writer cites *candidate* numbers, so
+  `sources_json` keeps all 40 in 1..40 order. A generated briefing cited
+  `[3,4,6,9,10,13,19,27,37,38]` — exactly the chosen set, non-consecutive, none out of range,
+  each indexing back to itself. A renumbering slip here would point every citation at the wrong
+  article while looking entirely normal.
+- **Editor quality**: on Geopolitics it rejected an opinion column as "Opinion piece, no new
+  event" and a sensational claim as "lacks verifiable event", while selecting Qatar-Iran
+  mediation and a Hormuz shipping warning.
+- **Fail-open**: with `_chat` monkeypatched to return junk, and separately to raise, selection
+  falls back to the Importance top-10 and the briefing proceeds unchanged.
+- **Thread migration**: 106 → 18 rows, one per view, deduped to each view's most recent list;
+  re-running the migration is a no-op.
+- **Junk filter**: 6,000 live titles, 0.92% dropped, and **0 of the top 300 clusters** — the
+  population briefings actually draw from. Every drop was eyeballed.
+- Output length landed at ~1,090 tokens, the intended ~2×. `tests/smoke.sh` 20/20.
+
+**Files** — `pipeline/textfilters.py` (new), `pipeline/build_clusters.py`,
+`dashboard/briefing.py`, `dashboard/routes/api_briefing.py`, `dashboard/articles.py`,
+`dashboard/webutil.py`, `dashboard/models.py`, `dashboard/routes/pages.py`,
+`dashboard/templates/methodology.html`, `dashboard/static/js/dashboard.js`,
+`dashboard/static/sw.js`.
+
+**Notes** — Measured cost: editor ~$0.00082, writer ~$0.00091, **~$0.0017/briefing ≈
+$2.26/month** at ~1,300 generations, plus ~$0.59/month for threads. Budget was $2-3.
+
+Two things learned the hard way, both worth remembering:
+
+1. **`gpt-oss-120b` is a reasoning model and reasoning tokens are billed as output.** At
+   `max_tokens=1800` the editor returned a **completely empty** response — not truncated, empty
+   — because the budget was spent before the JSON began. It needs 4000. The writer's existing
+   8000 carries the same note.
+2. **Asking for a verdict on every candidate cost 3× more than asking only about the ones it
+   acts on.** Emitting `chosen`/`not_news` only, with `reasoning_effort: "low"`, cut editor
+   output from ~2,400-3,400 tokens to ~700 and brought the month from $4.03 to $2.26. The ⓘ
+   panel still lists everything else as "considered but not selected" by difference.
+
+Also fixed: the SSE path bound `generated_at` only inside `if briefing:` but reported it in the
+terminal event, so a falsy normalization raised `UnboundLocalError` mid-stream and reached the
+client as a silently truncated response. And the non-streaming path recorded a strictly smaller
+`meta_json` than the SSE path, so prewarmed briefings — the ones most visitors see — had a
+thinner ⓘ panel than human-triggered ones; both now write the full set.
+
+`pipeline/textfilters.py` is stdlib-only on purpose: importing `build_clusters` into Flask would
+run its module-level `logging.basicConfig` and reconfigure the root logger in the web process.
+
 ## 2026-08-26 — Measuring pill precision took the site down; the page reported numbers nobody had checked
 
 **What** — `pill_eval` now opens a **read-only** DuckDB connection instead of a read-write one,

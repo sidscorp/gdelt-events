@@ -78,24 +78,16 @@ _OUTLET_SUFFIX = re.compile(r"\s*[\|\-–—:]\s*[^|\-–—:]{1,40}$")
 _NONWORD = re.compile(r"[^a-z0-9 ]+")
 _WS = re.compile(r"\s+")
 
-# Bot-wall / paywall / error interstitial titles — skip so they don't form
-# junk clusters (and would just be noise as singletons too).
-_JUNK_TITLES = (
-    "client challenge", "just a moment", "are you a robot", "access denied",
-    "attention required", "403 forbidden", "page not found", "404 not found",
-    "bot verification", "verifying you are human", "one moment please",
-    "robot or human", "please verify you are a human", "security check",
-    "access to this page has been denied", "site maintenance", "are you human",
-)
-
-
-def is_junk_title(title):
-    if not title:
-        return True
-    t = _WS.sub(" ", title.lower()).strip()
-    if len(t) < 6:
-        return True
-    return any(j in t for j in _JUNK_TITLES)
+# Bot-wall / paywall / error interstitial titles — skip so they don't form junk
+# clusters (they cluster *well*, being near-identical boilerplate, so leaving
+# them in actively amplifies them: "Making sure you're not a bot!" reached a
+# 14-member cluster and was handed to a briefing as previously-covered news).
+#
+# The list now lives in pipeline/textfilters.py so the dashboard can apply the
+# same rule to briefing candidates. That module is stdlib-only by design —
+# importing THIS one from Flask would run the logging.basicConfig above and
+# reconfigure the root logger in the web process.
+from textfilters import is_junk_title  # noqa: E402,F401
 
 
 # --- Small helpers -----------------------------------------------------------

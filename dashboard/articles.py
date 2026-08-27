@@ -18,7 +18,7 @@ from parsers import (
 )
 from views import find_view
 from models import get_pill
-from webutil import _phase
+from webutil import _phase, usable_title
 from importance import compute_importance
 # Cluster helpers live in briefing.py; importing them here (not the other way)
 # keeps the dependency acyclic — briefing.py imports _window_events lazily.
@@ -897,7 +897,7 @@ def _cards_from_gal_rows(con, rows):
     for r in rows:
         art = _gal_row_to_article(r)
         url = art.get("url")
-        if not url or len((art.get("title") or "").strip()) <= 10:
+        if not url or not usable_title(art.get("title")):
             continue
         cid = cmap.get(url)
         key = cid or url
@@ -940,7 +940,7 @@ def _global_window_events(con, cutoff, en_only=True):
         ).fetchall()
         for row in rows:
             card = _card_from_cluster(*row)
-            if len((card.get("title") or "").strip()) > 10:
+            if usable_title(card.get("title")):
                 cards.append(card)
     except Exception:
         pass  # clusters table absent -> singletons only
@@ -958,7 +958,7 @@ def _global_window_events(con, cutoff, en_only=True):
             if added >= IMP_GLOBAL_SINGLES:
                 break
             art = _gal_row_to_article(r)
-            if cmap.get(art.get("url")) or len((art.get("title") or "").strip()) <= 10:
+            if cmap.get(art.get("url")) or not usable_title(art.get("title")):
                 continue  # clustered -> already represented above
             art["n_sources"] = 1
             art["latest_seen"] = art.get("sort_key")

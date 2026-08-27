@@ -101,6 +101,7 @@ def init_user_db():
     _migrate_briefing_columns(con)
     _migrate_perf_table(con)
     _migrate_briefing_history(con)
+    _migrate_briefing_threads(con)
     con.close()
 
 
@@ -349,3 +350,49 @@ def get_all_custom_pills() -> list[dict]:
     rows = con.execute("SELECT id, keywords_json, scan_description FROM custom_pills").fetchall()
     con.close()
     return [dict(r) for r in rows]
+
+
+def _migrate_briefing_threads(con):
+    """Re-key briefing_threads from cache_key (view:hours) to view_id.
+
+    Threads describe a storyline for a TOPIC, not for a time window, but the
+    table was keyed on the briefing cache key — so one view carried up to six
+    divergent thread lists, each costing its own update call and each telling
+    the reader a different story about what was ongoing.
+
+    SQLite cannot ALTER a primary key, so build the new table and copy across,
+    collapsing a view's rows onto its most recently updated one. Idempotent:
+    no-ops once view_id is the key.
+    """
+    try:
+        cols = {r[1] for r in con.execute("PRAGMA table_info(briefing_threads)").fetchall()}
+    except Exception:
+        return
+    if not cols or "view_id" in cols:
+        return
+    con.executescript("""
+        CREATE TABLE IF NOT EXISTS briefing_threads_v2 (
+            view_id TEXT PRIMARY KEY,
+            threads_json TEXT,
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
+        INSERT OR REPLACE INTO briefing_threads_v2 (view_id, threads_json, updated_at)
+        SELECT view_id, threads_json, updated_at FROM (
+            SELECT
+                CASE WHEN instr(cache_key, ':') > 0
+                     THEN substr(cache_key, 1, instr(cache_key, ':') - 1)
+                     ELSE cache_key END AS view_id,
+                threads_json,
+                updated_at,
+                ROW_NUMBER() OVER (
+                    PARTITION BY CASE WHEN instr(cache_key, ':') > 0
+                                      THEN substr(cache_key, 1, instr(cache_key, ':') - 1)
+                                      ELSE cache_key END
+                    ORDER BY updated_at DESC
+                ) AS rn
+            FROM briefing_threads
+        ) WHERE rn = 1;
+        DROP TABLE briefing_threads;
+        ALTER TABLE briefing_threads_v2 RENAME TO briefing_threads;
+    """)
+    con.commit()

@@ -635,6 +635,35 @@ async function showBriefingInfo() {
   const threads = (m.threads_used || []).map(t =>
     `<li><strong>${esc(t.title || '')}</strong> (since ${esc(t.first_seen || '?')}): ${esc(t.summary || '')}</li>`).join('');
 
+  // Editorial selection: an LLM editor picks which candidates the briefing
+  // covers, and says why. Showing what it passed over is the point — it is the
+  // only place a reader can see the judgement rather than just its result.
+  const ed = m.editor_selection || null;
+  const titleOf = n => {
+    const s = (data.sources || []).find(x => x.n === n);
+    return s ? (s.title || s.link || '') : `#${n}`;
+  };
+  const vd = (ed && ed.verdicts) || [];
+  const chosenRows = vd.filter(v => v.verdict === 'chosen').map(v =>
+    `<li><strong>[${v.n}]</strong> ${esc(v.title || titleOf(v.n))}` +
+    (v.reason ? `<br><span style="color:var(--text-tertiary);">${esc(v.reason)}</span>` : '') +
+    `</li>`).join('');
+  const rejectedRows = vd.filter(v => v.verdict === 'not_news').map(v =>
+    `<li><strong>[${v.n}]</strong> ${esc(v.title || titleOf(v.n))}` +
+    (v.reason ? `<br><span style="color:var(--text-tertiary);">not a news article &mdash; ${esc(v.reason)}</span>` : '') +
+    `</li>`).join('');
+  const judgedNs = new Set(vd.map(v => v.n));
+  const passedRows = (data.sources || []).filter(s => !s.chosen && !judgedNs.has(s.n)).map(s =>
+    `<li><strong>[${s.n}]</strong> ${esc(s.title || s.link || '')}</li>`).join('');
+  const editorBlock = !ed ? '' : (
+    ed.fell_back
+      ? `<p style="color:var(--text-tertiary);">Editorial selection was unavailable for this briefing; it fell back to the top ${ed.n_chosen} by Importance.</p>`
+      : `<p><strong>Editorial selection:</strong> ${ed.n_candidates} candidates considered, ${ed.n_chosen} chosen.</p>` +
+        (chosenRows ? `<details open><summary style="cursor:pointer;">Chosen, and why (${vd.filter(v => v.verdict === 'chosen').length})</summary><ul style="margin:.4rem 0 .4rem 1.1rem;">${chosenRows}</ul></details>` : '') +
+        (rejectedRows ? `<details><summary style="cursor:pointer;">Rejected as not news (${vd.filter(v => v.verdict === 'not_news').length})</summary><ul style="margin:.4rem 0 .4rem 1.1rem;">${rejectedRows}</ul></details>` : '') +
+        (passedRows ? `<details><summary style="cursor:pointer;">Considered but not selected (${(data.sources || []).filter(s => !s.chosen && !judgedNs.has(s.n)).length})</summary><ul style="margin:.4rem 0 .4rem 1.1rem;">${passedRows}</ul></details>` : '')
+  );
+
   const modal = document.createElement('div');
   modal.className = 'pill-modal';
   modal.innerHTML = `
@@ -644,12 +673,14 @@ async function showBriefingInfo() {
         <p><strong>Model:</strong> ${esc(m.model || 'unknown (generated before metadata capture)')} ·
            <strong>Generated:</strong> ${esc(data.generated_at || '?')} UTC (${age}) ·
            <strong>Cache:</strong> ${m.cache_ttl_s ? Math.round(m.cache_ttl_s / 60) + ' min' : '45 min'}</p>
-        <p>The briefing summarizes the window's <strong>top ${data.article_count || '?'} events ranked by the same
-           Importance score as the feed</strong> (coverage 0.5 &middot; recency 0.3 &middot; velocity 0.2 —
-           <a href="/methodology" target="_blank">full methodology</a>).</p>
+        <p>${ed && !ed.fell_back
+             ? `Candidates are the window's top events by the same Importance score as the feed (coverage 0.5 &middot; recency 0.3 &middot; velocity 0.2); an editor then chose which to cover`
+             : `The briefing summarizes the window's <strong>top ${data.article_count || '?'} events ranked by the same Importance score as the feed</strong> (coverage 0.5 &middot; recency 0.3 &middot; velocity 0.2)`}
+           — <a href="/methodology" target="_blank">full methodology</a>.</p>
+        ${editorBlock}
         ${cont ? `<details><summary style="cursor:pointer;">Continuity: stories the previous briefing covered (${(m.continuity_titles || []).length})</summary><ul style="margin:.4rem 0 .4rem 1.1rem;">${cont}</ul></details>` : ''}
         ${threads ? `<details><summary style="cursor:pointer;">Ongoing story threads it was tracking (${(m.threads_used || []).length})</summary><ul style="margin:.4rem 0 .4rem 1.1rem;">${threads}</ul></details>` : ''}
-        <details><summary style="cursor:pointer;">The ${(data.sources || []).length} ranked source events it was given</summary>
+        <details><summary style="cursor:pointer;">All ${(data.sources || []).length} candidate events (citation numbering)</summary>
           <div style="max-height:220px;overflow-y:auto;margin:.4rem 0;"><table style="font-size:0.78rem;border-collapse:collapse;">${srcRows}</table></div>
         </details>
         ${m.prompt ? `<details><summary style="cursor:pointer;"><strong>The verbatim prompt</strong> (exactly what the model received)</summary>

@@ -12,10 +12,11 @@ import time as _time
 from db import get_db
 from briefing import (
     BRIEFING_FRESH_S, BRIEFING_EVENT_LIMIT, BRIEFING_MODEL, fresh_s,
-    _build_briefing_prompt, _fetch_briefing_events,
+    _build_briefing_prompt, _fetch_briefing_events, _select_events,
     _generate_briefing, _generate_briefing_stream,
     _normalize_briefing,
     get_threads, record_briefing_history, update_threads_async,
+    should_update_threads,
 )
 
 bp = Blueprint("api_briefing", __name__)
@@ -40,6 +41,31 @@ def _finish_regen(cache_key: str):
     """Release regeneration slot."""
     with _regen_lock:
         _regen_in_flight.discard(cache_key)
+
+
+def _editor_pass(candidates, view_name, view_desc, hours, threads):
+    """Editor selection + the citation payload.
+
+    ``sources_payload`` deliberately carries ALL candidates, numbered 1..N, not
+    just the chosen ones: the client maps [N] -> sources[N-1], and the writer
+    cites each story by its candidate number, so the persisted array must be
+    the same index space the writer was shown. It also lets the info panel show
+    what was passed over.
+    """
+    selected, verdicts = _select_events(candidates, view_name, view_desc, hours, threads)
+    payload = [{"n": i + 1, "link": s["link"], "outlet": s.get("outlet"),
+                "title": s.get("title"), "n_sources": s.get("n_sources", 1)}
+               for i, s in enumerate(candidates)]
+    chosen_ns = {s.get("n") for s in selected}
+    for row in payload:
+        row["chosen"] = row["n"] in chosen_ns
+    editor_meta = {
+        "n_candidates": len(candidates),
+        "n_chosen": len(selected),
+        "verdicts": verdicts,
+        "fell_back": not verdicts,
+    }
+    return selected, payload, editor_meta
 
 
 @bp.route("/api/briefing")
@@ -148,10 +174,9 @@ def api_briefing():
                     })
                 return jsonify({"briefing": None, "error": "Not enough articles", "found": len(sources)})
 
-            sources = sources[:BRIEFING_EVENT_LIMIT]
-            sources_payload = [{"n": i + 1, "link": s["link"], "outlet": s.get("outlet"),
-                                "title": s.get("title"), "n_sources": s.get("n_sources", 1)}
-                               for i, s in enumerate(sources)]
+            candidates = sources
+            sources, sources_payload, editor_meta = _editor_pass(
+                candidates, view_name, view_desc, hours, threads)
             sources_json = json.dumps(sources_payload)
             prompt = _build_briefing_prompt(sources, view_name, view_desc, hours,
                                             prev=prev, threads=threads)
@@ -174,6 +199,15 @@ def api_briefing():
             generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
             meta_json = json.dumps({
                 "model": BRIEFING_MODEL, "prompt": prompt, "n_sources": len(sources),
+                "editor_selection": editor_meta,
+                "continuity_titles": [
+                    (s.get("title") or "")[:110] for s in (prev or {}).get("sources", [])[:8]
+                ] if prev else [],
+                "threads_used": [
+                    {"title": t.get("title"), "first_seen": t.get("first_seen"),
+                     "summary": t.get("summary")}
+                    for t in (threads or []) if (t.get("status") or "active") == "active"
+                ],
                 "elapsed_s": round(_time.time() - gen_t0, 2),
                 "briefing_chars": len(briefing), "cache_ttl_s": fresh_s(hours),
             })
@@ -189,7 +223,7 @@ def api_briefing():
             record_briefing_history(cache_key, view_id or "_all", hours, briefing,
                                     sources_json, len(sources), meta_json, generated_at,
                                     trigger=history_trigger)
-            if history_trigger != "prewarm":
+            if should_update_threads(cache_key, history_trigger):
                 update_threads_async(cache_key, threads, briefing)
             return jsonify({
                 "briefing": briefing, "sources": sources_payload,
@@ -238,16 +272,19 @@ def api_briefing():
                     yield f"data: {json.dumps({'error': 'Not enough articles', 'found': len(sources), 'done': True})}\n\n"
                 return
 
-            sources = sources[:BRIEFING_EVENT_LIMIT]
-            sources_payload = [{"n": i + 1, "link": s["link"], "outlet": s.get("outlet"),
-                                "title": s.get("title"), "n_sources": s.get("n_sources", 1)}
-                               for i, s in enumerate(sources)]
+            # The editor call runs before the first token, so tell the reader
+            # what is happening. 'meta' is a literal label the client renders.
+            yield f"data: {json.dumps({'meta': f'Selecting from {len(sources)} stories...'})}\n\n"
+            candidates = sources
+            sources, sources_payload, editor_meta = _editor_pass(
+                candidates, view_name, view_desc, hours, threads)
             sources_json = json.dumps(sources_payload)
             prompt = _build_briefing_prompt(sources, view_name, view_desc, hours,
                                             prev=prev, threads=threads)
             gen_t0 = _time.time()
 
-            # Send fresh sources map (may differ from cached)
+            # Send fresh sources map (may differ from cached). Must be sent
+            # exactly once: the client resets its accumulated text on it.
             yield f"data: {json.dumps({'sources': sources_payload})}\n\n"
 
             full_text = []
@@ -261,10 +298,15 @@ def api_briefing():
                 return
 
             briefing = _normalize_briefing("".join(full_text).strip(), view_name, hours)
+            # Bound unconditionally: the terminal event below reports it, and
+            # when _normalize_briefing returned falsy this raised
+            # UnboundLocalError mid-stream, which reaches the client as a
+            # silently truncated response rather than an error.
+            generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
             if briefing:
-                generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
                 meta_json = json.dumps({
                     "model": BRIEFING_MODEL, "prompt": prompt, "n_sources": len(sources),
+                    "editor_selection": editor_meta,
                     "continuity_titles": [
                         (s.get("title") or "")[:110] for s in (prev or {}).get("sources", [])[:8]
                     ] if prev else [],
@@ -293,9 +335,12 @@ def api_briefing():
                     sources_json, len(sources), meta_json, generated_at,
                     trigger=history_trigger,
                 )
-                # Thread continuity is only read by a human opening the panel, and
-                # costs ~0.84x the briefing itself (measured). Prewarm skips it.
-                if history_trigger != "prewarm":
+                # Threads used to be skipped on prewarm entirely, which froze
+                # every list (some since July) while the prompt kept telling the
+                # model they were live. They now update on prewarm too, gated by
+                # should_update_threads: once per view per few hours, and only
+                # for views someone actually reads.
+                if should_update_threads(cache_key, history_trigger):
                     update_threads_async(cache_key, threads, briefing)
             yield f"data: {json.dumps({'done': True, 'refreshed': is_stale, 'article_count': len(sources), 'generated_at': generated_at, 'cache_ttl_s': fresh_s(hours)})}\n\n"
         finally:

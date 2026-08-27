@@ -376,9 +376,11 @@ def event_detail(cluster_id):
 def _doc_facts():
     facts = {}
     try:
-        from briefing import BRIEFING_MODEL, BRIEFING_EVENT_LIMIT, fresh_s
+        from briefing import (BRIEFING_MODEL, BRIEFING_EVENT_LIMIT,
+                              BRIEFING_CANDIDATE_LIMIT, fresh_s)
         facts["model"] = BRIEFING_MODEL.rsplit("/", 1)[-1]
         facts["event_limit"] = BRIEFING_EVENT_LIMIT
+        facts["candidate_limit"] = BRIEFING_CANDIDATE_LIMIT
         facts["fresh_short_h"] = fresh_s(3) // 3600
         facts["fresh_long_h"] = fresh_s(720) // 3600
     except Exception:

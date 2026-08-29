@@ -21,6 +21,108 @@ Newest first.
 
 ---
 
+## 2026-08-29 - Entity spine: entity_registry + tiered alias table (PLAN-100X Phase 1)
+
+**What** - New `pipeline/entity_registry.py` builds two tables in `data/gdelt.duckdb`:
+`entity_registry` (one row per real-world company, fused from SEC filers + FDA establishments)
+and `entity_alias` (news-side organisation strings mapped onto those entities, each row carrying
+its match tier, an `auto_join` flag and a confidence). Plus `entity_build_log` (append-only build
+reports). Offline build, ~42s over the full 2.74M-row GKG scan. **Nothing reads these tables
+yet** - no dashboard, API or briefing code was touched. This is the spine only.
+
+**Why** - The news<->company link was `fda_match_cache` name matching, whose `stripped` tier is
+structurally noisy (UNESCO->Olympus, 'Patterson' the flooring firm). An attempted `fda_match`
+view resurrection was rejected on 2026-08-28 for exactly that reason. Every planned surface -
+follow loops, company pages, register-aware briefings - needs a company link it can trust, so
+the link gets built and audited once, on its own, instead of being re-derived per feature.
+
+**How it was verified** - Full build, read-only compute + one write burst, dashboard left
+serving throughout. Coverage: 17,966 SEC filers + 8,594 FDA establishments -> 26,081 entities,
+of which 260 carry both an SEC CIK and an FDA owner/operator number (299 establishments fused;
+some filers own several). 8,649 entities pass the liveness test. GKG scan: 2,744,936 rows,
+1,065,804 distinct normalised organisation strings -> 5,479 auto-join news edges
+(3,832 T1_NAME_DISTINCT, 1,642 T1_NAME_SINGLE, 5 T2_SUCCESSOR) and 331 refused as
+T3_DEAD_FILER.
+
+Hand audit of 200 auto-join news edges drawn uniformly from that population (seed 1, identity
+aliases excluded), adjudicated by hand against name/ticker/exchange/SIC - full adjudication in
+`docs/entity-spine-audit-2026-08-29.md`. Two measures, deliberately not conflated:
+**link precision (does the alias denote this entity) 198/200 = 98.5%, which clears the >=97%
+gate**; alias ambiguity (right entity, but a share of mentions are about something else) 8/200 =
+4.0%, carried into Phase 2. The 3 wrong links were `SU` -> SU Group Holdings (a 2-character
+acronym fragment), `DOVER` -> Dover Corp (the town dominates the mentions), and
+`GLOBAL ENTERTAINMENT` -> a shell filer. Two guards were added *after* that measurement, so the
+98.5% is not circular: `MIN_SINGLE_TOKEN_LEN = 3` (drops 214 one- and two-character org strings;
+the correct 3-character names RXO, DHT, IDT are unaffected) and a 3-entry `ALIAS_BLOCKLIST` with
+the reason recorded inline per entry. The shipped build therefore has 5,464 auto-join news edges
+(3,831 T1_NAME_DISTINCT, 1,628 T1_NAME_SINGLE, 5 T2_SUCCESSOR), 326 refused as T3_DEAD_FILER,
+214 refused as too short, 3 blocklisted. Prod unaffected throughout: `tests/smoke.sh` run from
+the Mac after the build, 20/20.
+
+**Files** - `pipeline/entity_registry.py` (new). New tables `entity_registry`, `entity_alias`,
+`entity_build_log` in `data/gdelt.duckdb`. No existing file modified.
+
+**Notes** -
+
+*The plan's domain tiers are not implementable and the spec was corrected.* PLAN-100X specifies
+"T1 exact normalised legal name **or shared domain**" and "T2 suffix-stripped **+ shared
+domain**". No company-domain data exists anywhere in the fleet: SEC `companies` is
+(cik, ticker, name, updated_at, sic, sic_description, exchange, fiscal_year_end); `fda_companies`
+is (owner_operator_number, firm_name, site_count, product_count, device_classes,
+medical_specialties); GKG's domain columns are the *publisher's* domain, not the subject
+company's. T2-as-written can never fire. The `domains` column is kept in the schema, empty, for
+the day a source appears - do not populate it from GKG.
+
+*The replacement discriminator is a liveness test, not a sector test.* A single-token name
+auto-joins only if its entity is currently exchange-listed OR has an SEC filing period on/after
+2025-01-01. Both halves are load-bearing: recency alone drops foreign private issuers (they file
+20-F, so they have no `snapshots` rows at all - Shell, Prudential, Canon, Shimadzu, Sysmex,
+Nihon Kohden); exchange alone keeps dead shells that still carry a ticker (MORGAN GROUP HOLDING
+CO, MGHL, last filed 2023). Validated against the false joins found by hand: it rejects TESCO
+CORP (the mentions are the UK grocer, not an SEC filer at all), MORGAN GROUP HOLDING CO (the
+mentions are JPMorgan/Morgan Stanley), "Alphabet Holding Company, Inc." (a shell, not Google's
+Alphabet - the test also picks the right Alphabet from the collision), Aurum Inc. and MERIDIAN
+CO LTD, while keeping Apple, Oracle, Chevron, Visa, Shell and Canon.
+
+*Rejected, with numbers - do not retry sector/SIC compatibility as a discriminator.* It was the
+obvious substitute for the missing domain signal. Of the 260 SEC<->FDA joins, ~26 pair a
+non-medical SIC with an FDA establishment and every one inspected is correct: Sony, Ricoh,
+Shimadzu, Sysmex, Stericycle, Sharps Compliance, TE Connectivity, TD SYNNEX, Sanmina, Plexus,
+MOOG, Procter & Gamble, Thermo Fisher, Stratasys, Nihon Kohden, Ottobock, Sectra, Teladoc,
+Tempus AI, Varex, Nortech, Omnicell, Theragenics, Senseonics, Response Biomedical, Synergetics.
+Industrials and electronics firms are legitimately FDA-registered (medical displays, 3D-printed
+healthcare parts, sterilisation services, contract manufacture). A sector gate would discard
+~10% of the correct joins to catch noise that is not there.
+
+*Known recall cost, deliberately taken.* The liveness test blocks 331 news edges whose only SEC
+row is a dead filer. Some of those mentions are real and high-volume - GOOGLE is the single
+largest organisation string in GKG (~4.7k mentions per 300k rows) and its SEC row, `GOOGLE INC.`,
+last filed in 2015. A small hand-curated `SUCCESSORS` map in the module redirects the ones worth
+redirecting (GOOGLE->GOOGL, LINKEDIN->MSFT, RAYTHEON->RTX, SPRINT->TMUS, TIME WARNER->WBD);
+names whose successor is not an SEC filer (TWITTER/X, MONSANTO/Bayer, SEARS, SAFEWAY, MCAFEE,
+DIRECTV) are listed there with a null target so the next reader knows they were considered and
+left blocked. Extending that map is the cheapest available recall win.
+
+*The ambiguity class is a real, measured limitation and Phase 2 must handle it.* No build-time
+name rule can separate "shares fell on the Nasdaq" from "Nasdaq, Inc. reported earnings" - and
+`NASDAQ` is the single largest alias in the corpus at 38,931 mentions. Mention-level
+disambiguation (article context against the entity's sector) is an entry condition for the
+follow loop: without it, a follower of NDAQ receives every market story on the site.
+
+*Second identity gap, found while measuring, not yet closed.* `fda_regulatory_events` carries
+only a free-text `firm_name` and no `owner_operator_number`, so the register does not join to
+`fda_companies` by key. Exact normalised-name match covers 607 of its 1,237 distinct firms
+(49.1%); only 83 (6.7%) reach an SEC filer. So `entity_registry.fda_firm_ids` links an entity to
+the *establishment* list, not to the register entries a company page would show. Phase 3 needs
+that second hop built and measured on its own.
+
+*Dev-first was not possible for this one.* The dev slice is a static 7-day snapshot whose
+rebuild is currently broken (`scripts/build_dev_snapshot.py` is referenced by
+`rebuild_dev_slice.ps1` and absent from both trees - PLAN-100X Phase 0, still open), and a
+partial GKG cannot validate a full-corpus entity build. Mitigation used instead: the build is
+read-only until a single terminal write burst, it creates only new tables, and it was run twice
+in `--dry-run` (300k sample, then the full corpus) before anything was written.
+
 ## 2026-08-28 (later) — FDA panel: interactive rows, canonical source links, honest footnote
 
 **What** — Rows in "Recent FDA Actions" are now interactive: clicking a row expands it to the full

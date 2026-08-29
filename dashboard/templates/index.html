@@ -14,7 +14,7 @@
 <meta name="twitter:description" content="{{ meta_desc }}">
 <meta name="twitter:image" content="{{ og_image }}">
 {% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/dashboard.css?v=20">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/dashboard.css?v=21">{% endblock %}
 {% block content %}
 <div id="topProgress"></div>
 
@@ -86,6 +86,7 @@
     <span class="fda-panel-toggle" id="fdaPanelToggleLabel">&#9660; collapse</span>
   </div>
   <div id="fdaEventsList"><div style="padding:0.5rem 0.8rem; color:var(--text-tertiary); font-size:0.78rem;">Loading...</div></div>
+  <div class="fda-panel-foot">Straight from FDA feeds — not read by the AI briefing. Clearance IDs link to the FDA's own page; a firm name filters the news to it; click a row for the full text.</div>
 </div>
 
 <div class="section-label">Refine results</div>
@@ -207,5 +208,5 @@
 {% block scripts %}
 <script src="/static/js/rum.js?v=18"></script>
 <script src="/static/js/dashboard.js?v=21"></script>
-<script src="/static/js/markdown.js?v=23"></script>
+<script src="/static/js/markdown.js?v=24"></script>
 {% endblock %}

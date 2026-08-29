@@ -21,6 +21,35 @@ Newest first.
 
 ---
 
+## 2026-08-28 (later) — FDA panel: interactive rows, canonical source links, honest footnote
+
+**What** — Rows in "Recent FDA Actions" are now interactive: clicking a row expands it to the full
+product description + reason (the 120-char clamp was revealed only via title-tooltip — dead on
+touch). Firm names keep their org-filter jump with a real affordance ("Filter the news to this
+company"). 510(k) rows link to the canonical FDA clearance summary page
+(`accessdata.fda.gov/scripts/cdrh/cfdocs/cfpmn/pmn.cfm?ID=<K-number>`, reachability verified by
+hand on K260563 → 200). Enforcement/recall records have no stable public URL (IRES does not
+deep-link; fda.gov search sits behind a bot challenge), so they expand in place instead. Panel
+gains a footnote: straight from FDA feeds, *not read by the AI briefing*, and how to interact.
+
+**Why** — Sidd asked three questions on screenshot review: (1) does the briefing read the panel
+data — no (briefing.py has zero FDA-register awareness; separate design decision deferred, the
+footnote covers the expectation gap), (2) rows aren't clickable — now they are, (3) is
+openfda-agent integrated — it is not; the two systems share only the gateway. No code change on
+Q1/Q3 tonight: mixing register facts into the citation-indexed briefing is a bigger contract move
+than a UI session wants.
+
+**How it was verified** — dev :8016 for syntax/styling; prod re-loaded with live data: panel
+shows (200), rows render badges/firms/dates; 510(k) anchor URL verified live. Smoke suite 20/20
+re-run after the earlier deploy; unchanged files untouched.
+
+**Files** — dashboard/static/js/markdown.js (v24), dashboard/static/css/dashboard.css (v21),
+dashboard/templates/index.html (footnote), dashboard/static/sw.js (shell v27).
+
+**Notes** — Second deploy of the evening inside the same lock discipline. The clickable-reason
+rows deliberately do not use `<details>` to keep the flex row layout.
+
+---
 ## 2026-08-28 — SEC charts you can actually read, the FDA panel back from the dead, and honest hosting claims
 
 **What** —

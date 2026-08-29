@@ -407,12 +407,20 @@ async function loadFdaEvents(hours) {
     countEl.textContent = `(${data.events.length})`;
     list.innerHTML = data.events.slice(0, 50).map(e => {
       const firm = (e.firm_name || '').substring(0, 40);
-      const desc = (e.product_description || e.reason_for_recall || '').substring(0, 120);
+      const fullDesc = (e.product_description || '').trim();
+      const fullReason = (e.reason_for_recall || '').trim();
+      const descFull = (fullDesc + (fullReason && fullReason !== fullDesc ? ' — Reason: ' + fullReason : '')).trim();
+      const descShort = descFull.substring(0, 120);
       const classLabel = e.recall_class ? ` ${e.recall_class.replace(/^Class\s*/i, 'Class ')}` : '';
-      return `<div class="fda-event-row">
+      // 510(k) clearances have a canonical FDA page keyed by the K-number;
+      // enforcement/recall records have no stable public URL - those rows
+      // expand for the full text and the firm name filters the news instead.
+      const srcUrl = e.event_type === '510k'
+        ? `https://www.accessdata.fda.gov/scripts/cdrh/cfdocs/cfpmn/pmn.cfm?ID=${encodeURIComponent(e.event_id)}` : null;
+      return `<div class="fda-event-row" onclick="this.classList.toggle('open')" title="Click to expand">
         <span class="fda-event-badge ${_fdaBadgeClass(e.event_type)}">${_fdaBadgeLabel(e.event_type)}${classLabel}</span>
-        <span class="fda-event-firm" title="${(e.firm_name||'').replace(/"/g,'&quot;')}" onclick="applyFilter('org','${firm.replace(/'/g,"\\'")}') ">${firm}</span>
-        <span class="fda-event-desc" title="${(desc||'').replace(/"/g,'&quot;')}">${desc}</span>
+        <span class="fda-event-firm" title="Filter the news to this company" onclick="event.stopPropagation();applyFilter('org','${firm.replace(/'/g,"\\'")}')">${firm}</span>
+        <span class="fda-event-desc"><span class="d-short">${descShort}</span><span class="d-full">${descFull}</span>${srcUrl ? ` <a class="fda-src" href="${srcUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()">FDA&nbsp;page&nbsp;↗</a>` : ''}</span>
         <span class="fda-event-date">${_fdaDateFmt(e.event_date)}</span>
       </div>`;
     }).join('');

@@ -21,6 +21,57 @@ Newest first.
 
 ---
 
+## 2026-08-28 — SEC charts you can actually read, the FDA panel back from the dead, and honest hosting claims
+
+**What** —
+*SEC page*: every bar now carries its own value printed above it (no hover needed — values were
+tooltip-only, which does not exist on touch), every bar is period-labelled (`Jun 26`, not
+every-other one), the zero baseline is always drawn, a dotted guide marks the window high with
+its figure, and each chart gets one computed takeaway sentence underneath ("Latest: $198M —
+rising in 3 of the last 6 quarters"). The margin chart labels its floor, ceiling, and latest
+point. New template functions `bars_takeaway`/`line_takeaway` in sec_explain keep the no-LLM
+contract: every sentence is a template over stored numbers.
+*FDA panel*: the "Recent FDA Actions" panel now opens on the **FDA agency pill view** (and any
+future fda_match view). It was unreachable before: its JS gate required view kind `fda_match`,
+which zero views have had since the July overhaul converted Medical Device Companies to a pill,
+and even had a view qualified it could not show: `#fdaEventsPanel{display:none}` was never
+overridden (`loadFdaEvents` set inline display to `''`, which falls right back to the stylesheet
+rule — the panel could literally never have been visible since that CSS landed).
+*Copy truth*: the footer said "self-hosted on personal hardware" while the briefing/judge LLM
+runs on Fireworks. Footer now says pipeline & site run on personal hardware, AI writing by a
+hosted open-weights model; About/Methodology attribute the model host (Fireworks) separately
+from our self-hosted gateway. Our own GPU claim stays scoped to embeddings, which it is
+actually true of.
+
+**Why** — Sidd's screenshots said it: the SEC trend charts had no axes, no values, and an
+illegible every-other-tick label — pure Tufte, zero comprehension. The FDA side was invisible
+despite the feature existing (see the two-layer hide above). And the self-hosted claim was
+false advertising the moment briefings left the building.
+
+**How it was verified** — On the dev instance (:8016): tests/test_sec_explain.py 18/18 pass
+incl. 2 new takeaway tests and the byte-identical-copies guard; /sec-analysis?ticker=BAH
+renders 16 value labels, guides, and 3 takeaway sentences (screenshot-reviewed); the FDA view
+shows the panel (empty-state text on the dev slice, whose fda_regulatory_events is empty);
+footer renders the new copy; /api/views intact. All files fresh-fetched from prod and diffed
+pre-deploy.
+
+**Files** — dashboard/routes/sec_analysis.py, dashboard/templates/sec_analysis.html,
+dashboard/static/css/sec.css, dashboard/sec_explain.py, pipeline/sec_explain.py,
+tests/test_sec_explain.py, dashboard/static/js/dashboard.js, dashboard/static/js/markdown.js,
+dashboard/templates/index.html (footer + asset versions), dashboard/templates/about.html,
+dashboard/templates/methodology.html, dashboard/static/sw.js (cache v24→v25).
+
+**Notes** — A wider FDA Companies resurrection (a new `kind=fda_match` view) was built and
+rejected in dev: the name-match feed returned UNESCO-Olympus/Alma-Center/Patterson-flooring
+noise (common-word firm collisions), the GKG cache branch ignores `match_types` entirely, and
+`matched_name` never surfaces into the API payload, so the "FDA co." badge can't render.
+Documents as the follow-up: to revive that view properly, constrain the GKG branch by match
+type, surface matched_name on the unified feed, and gate stripped names semantically. sw.js
+shell-cache only serves `/`; sec-analysis/methodology/about are not shell-cached, so only the
+index shell needed the cache bump.
+
+---
+
 ## 2026-08-26 — Briefings get an editor, and say who they passed over
 
 **What** — The briefing is now two LLM calls. An **editor** reads 40 candidates (up from 12)

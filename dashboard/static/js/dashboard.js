@@ -224,9 +224,10 @@ function updateUrl() {
 // view. Called from the view pill click handler and from init (via
 // fetchViews). Data-driven: reads `available_match_types` off the view.
 function renderMatchProfile() {
-  // Show or hide the FDA Events panel based on whether an FDA view is active
+  // Show or hide the FDA Events panel: on FDA-company views (kind fda_match)
+  // and on the FDA agency pill, where the panel complements regulatory news.
   const curView = state.view ? viewsById[state.view] : null;
-  if (curView && curView.kind === 'fda_match') {
+  if (curView && (curView.kind === 'fda_match' || curView.id === 'fda-agency')) {
     if (!_fdaEventsLoaded) loadFdaEvents(state.hours || 168);
   } else {
     hideFdaPanel();

@@ -106,15 +106,35 @@ footer {
   color: var(--text-tertiary); font-size: 0.72rem;
 }
 .sec-chart { width: 100%; height: auto; overflow: visible; }
-.sec-chart .bar { fill: var(--accent-brand); opacity: 0.85; }
+.sec-chart .bar { fill: var(--accent-brand); opacity: 0.72; }
+.sec-chart .bar.latest { opacity: 1; }
 .sec-chart .bar.annual { opacity: 1; }
 .sec-chart .bar.neg, .sec-chart.ni .bar.neg { fill: var(--neg); opacity: 0.9; }
 .sec-chart.ni .bar { fill: var(--ni-bar); }
 .sec-chart .axis { stroke: var(--text-tertiary); stroke-width: 1; opacity: 0.55; }
 .sec-chart .axis.dashed { stroke-dasharray: 3 3; }
-.sec-chart .tick { font-size: 8px; fill: var(--text-tertiary); text-anchor: middle; }
+.sec-chart .tick { font-size: 8.5px; fill: var(--text-tertiary); text-anchor: middle; }
+/* Direct value labels: no axes, no hover-dependency. NYT idiom - a reader
+   should never need a legend or a tooltip to read a value. */
+.sec-chart .vlab {
+  font-size: 8.5px; fill: var(--text-tertiary); text-anchor: middle;
+  font-variant-numeric: tabular-nums;
+}
+.sec-chart .vlab.latest { fill: var(--text); font-weight: 600; }
+.sec-chart .guide { stroke: var(--border); stroke-width: 1; stroke-dasharray: 2 3; }
+.sec-chart .glab { font-size: 8px; fill: var(--text-tertiary); }
 .sec-chart .trend { fill: none; stroke: var(--accent-brand); stroke-width: 1.8; }
 .sec-chart .dot { fill: var(--accent-brand); }
+
+/* One computed sentence under each chart saying what to take from it. */
+.cap-take {
+  font-size: 0.78rem; color: var(--text-secondary); line-height: 1.45;
+  margin: 0.15rem 0 1.1rem;
+}
+.cap-trend-intro {
+  font-size: 0.78rem; color: var(--text-tertiary); line-height: 1.5;
+  margin: -0.2rem 0 0.9rem;
+}
 
 /* ── history table ─────────────────────────────────────────────────────── */
 .sec-scroll { overflow-x: auto; }

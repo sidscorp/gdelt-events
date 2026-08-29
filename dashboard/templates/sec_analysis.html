@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block title %}{% if company %}{{ company.name }} financials{% else %}Company Financials{% endif %} — GDELT Monitor{% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/sec.css?v=2">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/sec.css?v=3">{% endblock %}
 {% block content %}
 
 <h1>Company Financials</h1>
@@ -79,35 +79,52 @@
 
   <div>
     <h2>Trend</h2>
+    <p class="cap-trend-intro">Two numbers over the past ten reporting periods. Every bar
+      carries its own value and every bar is labelled, so nothing depends on hovering.
+      The dotted line marks the highest point in the window, for scale.</p>
     {% macro barchart(c, title, help, cls) %}
     {% if c %}
     <figure class="sec-fig">
       <figcaption>{{ title }} <span class="cap-basis">{{ c.basis }}</span><span class="cap-help">{{ help }}</span></figcaption>
       <svg viewBox="0 0 {{ c.width }} {{ c.height }}" class="sec-chart {{ cls }}" role="img" aria-label="{{ title }}">
-        {% if c.show_zero %}<line x1="0" y1="{{ c.zero_y }}" x2="{{ c.width }}" y2="{{ c.zero_y }}" class="axis"/>{% endif %}
+        <line x1="0" y1="{{ c.zero_y }}" x2="{{ c.width }}" y2="{{ c.zero_y }}" class="axis"/>
+        {% if c.hi_label %}
+        <line x1="0" y1="{{ c.hi_y }}" x2="{{ c.width }}" y2="{{ c.hi_y }}" class="guide"/>
+        <text x="0" y="{{ c.hi_y - 3 }}" class="glab">{{ c.hi_label }}</text>
+        {% endif %}
         {% for b in c.bars %}
           <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"
-                class="bar{% if b.neg %} neg{% endif %}"><title>{{ b.label }}: {{ b.value }}</title></rect>
-          {% if loop.index0 % 2 == 0 or loop.last %}<text x="{{ b.cx }}" y="{{ c.height - 4 }}" class="tick">{{ b.label }}</text>{% endif %}
+                class="bar{% if b.neg %} neg{% endif %}{% if b.latest %} latest{% endif %}"><title>{{ b.label }}: {{ b.value }}</title></rect>
+          <text x="{{ b.cx }}" y="{{ b.vy }}" class="vlab{% if b.latest %} latest{% endif %}">{{ b.value }}</text>
+          <text x="{{ b.cx }}" y="{{ c.height - 4 }}" class="tick">{{ b.label }}</text>
         {% endfor %}
       </svg>
+      {% if c.take %}<p class="cap-take">{{ c.take }}</p>{% endif %}
     </figure>
     {% endif %}
     {% endmacro %}
 
-    {{ barchart(rev_chart, 'Revenue', 'Every bar covers the same length of time, so heights are directly comparable. Hover for values.', 'rev') }}
-    {{ barchart(ni_chart, 'Net income', 'Bars below the line are losses.', 'ni') }}
+    {{ barchart(rev_chart, 'Revenue', 'Each bar is one quarter of sales — all money taken in, before costs. Taller means more business was done.', 'rev') }}
+    {{ barchart(ni_chart, 'Net income', 'What is left after every cost, including tax. Bars hanging below the solid line are quarters at a loss.', 'ni') }}
 
     {% if margin_chart %}
     <figure class="sec-fig">
       <figcaption>Operating margin
-        <span class="cap-help">Share of every revenue dollar kept as operating profit. Range shown: {{ margin_chart.lo }} to {{ margin_chart.hi }}. Rising means the business is getting more efficient.</span>
+        <span class="cap-help">The share of each revenue dollar kept as operating profit — rising means the business is getting more efficient per dollar of sales.</span>
       </figcaption>
       <svg viewBox="0 0 {{ margin_chart.width }} {{ margin_chart.height }}" class="sec-chart line" role="img" aria-label="Operating margin trend">
         {% if margin_chart.zero_y %}<line x1="0" y1="{{ margin_chart.zero_y }}" x2="{{ margin_chart.width }}" y2="{{ margin_chart.zero_y }}" class="axis dashed"/>{% endif %}
+        <line x1="0" y1="{{ margin_chart.hi_y }}" x2="{{ margin_chart.width }}" y2="{{ margin_chart.hi_y }}" class="guide"/>
+        <text x="0" y="{{ margin_chart.hi_y + 9 }}" class="glab">{{ margin_chart.hi }} high</text>
+        <line x1="0" y1="{{ margin_chart.lo_y }}" x2="{{ margin_chart.width }}" y2="{{ margin_chart.lo_y }}" class="guide"/>
+        <text x="0" y="{{ margin_chart.lo_y - 3 }}" class="glab">{{ margin_chart.lo }} low</text>
         <polyline points="{{ margin_chart.points }}" class="trend"/>
         {% for d in margin_chart.dots %}<circle cx="{{ d.x }}" cy="{{ d.y }}" r="2.5" class="dot"><title>{{ d.label }}: {{ d.value }}</title></circle>{% endfor %}
+        <text x="{{ margin_chart.last.x }}" y="{{ margin_chart.last.y - 6 }}" class="vlab latest" text-anchor="end">{{ margin_chart.last.value }}</text>
+        <text x="0" y="{{ margin_chart.height + 9 }}" class="tick" text-anchor="start">{{ margin_chart.first.label }}</text>
+        <text x="{{ margin_chart.width }}" y="{{ margin_chart.height + 9 }}" class="tick" text-anchor="end">{{ margin_chart.last.label }}</text>
       </svg>
+      {% if margin_chart.take %}<p class="cap-take">{{ margin_chart.take }}</p>{% endif %}
     </figure>
     {% endif %}
   </div>

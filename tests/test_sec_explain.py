@@ -16,8 +16,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pipeline.sec_derive import compute_for_company, _pct_change, _percentile  # noqa: E402
 from pipeline.sec_explain import (  # noqa: E402
-    observations, rule_decline_streak, rule_leverage, rule_loss, rule_margin_move,
-    rule_nonoperating, rule_revenue_growth, rule_sector_position,
+    bars_takeaway, line_takeaway, observations, rule_decline_streak,
+    rule_leverage, rule_loss, rule_margin_move, rule_nonoperating,
+    rule_revenue_growth, rule_sector_position,
 )
 
 GOOGL_CO = {"sic": "7370", "sic_description": "Services-Computer Programming"}
@@ -198,6 +199,26 @@ def test_missing_revenue_explains_itself():
     obs = observations(_snap(net_income=16_500_000_000), {}, {})
     assert any("does not tag" in o.text for o in obs), \
         "a bank with no revenue line should say why, not show a dash"
+
+
+# ── chart takeaways ────────────────────────────────────────────────────────────
+
+def test_bars_takeaway_calls_out_window_high_and_low():
+    t = bars_takeaway("Revenue", [100, 120, 90, 140], "quarterly")
+    assert "$140" in t and "highest" in t, t
+    t = bars_takeaway("Net income", [50, 40, 10], "quarterly")
+    assert "lowest" in t, t
+    t = bars_takeaway("Revenue", [100, 90, 130, 120], "annual")
+    assert "years" in t and "rising in 1 of the last 3" in t, t
+    assert bars_takeaway("Revenue", [100], "quarterly") is None
+
+
+def test_line_takeaway_states_direction():
+    t = line_takeaway([0.10, 0.14, 0.20])
+    assert "widened" in t and "10.0%" in t and "20.0%" in t, t
+    assert "narrowed" in line_takeaway([0.30, 0.22, 0.15])
+    assert "flat" in line_takeaway([0.300, 0.304, 0.301]).lower()
+    assert line_takeaway([0.1, 0.2]) is None
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ from datetime import date, timedelta
 from flask import Blueprint, render_template, request
 
 from _paths import DATA_DIR
+from sec_explain import bars_takeaway, line_takeaway, observations
 from sec_search import search as company_search
 
 bp = Blueprint("sec_analysis", __name__)
@@ -192,8 +193,26 @@ def _metric_rows(latest: dict, spec: dict) -> tuple[list[dict], list[str]]:
 # The site loads no charting library and no external JS; these are built as
 # markup so they render server-side, work with JS disabled and stay crawlable.
 # Colours come from CSS custom properties so light and dark both work.
+#
+# Readability contract (2026-08-28): no naked bars. Every bar carries its value
+# (tooltips do not exist on touch), every bar is period-labelled, the zero
+# baseline is always drawn, the range ceiling is a guide line with its figure,
+# and each chart gets one computed takeaway sentence underneath.
 
-def _bar_chart(periods: list[dict], key: str, width=560, height=120) -> dict | None:
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun",
+           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")
+
+
+def _short_label(pe: str) -> str:
+    """'2026-06-30' -> 'Jun 26'. Every bar gets one, so they must stay short."""
+    try:
+        return f"{_MONTHS[int(pe[5:7]) - 1]} {pe[2:4]}"
+    except (ValueError, IndexError):
+        return pe[:7]
+
+
+def _bar_chart(periods: list[dict], key: str, label: str = "Values",
+               width=560, height=152) -> dict | None:
     """Bars for one metric over time, oldest left, ALL THE SAME PERIOD LENGTH.
 
     Mixing a full year in among quarters put a bar four times the height of its
@@ -215,13 +234,17 @@ def _bar_chart(periods: list[dict], key: str, width=560, height=120) -> dict | N
     hi = max(hi, 0)
     lo = min(lo, 0)
     span = (hi - lo) or 1
-    pad_l, pad_b = 4, 16
+    pad_l, pad_t, pad_b = 4, 14, 16
     bw = (width - pad_l * 2) / len(pts)
-    zero_y = (height - pad_b) - ((0 - lo) / span) * (height - pad_b - 6)
+
+    def y_of(v):
+        return (height - pad_b) - ((v - lo) / span) * (height - pad_b - pad_t)
+
+    zero_y = y_of(0)
 
     bars = []
     for i, (pe, v, fp) in enumerate(pts):
-        y_val = (height - pad_b) - ((v - lo) / span) * (height - pad_b - 6)
+        y_val = y_of(v)
         top, h = min(y_val, zero_y), abs(y_val - zero_y)
         bars.append({
             "x": round(pad_l + i * bw + bw * 0.15, 1),
@@ -230,16 +253,25 @@ def _bar_chart(periods: list[dict], key: str, width=560, height=120) -> dict | N
             "h": round(max(h, 1.5), 1),
             "neg": v < 0,
             "annual": fp == "FY",
-            "label": pe[:7],
+            "label": _short_label(pe),
             "value": _fmt_usd(v),
             "cx": round(pad_l + i * bw + bw / 2, 1),
+            "vy": round(y_val - 4 if v >= 0 else y_val + 10, 1),
+            "latest": i == len(pts) - 1,
         })
     return {"bars": bars, "width": width, "height": height, "basis": basis,
-            "zero_y": round(zero_y, 1), "show_zero": lo < 0}
+            "zero_y": round(zero_y, 1),
+            "hi_label": f"top value {_fmt_usd(hi)}" if hi > 0 else None,
+            "hi_y": round(y_of(hi), 1),
+            "take": bars_takeaway(label, vals, basis)}
 
 
-def _line_chart(periods: list[dict], key: str, width=560, height=110) -> dict | None:
-    """Margin trend as a polyline, with a dashed zero line when it crosses."""
+def _line_chart(periods: list[dict], key: str, width=560, height=118) -> dict | None:
+    """Margin trend as a polyline, with a dashed zero line when it crosses.
+
+    Range guides label the ceiling and floor figures; the first and last points
+    are labelled directly, in the NYT idiom where a reader never needs a legend.
+    """
     q = [p for p in periods if p.get("fp") != "FY"]
     src = q if len([p for p in q if p.get(key) is not None]) >= 3 else periods
     pts = [(p["period_end"], p.get(key)) for p in reversed(src) if p.get(key) is not None]
@@ -258,11 +290,18 @@ def _line_chart(periods: list[dict], key: str, width=560, height=110) -> dict | 
     zero_y = None
     if lo < 0 < hi:
         zero_y = round((height - pad) - ((0 - lo) / span) * (height - pad * 2), 1)
+    hi_y = round((height - pad) - ((hi - lo) / span) * (height - pad * 2), 1)
+    lo_y = round((height - pad) - ((lo - lo) / span) * (height - pad * 2), 1)
     return {"points": " ".join(f"{x},{y}" for x, y in coords),
             "dots": [{"x": x, "y": y, "value": _fmt_pct(v), "label": pe[:7]}
                      for (x, y), (pe, v) in zip(coords, pts)],
+            "first": {"x": coords[0][0], "y": coords[0][1],
+                      "value": _fmt_pct(vals[0]), "label": _short_label(pts[0][0])},
+            "last": {"x": coords[-1][0], "y": coords[-1][1],
+                     "value": _fmt_pct(vals[-1]), "label": _short_label(pts[-1][0])},
             "width": width, "height": height, "zero_y": zero_y,
-            "hi": _fmt_pct(hi), "lo": _fmt_pct(lo)}
+            "hi": _fmt_pct(hi), "lo": _fmt_pct(lo), "hi_y": hi_y, "lo_y": lo_y,
+            "take": line_takeaway(vals)}
 
 
 # DEFERRED: pairing filings with news coverage.
@@ -350,8 +389,8 @@ def sec_analysis():
         ctx["periods"] = periods[:PERIODS_SHOWN]
         ctx["latest"] = periods[0]
         chart_src = periods[:CHART_PERIODS]
-        ctx["rev_chart"] = _bar_chart(chart_src, "revenue")
-        ctx["ni_chart"] = _bar_chart(chart_src, "net_income")
+        ctx["rev_chart"] = _bar_chart(chart_src, "revenue", "Revenue")
+        ctx["ni_chart"] = _bar_chart(chart_src, "net_income", "Net income")
         ctx["margin_chart"] = _line_chart(chart_src, "operating_margin")
 
         spec = _filer_class(best.get("sic"))
@@ -375,7 +414,6 @@ def sec_analysis():
                     "negative_equity": eq < 0,
                 }
 
-        from sec_explain import observations
         # Tell the rules what the page already explains, so they do not repeat it.
         best = dict(best)
         best["framed"] = bool(spec.get("framing"))

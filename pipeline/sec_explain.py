@@ -230,3 +230,36 @@ def observations(snapshot: dict, derived: dict, company: dict,
         seen.add(o.kind)
         kept.append(o)
     return kept[:limit]
+
+
+# ── chart takeaways ──────────────────────────────────────────────────────────
+# Same contract as the observation rules: a template filled from the series the
+# chart was drawn with, so it can only restate what the reader can already see.
+# A chart without a takeaway sentence was unreadable to non-finance visitors -
+# they got shape with no scale - and tooltip-only values do not exist on touch.
+
+def bars_takeaway(label: str, vals: list[float], basis: str) -> str | None:
+    """One sentence summarising a bar series, computed from the bars themselves."""
+    if len(vals) < 2:
+        return None
+    unit = "quarters" if basis == "quarterly" else "years"
+    latest, rest = vals[-1], vals[:-1]
+    if latest >= max(rest):
+        trend = f"the highest of the {len(vals)} {unit} shown"
+    elif latest <= min(rest):
+        trend = f"the lowest of the {len(vals)} {unit} shown"
+    else:
+        ups = sum(1 for a, b in zip(vals, vals[1:]) if b > a)
+        trend = f"rising in {ups} of the last {len(vals) - 1} {unit}"
+    return f"Latest: {_usd(latest)} — {trend}."
+
+
+def line_takeaway(vals: list[float]) -> str | None:
+    """Direction of a margin series, first to last, in words."""
+    if len(vals) < 3:
+        return None
+    first, last = vals[0], vals[-1]
+    if abs(last - first) < 0.005:
+        return f"Broadly flat around {_pct(last)} across the period shown."
+    direction = "widened" if last > first else "narrowed"
+    return f"It has {direction} from {_pct(first)} to {_pct(last)} across the period shown."

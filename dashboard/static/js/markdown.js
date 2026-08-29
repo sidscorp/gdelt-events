@@ -387,11 +387,15 @@ async function loadFdaEvents(hours) {
   const list = document.getElementById('fdaEventsList');
   const countEl = document.getElementById('fdaEventCount');
   if (!panel) return;
-  panel.style.display = '';
+  // display:'' alone does NOT show the panel - the stylesheet keeps the id at
+  // display:none, so clearing the inline style falls back to hidden.
+  panel.style.display = 'block';
   _fdaEventsLoaded = true;
 
-  // Convert hours to days for the API
-  const days = Math.max(1, Math.min(90, Math.ceil((hours || 168) / 24)));
+  // Convert hours to days for the API. Floor at 30: FDA regenerates these feeds
+  // weekly (510(k)s monthly), so a raw 24h feed window almost always reads
+  // "No FDA regulatory actions" — a true-but-misleading empty state.
+  const days = Math.max(30, Math.min(90, Math.ceil((hours || 168) / 24)));
   try {
     const resp = await fetch(`/api/fda_events?days=${days}`);
     const data = await resp.json();

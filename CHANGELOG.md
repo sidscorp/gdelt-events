@@ -21,6 +21,80 @@ Newest first.
 
 ---
 
+## 2026-08-29 (later) - Phase 0: the dev slice can be rebuilt again, and the sec-tracker 404 loop is identified
+
+**What** - Two open wounds from PLAN-100X Phase 0.
+(1) Added the missing `scripts/build_dev_snapshot.py`. `rebuild_dev_slice.ps1` has invoked it
+since it was written, but the script was never committed and existed nowhere on disk, so every
+rebuild failed rc=2 and the dev slice sat frozen at 2026-07-19..07-26.
+(2) Identified what actually produces the endless `GET /api/watchlist/status` 404s on
+sec-tracker. **It is not the frontend.** See below - the fix is a one-line kill and is pending
+Sidd's go-ahead, so this item is diagnosed, not yet closed.
+
+**Why** - The dev slice being five weeks stale made dev-first verification worthless: any
+short-window assertion (`hours=1`, `hours=24`) fails against a stale snapshot regardless of the
+code under test, so the instruction to "test on :8016 first" could not be followed. It already
+cost the entity-spine work (2026-08-29 earlier entry), which had to be built with dry runs
+against prod instead.
+
+**How it was verified** - `rebuild_dev_slice.ps1` end to end: rc=0 in 19s, dev dashboard came
+back healthy on :8016. Slice window moved from 2026-07-19..07-26 to
+**2026-08-22 19:46 .. 2026-08-29 22:47**, latest article 53 minutes old, 1,818,352 rows total
+(gal 782,451 / gal_recent 782,451 / gkg 140,024 / article_tags 29,384 / clusters 1,836 /
+cluster_members 5,774 + the reference tables whole). `tests/smoke.sh` run from the Mac against
+`BASE=http://rainbow-boi:8016`: **20/20**. Prod smoke re-run: 20/20.
+
+**Files** - `scripts/build_dev_snapshot.py` (new).
+
+**Notes** -
+
+*The slice is keyed on `crawled_at`, not `published_at`.* `gal.published_at` holds values from
+2025 through 2026-12 because publishers lie in their metadata, so slicing on it yields an
+incoherent window with a random tail. `crawled_at` is our own ingest clock. This is also what
+`gal_recent` is really maintained on - it holds ~8 days of crawls while its own `published_at`
+range spans 2025-08..2026-12 - so keying on `crawled_at` reproduces prod's true shape, garbage
+publication timestamps included, which is the point of a fidelity slice.
+
+*`gal_recent` was missing from the old dev slice and that quietly invalidated dev testing.*
+`dashboard/articles.py::_has_gal_recent` routes around the table when it is absent, so dev was
+exercising a **different query path than prod** - a dev-first check could pass on code that
+fails in production. It is copied now.
+
+*`events` (3.6M rows) and `mentions` (9.7M rows) are deliberately not copied.* Neither table is
+read by anything: there is no `FROM events` or `FROM mentions` anywhere in `dashboard/` or
+`pipeline/`. They are ingested and never queried. Copying them would several-times the rebuild
+for data nothing looks at. Worth a separate look at whether they should still be ingested.
+
+*The slice is built into a new file and swapped, not rebuilt in place.* DuckDB does not return
+freed pages to the OS, so `CREATE OR REPLACE` in place grows the dev database on every run. The
+build also refuses to swap in a slice where any of gal/gal_recent/gkg/article_tags/fda_companies
+came out empty, and leaves the previous database at `gdelt.duckdb.prev`. A dropped SSH mid-build
+therefore leaves the working dev database untouched.
+
+*Second phantom reference, not fixed.* `rebuild_dev_slice.ps1`'s header points at
+`scripts/kick_rebuild.ps1` for the one-shot-task pattern. That file does not exist either. The
+rebuild is short enough (19s) that running it directly over SSH is fine, so this is recorded
+rather than fixed.
+
+*The sec-tracker 404 loop: the documented diagnosis is wrong.* PLAN-100X and the skill doc both
+say "frontend 5s-polls `/api/watchlist/status` -> 404 forever". The frontend does no such thing:
+there is no reference to `watchlist` and no `setInterval` anywhere in
+`~/projects/sec-tracker/frontend/src` or in the built `dist` bundle, and nginx has logged exactly
+one request for that path ever (24/May/2026, from curl). A `tcpdump` on loopback shows the real
+caller is `User-Agent: curl/8.5.0` against `localhost:8111`. It is **PID 2093467, parent PID 1,
+uptime 96 days 23 hours** - an orphaned shell loop:
+
+    zsh -c until curl -s 'http://localhost:8111/api/watchlist/status' |
+      python3 -c '...exit(0 if d.get("warm_status") == "idle" else 1)'; do sleep 5; done
+
+An agent session on 2026-05-24 launched it to wait for a cache warm, the endpoint 404s so the
+JSON parse never yields `warm_status == "idle"`, the loop's exit condition is unreachable, and it
+has re-polled every 5 seconds ever since - on the order of 1.7 million requests. It was
+reparented to init when that session ended. The correct fix is to kill PID 2093467; implementing
+the endpoint would merely feed a runaway loop that nothing is waiting on. **Not yet done** - the
+kill needs Sidd's approval. This is the same class as the documented "ssh-spawned processes
+survive as unkillable orphans" gotcha, which until now was only recorded against rainbow-boi.
+
 ## 2026-08-29 - Entity spine: entity_registry + tiered alias table (PLAN-100X Phase 1)
 
 **What** - New `pipeline/entity_registry.py` builds two tables in `data/gdelt.duckdb`:

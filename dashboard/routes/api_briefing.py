@@ -462,6 +462,75 @@ def api_fda_events():
     return jsonify({"events": events, "days": days, "total": len(events)})
 
 
+@bp.route("/api/briefing_history")
+def api_briefing_history():
+    """Snapshot list for one (view, hours) combo — powers the briefing timeline.
+
+    Pure metadata (id, time, count) so the strip is cheap; the full briefing
+    body comes from /api/briefing_history/<id> on demand. History is recorded
+    since 2026-07-26 and is dominated by prewarmed combos — that is why the
+    UI lists rather than implying continuous coverage.
+    """
+    raw_view = (request.args.get("view") or "").strip()
+    view_id = raw_view or "_all"   # global briefing is stored under '_all'
+    try:
+        hours = max(1, min(720, int(request.args.get("hours", 24) or 24)))
+    except (TypeError, ValueError):
+        hours = 24
+
+    try:
+        from models import get_user_db
+        con = get_user_db()
+        try:
+            rows = con.execute(
+                "SELECT id, generated_at, article_count, trigger "
+                "FROM briefing_history WHERE view_id = ? AND hours = ? "
+                "ORDER BY generated_at DESC LIMIT 60",
+                (view_id, hours),
+            ).fetchall()
+        finally:
+            con.close()
+    except Exception as e:
+        return jsonify({"snapshots": [], "error": str(e)}), 500
+
+    snapshots = [
+        {"id": r["id"], "generated_at": r["generated_at"],
+         "article_count": r["article_count"], "trigger": r["trigger"]}
+        for r in rows
+    ]
+    return jsonify({"view": raw_view, "hours": hours,
+                    "snapshots": snapshots, "total": len(snapshots)})
+
+
+@bp.route("/api/briefing_history/<int:bid>")
+def api_briefing_history_item(bid):
+    """One stored briefing, for the timeline view."""
+    try:
+        from models import get_user_db
+        con = get_user_db()
+        try:
+            row = con.execute(
+                "SELECT view_id, hours, generated_at, briefing, article_count, sources_json "
+                "FROM briefing_history WHERE id = ?",
+                (bid,),
+            ).fetchone()
+        finally:
+            con.close()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    if row is None:
+        return jsonify({"error": "Not found"}), 404
+    return jsonify({
+        "id": bid,
+        "view": "" if row["view_id"] == "_all" else row["view_id"],
+        "hours": row["hours"],
+        "generated_at": row["generated_at"],
+        "briefing": row["briefing"],
+        "article_count": row["article_count"],
+        "sources": json.loads(row["sources_json"]) if row["sources_json"] else [],
+    })
+
+
 # --- Pageview tracking (privacy-safe: daily-salted IP hash, no raw IP) ---
 
 def _ip_hash():

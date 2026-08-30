@@ -216,6 +216,7 @@ async function fetchBriefing() {
   if (_briefingView !== null && view === _briefingView && hours === _briefingHours) return;
   _briefingView = view;
   _briefingHours = hours;
+  if (typeof _histExit === 'function') _histExit();
   stopFreshnessTicker();
   const frEl = document.getElementById('briefingFreshness');
   if (frEl) frEl.innerHTML = '';
@@ -389,6 +390,7 @@ function hideBriefProgress() {
           if (data.generated_at || data.cache_ttl_s) {
             startFreshnessTicker(data.generated_at, data.cache_ttl_s, data.article_count);
           }
+          updateBriefHistoryLink();
         }
       } catch (_) {}
       return false;
@@ -510,3 +512,135 @@ function hideFdaPanel() {
   _fdaEventsLoaded = false;
 }
 
+
+// ---------------------------------------------------------------------------
+// Briefing timeline ("scroll back in time")
+//
+// briefing_history has kept one row per briefing generation since 2026-07-26
+// (~3k rows, growing ~70/day, mostly prewarm-driven for the popular combos).
+// This module shows a snapshot strip for the current view|hours, renders a
+// stored briefing through the same renderer as the live one on click, and a
+// single click returns to live with the freshness ticker restored.
+// ---------------------------------------------------------------------------
+let _histList = null;     // snapshots for the current view|hours
+let _histKey = null;
+let _histOpen = false;
+let _histViewing = null;  // briefing_history id currently displayed
+let _liveBackup = null;   // {html, meta} to restore the live briefing
+
+function _histHost() {
+  return document.getElementById('briefHist');
+}
+function _histPanel() {
+  return document.getElementById('briefHistPanel');
+}
+function _histFmt(ts) {
+  // stored 'YYYY-MM-DD HH:MM:SS' is UTC; render local with day context
+  const d = new Date(ts.replace(' ', 'T') + 'Z');
+  if (isNaN(d)) return ts;
+  const now = new Date();
+  const dayAgo = (now - d) / 864e5;
+  const hhmm = d.toTimeString().slice(0, 5);
+  if (dayAgo < 1 && d.getDate() === now.getDate()) return 'today ' + hhmm;
+  if (dayAgo < 2) return 'yesterday ' + hhmm;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + hhmm;
+}
+
+async function updateBriefHistoryLink() {
+  const host = _histHost();
+  if (!host) return;
+  const view = (typeof state !== 'undefined' && state.view) ? state.view : '';
+  const hours = (typeof state !== 'undefined' && state.hours) ? state.hours : 24;
+  const key = view + '|' + hours;
+  if (_histKey !== key) {
+    _histKey = key; _histList = null; _histOpen = false;
+    host.innerHTML = '';
+  }
+  try {
+    const r = await fetch('/api/briefing_history?view=' + encodeURIComponent(view) + '&hours=' + hours);
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!d.snapshots || d.snapshots.length < 2) return;  // a list of one shows nothing
+    _histList = d.snapshots;
+    if (_histOpen) _histRenderList();
+    else host.innerHTML =
+      '<button class="brief-hist-toggle" onclick="toggleBriefHistory()" title="See what past briefings said">' +
+      '⏱ ' + d.total + ' past briefings</button>';
+  } catch (_) {}
+}
+
+function toggleBriefHistory() {
+  _histOpen = !_histOpen;
+  const host = _histHost();
+  if (!_histOpen) { hideBriefHistory(); return; }
+  _histRenderList();
+  host.innerHTML =
+    '<button class="brief-hist-toggle open" onclick="toggleBriefHistory()">⏱ hide history</button>';
+}
+
+function hideBriefHistory() {
+  _histOpen = false;
+  const p = _histPanel();
+  if (p) { p.style.display = 'none'; p.innerHTML = ''; }
+  const host = _histHost();
+  if (host && _histList && _histList.length > 1 && !_histViewing) {
+    host.innerHTML = '<button class="brief-hist-toggle" onclick="toggleBriefHistory()">⏱ ' +
+      _histList.length + ' past briefings</button>';
+  }
+}
+
+function _histRenderList() {
+  const p = _histPanel();
+  if (!p || !_histList) return;
+  p.innerHTML = _histList.map(s =>
+    '<button class="brief-hist-item" data-bid="' + s.id + '" onclick="viewBriefSnapshot(' + s.id + ')">' +
+      '<span class="hist-t">' + _histFmt(s.generated_at) + '</span>' +
+      '<span class="hist-meta">' + (s.article_count || 0) + ' articles' +
+        (s.trigger === 'visit' ? ' · viewed live' : '') + '</span>' +
+    '</button>'
+  ).join('');
+  p.style.display = 'block';
+}
+
+async function viewBriefSnapshot(id) {
+  const textEl = document.getElementById('briefingText');
+  const metaEl = document.getElementById('briefingMeta');
+  if (!textEl) return;
+  // Snapshot the live briefing once so "back to latest" is instant and correct.
+  if (!_liveBackup) {
+    _liveBackup = { html: textEl.innerHTML, meta: metaEl ? metaEl.textContent : '' };
+  }
+  try {
+    const r = await fetch('/api/briefing_history/' + id);
+    if (!r.ok) return;
+    const d = await r.json();
+    _histViewing = id;
+    stopFreshnessTicker();
+    textEl.innerHTML =
+      '<div class="hist-banner">You are reading the briefing as of <strong>' +
+        _histFmt(d.generated_at) + '</strong> — ' + (d.article_count || 0) + ' articles then. ' +
+        '<button class="hist-back" onclick="backToLiveBriefing()">back to the live briefing</button></div>' +
+      linkifyCitations(renderMd(d.briefing || ''), d.sources || []);
+    if (metaEl) metaEl.textContent = 'Historical snapshot';
+    textEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  } catch (_) {}
+}
+
+function _histExit() {
+  // Called whenever the live flow takes over (view change, refetch, dismiss).
+  if (!_histViewing) return;
+  backToLiveBriefing();
+  hideBriefHistory();
+}
+
+function backToLiveBriefing() {
+  const textEl = document.getElementById('briefingText');
+  const metaEl = document.getElementById('briefingMeta');
+  if (textEl && _liveBackup) textEl.innerHTML = _liveBackup.html;
+  if (metaEl && _liveBackup) metaEl.textContent = _liveBackup.meta;
+  _liveBackup = null;
+  _histViewing = null;
+  if (_freshnessData) startFreshnessTicker(_freshnessData.generatedAt, _freshnessData.ttlS, _freshnessData.articleCount);
+}
+
+document.addEventListener('DOMContentLoaded', () => setTimeout(updateBriefHistoryLink, 2000));

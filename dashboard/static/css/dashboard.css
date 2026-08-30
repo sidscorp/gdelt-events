@@ -1151,3 +1151,39 @@ header h1 {
 }
 #stickyMeta { margin-left: auto; color: var(--text-tertiary); font-size: 0.72rem; white-space: nowrap; }
 @media (max-width: 560px) { #stickyMeta { display: none; } }
+
+/* Briefing timeline strip (2026-08-30): snapshot list + history banner */
+.brief-hist { margin-top: 0.25rem; }
+.brief-hist-toggle {
+  font-family: inherit; font-size: 0.72rem; color: var(--text-tertiary);
+  background: none; border: 1px solid var(--border); border-radius: 999px;
+  padding: 0.1rem 0.6rem; cursor: pointer;
+}
+.brief-hist-toggle:hover, .brief-hist-toggle.open {
+  color: var(--accent-brand); border-color: var(--accent-brand);
+}
+.brief-hist-panel {
+  margin-top: 0.35rem; border: 1px solid var(--border); border-radius: 6px;
+  max-height: 190px; overflow-y: auto; background: var(--surface);
+}
+.brief-hist-item {
+  display: flex; gap: 0.6rem; align-items: baseline; width: 100%; text-align: left;
+  font-family: inherit; font-size: 0.75rem; background: none; border: none;
+  border-bottom: 1px solid var(--border); padding: 0.35rem 0.7rem; cursor: pointer;
+  color: var(--text-secondary);
+}
+.brief-hist-item:last-child { border-bottom: none; }
+.brief-hist-item:hover { background: var(--bg-hover); }
+.brief-hist-item .hist-t { font-weight: 600; color: var(--text); white-space: nowrap; }
+.brief-hist-item .hist-meta { color: var(--text-tertiary); font-size: 0.7rem; }
+.hist-banner {
+  font-size: 0.78rem; color: var(--text-secondary); line-height: 1.5;
+  border-left: 2px solid var(--accent-brand); padding: 0.35rem 0.7rem;
+  margin-bottom: 0.7rem; background: var(--surface);
+}
+.hist-back {
+  font-family: inherit; font-size: 0.75rem; cursor: pointer;
+  color: var(--accent-brand); background: none; border: 1px solid var(--accent-brand);
+  border-radius: 999px; padding: 0.05rem 0.5rem; margin-left: 0.4rem;
+}
+.hist-back:hover { background: var(--accent-soft); }

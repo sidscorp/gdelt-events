@@ -21,6 +21,35 @@ Newest first.
 
 ---
 
+## 2026-08-30 — Briefing timeline ("scroll back in time")
+
+**What** — Every briefing card now carries a "⏱ N past briefings" affordance listing the snapshots
+stored for that exact view+window in `briefing_history` (3,005 rows since 2026-07-26). Clicking one
+renders the stored briefing through the same markdown pipeline and shows a banner ("You are reading
+the briefing as of … — back to the live briefing"); the back path restores the verbatim live state
+and restarts the freshness ticker. New read-only endpoints `/api/briefing_history?view=&hours=` and
+`/api/briefing_history/<id>`.
+
+**Why** — Sidd asked "we are keeping track of briefings over time, right?" — we were, silently, at
+~70 snapshots/day, and nobody could see any of it. This turns the most expensive artifact the site
+produces (LLM-written briefings) into a browsable continuity record.
+
+**How it was verified** — Dev (:8016) end-to-end in a real browser: toggle appeared with the real
+count, the snapshot list opened, a stored briefing rendered with the banner, and back-to-live
+restored state with the ticker running. Global 24h on dev returned 3 snapshots and full body text
+from both endpoints. `node --check` passes on the edited markdown.js.
+
+**Files** — dashboard/routes/api_briefing.py, dashboard/static/js/markdown.js (v27),
+dashboard/templates/index.html (#briefHist/#briefHistPanel containers, css v23), dashboard/static/css/dashboard.css,
+dashboard/static/sw.js (shell v31).
+
+**Notes** — During this, found + fixed the served mojibake ("âœ¦ AI Briefing") introduced by 955f727's
+PowerShell transcoding (previous entry covers the repair). Sparse pre-existing damage inside
+*stored* briefing text (~4 of the most recent 120 rows; em-dashes → �) noted for later; it rides in
+via the prewarm console path and predates this feature.
+
+---
+
 ## 2026-08-30 — Repair a cp1252/UTF-8 double-encode in index.html and sw.js
 
 **What** — The served homepage had been rendering "âœ¦ AI Briefing", "·", "…", "–", "●" etc. as

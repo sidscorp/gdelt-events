@@ -991,6 +991,43 @@ body.dark .lang-toggle.active { color: #1a1714; }
 /* Briefing skeleton lines inside the briefing card */
 .brief-skel { display: flex; flex-direction: column; gap: 0.55rem; padding: 0.2rem 0; }
 
+/* --- Briefing "being written now" state (2026-08-29) ------------------------
+   Shown only after 700ms (see markdown.js): 90% of cached briefings land inside
+   0.8s, so painting this immediately would flash "generating" on nearly every
+   warm load and read as slowness. It stays until the briefing is complete, not
+   until the first token, because the wait people feel is the ~3s to a finished
+   briefing, not the ~0.3s to first text. */
+.brief-progress {
+  margin: 0.45rem 0 0.15rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--text-tertiary) 6%, transparent);
+}
+.brief-progress-row { display: flex; align-items: center; gap: 0.5rem; }
+.brief-progress-label {
+  font-size: 0.82rem; font-weight: 600; color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;  /* the seconds counter must not jitter */
+}
+.brief-progress-note {
+  margin-top: 0.3rem; font-size: 0.75rem; line-height: 1.45;
+  color: var(--text-tertiary);
+}
+.brief-spinner {
+  width: 0.72rem; height: 0.72rem; flex: 0 0 auto; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--text-tertiary) 35%, transparent);
+  border-top-color: var(--text-secondary);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .brief-spinner { animation: brief-spin 0.8s linear infinite; }
+  @keyframes brief-spin { to { transform: rotate(360deg); } }
+}
+/* Reduced motion: a static ring reads as a bullet, so mark the state with a
+   steady dot instead of implying nothing is happening. */
+@media (prefers-reduced-motion: reduce) {
+  .brief-spinner { border-top-color: transparent; background: var(--text-tertiary); }
+}
+
 /* Shimmer sweep + staggered card entrance — motion-safe only */
 @media (prefers-reduced-motion: no-preference) {
   .skel-block::after {

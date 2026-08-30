@@ -21,6 +21,68 @@ Newest first.
 
 ---
 
+## 2026-08-29 (later still) - Briefing prewarm: fix an inverted demand signal, and say what is happening while a briefing is written
+
+**What** - Two changes, one cost and one UX.
+(1) `prewarm_briefings.py` now picks its combo list from `pageview_log` (what people look at),
+ranked by DISTINCT VISITORS, instead of from `briefing_history` (what got generated). It warms
+<=12 combos with >=2 distinct visitors in 14 days, down from the 29 it was walking.
+(2) When a briefing has to be written live, the panel now says so: a labelled progress row with a
+running seconds counter, and one line explaining that only the most-read views are written ahead
+of time and this one is made on demand to keep running costs down.
+
+**Why** - **The demand signal was inverted.** A `briefing_history` row is written only when a
+briefing is GENERATED; a visit that hits a warm cache writes nothing. So every combo the
+prewarmer successfully kept warm produced no `trigger='visit'` rows and looked like zero demand,
+while combos nobody reads missed cache, wrote a visit row, and looked like demand. The list was
+selecting on cache misses, which anti-correlate with popularity. It was walking 29 combos and
+regenerating 13 per run, 5 runs/day = ~59 generations/day, against **27 human briefing reads per
+week**. Measured over 7 days: 411 prewarm generations served 27 visits.
+
+This also corrects PLAN-100X's cost model. Briefings, not the judge, are the dominant gdelt cost:
+judge 16,739 judgements @20/call = ~836 calls = ~$0.97 (31%); briefings 438 generations x ~2.94
+calls = ~1,287 calls = ~$2.13 (**69%**) over the same 7 days. gdelt total is $0.443/day.
+
+**How it was verified** - Combo selection run against live prod usage: 12 combos, `_all:3` first,
+versus 29 before. Frontend built and exercised on **dev :8016** (possible for the first time -
+the dev slice rebuild was fixed earlier today): assets serve the new code, a live generation of an
+uncached combo (`medical-devices:24`) returned HTTP 200 with a complete briefing. `smoke.sh`
+against dev scored 19/20, the one failure being the documented dev-slice aging trap (`hours=1`
+against a static snapshot rebuilt 2h earlier - it was 20/20 immediately after the rebuild, and
+`language` values are present and proportional in the slice). Prod control: 20/20 before and
+after.
+
+**Files** - `pipeline/prewarm_briefings.py`, `dashboard/static/js/markdown.js`,
+`dashboard/static/css/dashboard.css`, asset versions in the templates, `sw.js` CACHE bump.
+
+**Notes** -
+
+*Demand is ranked by distinct visitors, not views, and that changes the answer.*
+`geopolitics-conflict:3` has 88 views but only **2 distinct visitors** - one enthusiast or
+crawler, not breadth. `_all:3` has 495 views from **306 visitors**: 68.6% of all pageviews. The
+next-broadest key has 5 visitors. Ranking on raw views would have warmed one person's habit above
+views that many different people open.
+
+*The measurement window is 18 days, not 30.* `pageview_log` starts 2026-08-12. Every percentage
+above is over 2026-08-12..08-30 (723 views). Worth re-checking once there is a full month.
+
+*The progress panel is deliberately delayed 700ms, and deliberately stays past first token.*
+Both numbers come from `perf_samples`, not taste. A cached briefing lands at p50 0.2s / p90 0.8s
+(n=872), so painting the state immediately would flash "writing this briefing now" on nearly
+every warm load and read as slowness rather than transparency. A live generation shows its first
+text at p50 0.34s but does not finish until p50 2.9s / p90 10.8s (n=379), so a note that
+disappears at first token is a note nobody reads - it stays until `done`.
+
+*Reduced-motion users get a steady dot, not a frozen ring.* A spinner with its animation removed
+reads as a bullet point and implies nothing is happening.
+
+**Not done here, and deliberately**: the judge-by-cluster item from PLAN-100X Phase 4 was
+**killed on measurement** and is written up in the plan. Clustering covers 0.77% of crawled
+articles (it is a near-duplicate detector for syndicated stories; minimum cluster size 2,
+singletons never stored). Only 516 of 13,836 judged urls (3.7%) are clustered, spanning 217
+clusters, so cluster-inheritance would cut judge calls by **2.2%**, not the ~70% assumed - a
+ceiling of about $0.003/day. Do not build it.
+
 ## 2026-08-29 (later) - Phase 0: the dev slice can be rebuilt again, and the sec-tracker 404 loop is identified
 
 **What** - Two open wounds from PLAN-100X Phase 0.
@@ -90,10 +152,20 @@ uptime 96 days 23 hours** - an orphaned shell loop:
 An agent session on 2026-05-24 launched it to wait for a cache warm, the endpoint 404s so the
 JSON parse never yields `warm_status == "idle"`, the loop's exit condition is unreachable, and it
 has re-polled every 5 seconds ever since - on the order of 1.7 million requests. It was
-reparented to init when that session ended. The correct fix is to kill PID 2093467; implementing
-the endpoint would merely feed a runaway loop that nothing is waiting on. **Not yet done** - the
-kill needs Sidd's approval. This is the same class as the documented "ssh-spawned processes
-survive as unkillable orphans" gotcha, which until now was only recorded against rainbow-boi.
+reparented to init when that session ended. The correct fix was to kill PID 2093467; implementing
+the endpoint would merely have fed a runaway loop that nothing was waiting on.
+
+**CLOSED 2026-08-29 20:13** - Sidd ran the kill. Verified: `ps -p 2093467` gone, and
+`journalctl -u sec-tracker --since '60 sec ago' | grep -c watchlist/status` = **0**, against a
+steady 12/min before. (A first check 90 seconds after the kill still counted 13 hits and briefly
+looked like a second poller; that window straddled the kill. The 60-second window after it is
+clean.) No endpoint was added and no sec-tracker code changed - the 404s had exactly one cause
+and it was not in the application.
+
+This is the same class as the documented "ssh-spawned processes survive as unkillable orphans"
+gotcha, which until now was recorded only against rainbow-boi. It happens on snambiar-linux too,
+and an orphan can outlive the session that made it by months without anyone noticing, because
+the only symptom is log noise on a service nobody was watching.
 
 ## 2026-08-29 - Entity spine: entity_registry + tiered alias table (PLAN-100X Phase 1)
 

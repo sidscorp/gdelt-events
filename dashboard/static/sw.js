@@ -1,7 +1,7 @@
-// GDELT Monitor service worker — instant app-shell open via stale-while-revalidate.
+﻿// GDELT Monitor service worker â€” instant app-shell open via stale-while-revalidate.
 // The shell (HTML + static assets) is served from cache immediately and refreshed
 // in the background. API/data requests always go to the network (never stale).
-const CACHE = 'gdelt-shell-v27';
+const CACHE = 'gdelt-shell-v29';
 const SHELL = [
   '/',
   '/static/favicon.svg', '/static/icon-192.png', '/static/icon-512.png',
@@ -32,7 +32,7 @@ self.addEventListener('fetch', (e) => {
   if (url.pathname.startsWith('/api/') || url.pathname === '/sw.js') return;
 
   // Navigations: ONLY the root is cache-assisted; all other pages (/login,
-  // /about, /portal, /event/...) go straight to the network — serving the
+  // /about, /portal, /event/...) go straight to the network â€” serving the
   // shell for every navigation once rendered the dashboard at /login AND
   // poisoned the '/' cache slot with whatever page came back.
   //

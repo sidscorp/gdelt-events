@@ -5,14 +5,31 @@ Hits the local non-streaming endpoint with ?prewarm=1, which regenerates only
 when the cache is stale for that window (see briefing.fresh_s). Data-version-guarded: only runs when gdelt_ingest.py has written
 a new data_version.txt, skipping redundant cycles.
 
-DEMAND-DRIVEN: the combo list is not the 17x6=102 cross-product. It is read
-from briefing_history — the view/window pairs a human has actually opened in
-the last PREWARM_LOOKBACK_DAYS. Measured over the first week of history, only
-13 of the 102 combos were EVER opened and 4 accounted for 78% of reads, so
-warming the cross-product spent ~26 generations for every one a person saw.
-Combos nobody opens are simply generated on demand the rare time someone does,
-which then makes them "recent" and they get warmed from the next run on. The
-list self-tunes; there is nothing to maintain by hand.
+DEMAND-DRIVEN: the combo list is not the 17x6=102 cross-product. It is read from
+`pageview_log` — the view/window pairs people actually LOOK AT, weighted by how many
+distinct visitors looked.
+
+    THIS USED TO READ `briefing_history WHERE trigger='visit'` AND THAT SIGNAL IS INVERTED.
+    A briefing_history row is only written when a briefing is GENERATED. A visit that hits a
+    warm cache writes nothing. So the combos this prewarmer successfully kept warm produced no
+    "visit" rows and looked like zero demand, while the combos nobody reads missed cache, wrote
+    a visit row, and looked like demand. The list was selecting on cache misses, which
+    anti-correlate with popularity. Measured 2026-08-29: it was walking 29 combos and
+    regenerating 13 per run, 5 runs/day = ~59 generations/day, against 27 human briefing reads
+    per WEEK. 411 prewarms served 27 visits.
+
+`pageview_log` records every pageview with its `briefing_key`, cache hit or miss, so it is the
+honest demand signal. Measured over 2026-08-12..08-30 (723 views): `_all:3` is 68.6% of all
+views with 306 distinct visitors; the next-broadest key has 5 visitors. Demand is extremely
+concentrated, so a short warm list covers almost everything.
+
+Distinct visitors, not raw views, decide: `geopolitics-conflict:3` shows 88 views from just
+2 visitors — one enthusiast or crawler, not breadth. Ranking on views alone would warm it above
+keys that many more people actually open.
+
+Combos below the threshold are generated on demand the rare time someone opens one. That path is
+fast and visible: measured client-side, a live briefing shows its first text at p50 0.34s and
+finishes at p50 2.9s / p90 10.8s, and the UI says what is happening and why.
 
 Failures are logged and skipped; the "keep stale until fresh" design means
 users still see the last cached briefing.
@@ -95,16 +112,39 @@ def warm(view, hours, base_url, timeout=120):
 
 
 
-PREWARM_LOOKBACK_DAYS = 30   # how far back a "someone opened this" signal counts
-PREWARM_MAX_COMBOS = 30      # hard ceiling, so a burst of browsing can't explode cost
+PREWARM_LOOKBACK_DAYS = 14   # trailing window for the demand signal
+PREWARM_MIN_VISITORS = 2     # distinct visitors a combo needs to earn a warm slot
+PREWARM_MAX_COMBOS = 12      # hard ceiling, so a burst of browsing can't explode cost
 ALWAYS_WARM = [("", 3), ("", 24)]   # global feed: the front page, always instant
 
 
-def demand_combos():
-    """(view_id, hours) pairs a human actually opened recently, most-read first.
+def _parse_briefing_key(key):
+    """'geopolitics-conflict:24' -> ('geopolitics-conflict', 24); '_all:3' -> ('', 3).
 
-    Reads trigger='visit' rows only — prewarm's own writes must not feed back in
-    and keep a combo alive forever.
+    Returns None for anything malformed. The log contains at least one '_all|3' with a pipe,
+    so this must not assume the separator is present or the window is numeric.
+    """
+    if not key or ":" not in key:
+        return None
+    view, _, hours = key.rpartition(":")
+    try:
+        hours = int(hours)
+    except ValueError:
+        return None
+    if hours not in HOURS:
+        return None
+    return ("" if view in ("_all", "", None) else view), hours
+
+
+def demand_combos():
+    """(view_id, hours) pairs people actually look at, broadest demand first.
+
+    Reads `pageview_log`, which records every pageview whether or not it hit a warm cache.
+    See the module docstring for why `briefing_history` cannot be used for this: its rows exist
+    only when a briefing was generated, so it measures cache misses, not readership.
+
+    Ranked by DISTINCT VISITORS, then views. One person reloading a niche view all week must not
+    outrank a view many different people open once.
     """
     import sqlite3
     db = DATA_DIR / "users.db"
@@ -112,19 +152,26 @@ def demand_combos():
     try:
         con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
         rows = con.execute(
-            "SELECT view_id, hours, count(*) c FROM briefing_history "
-            "WHERE trigger = 'visit' "
-            "  AND generated_at >= date('now', ?) "
-            "GROUP BY view_id, hours ORDER BY c DESC",
-            (f"-{PREWARM_LOOKBACK_DAYS} day",),
+            "SELECT briefing_key, count(DISTINCT ip_hash) visitors, count(*) views "
+            "FROM pageview_log "
+            "WHERE ts >= datetime('now', ?) "
+            "  AND briefing_key IS NOT NULL AND briefing_key <> '' "
+            "GROUP BY briefing_key "
+            "HAVING visitors >= ? "
+            "ORDER BY visitors DESC, views DESC",
+            (f"-{PREWARM_LOOKBACK_DAYS} day", PREWARM_MIN_VISITORS),
         ).fetchall()
         con.close()
-        for view_id, hours, _c in rows:
-            combos.append(("" if view_id in (None, "_all") else view_id, int(hours)))
+        for key, _visitors, _views in rows:
+            combo = _parse_briefing_key(key)
+            if combo and combo not in combos:
+                combos.append(combo)
     except Exception as e:
         print(f"[{time.strftime('%H:%M:%S')}] demand query failed ({e}) — "
               f"falling back to ALWAYS_WARM only", flush=True)
 
+    # The front page is warmed regardless of what the window says: it is 68.6% of all views and
+    # the one page a first-time visitor is guaranteed to land on.
     for c in ALWAYS_WARM:
         if c not in combos:
             combos.append(c)
@@ -149,7 +196,7 @@ def main():
     combos = demand_combos()
     total = len(combos)
     print(f"[{time.strftime('%H:%M:%S')}] pre-warming {total} demand-selected combos "
-          f"(last {PREWARM_LOOKBACK_DAYS}d of reads) on port {args.port}", flush=True)
+          f"(>={PREWARM_MIN_VISITORS} visitors in {PREWARM_LOOKBACK_DAYS}d) on port {args.port}", flush=True)
 
     t_start = time.time()
     ok_count = 0

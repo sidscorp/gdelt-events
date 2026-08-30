@@ -223,6 +223,74 @@ async function fetchBriefing() {
   // Abort any in-flight briefing
   if (_briefingAbort) { _briefingAbort.abort(); _briefingAbort = null; }
 
+// --- "we are writing your briefing" state -----------------------------------
+// Timings are measured, not guessed (perf_samples, 2026-08-29): a CACHED briefing
+// lands at p50 0.2s / p90 0.8s, a LIVE generation shows its first text at p50 0.34s
+// and finishes at p50 2.9s / p90 10.8s.
+//
+// Two consequences, both deliberate:
+//   * The panel is delayed by SHOW_AFTER_MS. 90% of cached briefings arrive inside
+//     0.8s, so showing it immediately would flash a "generating" message on almost
+//     every warm page load, which reads as slowness rather than transparency.
+//   * It stays up until `done`, not until the first token. First text lands at
+//     ~0.34s; a note that disappears that fast is a note nobody reads, and the
+//     wait people actually feel is the ~3s to a complete briefing.
+const BRIEF_PROGRESS_SHOW_AFTER_MS = 700;
+let _briefProgressTick = null;
+let _briefProgressDelay = null;
+
+function _briefProgressHost() {
+  let el = document.getElementById('briefingProgress');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'briefingProgress';
+    el.className = 'brief-progress';
+    el.setAttribute('role', 'status');      // announced to screen readers…
+    el.setAttribute('aria-live', 'polite');  // …without interrupting them
+    const meta = document.getElementById('briefingMeta');
+    meta.parentNode.insertBefore(el, meta.nextSibling);
+  }
+  return el;
+}
+
+function showBriefProgress(coldStart) {
+  hideBriefProgress();
+  const t0 = performance.now();
+  _briefProgressDelay = setTimeout(() => {
+    const host = _briefProgressHost();
+    // The panel is the single status voice once it appears. Without this the
+    // meta line's "Generating briefing…" sits directly above the panel's
+    // "Writing this briefing now · 3s" and the user reads the same fact twice.
+    const meta = document.getElementById('briefingMeta');
+    if (meta) meta.textContent = '';
+    const paint = () => {
+      const secs = Math.round((performance.now() - t0) / 1000);
+      host.innerHTML =
+        '<div class="brief-progress-row">' +
+          '<span class="brief-spinner" aria-hidden="true"></span>' +
+          '<span class="brief-progress-label">' +
+            (coldStart ? 'Writing this briefing now' : 'Updating this briefing') +
+            (secs >= 1 ? ' · ' + secs + 's' : '') +
+          '</span>' +
+        '</div>' +
+        '<div class="brief-progress-note">Usually ready in a few seconds. ' +
+          'Only the most-read views are written ahead of time — this one is generated ' +
+          'on demand, which keeps the running costs of the site down.' +
+        '</div>';
+    };
+    paint();
+    host.style.display = '';
+    _briefProgressTick = setInterval(paint, 1000);
+  }, BRIEF_PROGRESS_SHOW_AFTER_MS);
+}
+
+function hideBriefProgress() {
+  if (_briefProgressDelay) { clearTimeout(_briefProgressDelay); _briefProgressDelay = null; }
+  if (_briefProgressTick) { clearInterval(_briefProgressTick); _briefProgressTick = null; }
+  const el = document.getElementById('briefingProgress');
+  if (el) { el.style.display = 'none'; el.innerHTML = ''; }
+}
+
   const panel = document.getElementById('briefingPanel');
   const textEl = document.getElementById('briefingText');
   const metaEl = document.getElementById('briefingMeta');
@@ -242,6 +310,7 @@ async function fetchBriefing() {
       '</div>';
   }
   metaEl.textContent = keepText ? 'Updating…' : 'Generating briefing…';
+  showBriefProgress(!keepText);
   panel.style.display = '';
   const restoreEl = document.getElementById('briefingRestore');
   if (restoreEl) restoreEl.style.display = 'none';
@@ -272,6 +341,7 @@ async function fetchBriefing() {
       try {
         const data = JSON.parse(line.slice(6));
         if (data.error) {
+          hideBriefProgress();
           if (data.found !== undefined) {
             textEl.innerHTML = '<span style="color:var(--text-tertiary); font-style:italic;">Not enough recent articles for a briefing — try a wider time range.</span>';
             metaEl.textContent = '';
@@ -303,6 +373,7 @@ async function fetchBriefing() {
         }
         if (data.article_count) articleCount = data.article_count;
         if (data.done) {
+          hideBriefProgress();
           // Final repaint with markup complete, so nothing stays trimmed.
           if (fullText) textEl.innerHTML = linkifyCitations(renderMd(fullText), sourcesMap);
           // 'refreshed' means stale cached text was just replaced in place.
@@ -339,11 +410,15 @@ async function fetchBriefing() {
     }
     // Flush any final line left without a trailing newline.
     if (buffer && handleLine(buffer)) return;
+    hideBriefProgress();
     if (!fullText.trim()) {
       textEl.innerHTML = '<span style="color:var(--text-tertiary); font-style:italic;">Briefing unavailable — try a wider time range.</span>';
       metaEl.textContent = '';
     }
   } catch (err) {
+    // Includes the abort path: switching view mid-generation must not leave a
+    // stale "writing…" ticker running under the new view's briefing.
+    hideBriefProgress();
     if (err.name !== 'AbortError' && !textEl.textContent.trim()) panel.style.display = 'none';
   }
 }

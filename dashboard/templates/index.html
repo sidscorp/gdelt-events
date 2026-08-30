@@ -1,4 +1,4 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 {% block title %}{{ page_title or "GDELT News" }}{% endblock %}
 {% block meta %}
 <meta name="description" content="{{ meta_desc }}">
@@ -14,7 +14,7 @@
 <meta name="twitter:description" content="{{ meta_desc }}">
 <meta name="twitter:image" content="{{ og_image }}">
 {% endblock %}
-{% block page_css %}<link rel="stylesheet" href="/static/css/dashboard.css?v=21">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/dashboard.css?v=22">{% endblock %}
 {% block content %}
 <div id="topProgress"></div>
 
@@ -38,14 +38,14 @@
     </div>
   </div>
   <div class="header-sub">
-    <span class="header-tag">Real-time monitoring of 44K global news sources · updated every 15 min</span>
+    <span class="header-tag">Real-time monitoring of 44K global news sources Â· updated every 15 min</span>
     <span class="header-stats" id="stats">loading...</span>
   </div>
 </header>
 
-<!-- Source tabs removed — unified feed -->
+<!-- Source tabs removed â€” unified feed -->
 
-<div class="section-label">Curated topics <span style="text-transform:none; letter-spacing:0; color:var(--text-tertiary); font-size:0.7rem;">— click to filter · hover to see what a topic matches</span></div>
+<div class="section-label">Curated topics <span style="text-transform:none; letter-spacing:0; color:var(--text-tertiary); font-size:0.7rem;">â€” click to filter Â· hover to see what a topic matches</span></div>
 <div style="display:flex; align-items:center; flex-wrap:wrap; gap:0.3rem;">
   <div class="views-bar" id="viewsBar" style="margin:0;"></div>
   <div class="match-profile" id="matchProfile">
@@ -63,12 +63,12 @@
   <button class="time-pill{% if active_h == 72 %} active{% endif %}" data-hours="72">3d</button>
   <button class="time-pill{% if active_h == 168 %} active{% endif %}" data-hours="168">7d</button>
   <button class="time-pill{% if active_h == 720 %} active{% endif %}" data-hours="720">30d</button>
-  <button id="enOnlyToggle" class="lang-toggle active" title="Show only English-language articles (off = all languages)">🌐 English only</button>
+  <button id="enOnlyToggle" class="lang-toggle active" title="Show only English-language articles (off = all languages)">ðŸŒ English only</button>
 </div>
 
 <div id="briefingPanel" class="briefing-card" {% if not ssr_briefing %}style="display:none;"{% endif %}>
   <div class="briefing-head">
-    <span class="briefing-label">✦ AI Briefing</span>
+    <span class="briefing-label">âœ¦ AI Briefing</span>
     <span style="flex:1"></span>
     <button class="briefing-info-btn" onclick="showBriefingInfo()" title="See exactly what this briefing used: model, sources, and the verbatim prompt">&#9432; how this was made</button>
     <button class="briefing-dismiss" onclick="dismissBriefing()">dismiss</button>
@@ -77,7 +77,7 @@
   <div id="briefingFreshness" class="briefing-freshness"></div>
   <div id="briefingMeta" class="briefing-meta"></div>
 </div>
-<button id="briefingRestore" class="briefing-restore" style="display:none;" onclick="restoreBriefing()" title="Bring the AI briefing back">✦ Show AI Briefing</button>
+<button id="briefingRestore" class="briefing-restore" style="display:none;" onclick="restoreBriefing()" title="Bring the AI briefing back">âœ¦ Show AI Briefing</button>
 
 
 <div id="fdaEventsPanel">
@@ -86,14 +86,14 @@
     <span class="fda-panel-toggle" id="fdaPanelToggleLabel">&#9660; collapse</span>
   </div>
   <div id="fdaEventsList"><div style="padding:0.5rem 0.8rem; color:var(--text-tertiary); font-size:0.78rem;">Loading...</div></div>
-  <div class="fda-panel-foot">Straight from FDA feeds — not read by the AI briefing. Clearance IDs link to the FDA's own page; a firm name filters the news to it; click a row for the full text.</div>
+  <div class="fda-panel-foot">Straight from FDA feeds â€” not read by the AI briefing. Clearance IDs link to the FDA's own page; a firm name filters the news to it; click a row for the full text.</div>
 </div>
 
 <div class="section-label">Refine results</div>
 <div id="mainFilters" class="filters">
   <div class="filter-group" style="flex:1; min-width:180px;">
     <span class="filter-label">Search</span>
-    <input type="text" id="searchInput" placeholder="search articles…" autocomplete="off" style="width:100%;">
+    <input type="text" id="searchInput" placeholder="search articlesâ€¦" autocomplete="off" style="width:100%;">
   </div>
   <div class="filter-group">
     <span class="filter-label">Language</span>
@@ -108,7 +108,7 @@
     </select>
   </div>
   <button class="btn-more-filters" id="moreFiltersBtn" onclick="toggleMoreFilters()">
-    More filters <span id="moreFiltersDot" class="more-filters-dot" style="display:none;">●</span>
+    More filters <span id="moreFiltersDot" class="more-filters-dot" style="display:none;">â—</span>
   </button>
   <button class="btn-clear" onclick="clearFilters()">clear all</button>
 </div>
@@ -116,27 +116,27 @@
 <div id="moreFiltersDrawer" class="filters" style="display:none;">
   <div class="filter-group f-entity">
     <span class="filter-label">Person</span>
-    <input type="text" id="personInput" placeholder="name…" autocomplete="off">
+    <input type="text" id="personInput" placeholder="nameâ€¦" autocomplete="off">
   </div>
   <div class="filter-group f-entity">
     <span class="filter-label">Org</span>
-    <input type="text" id="orgInput" placeholder="organization…" autocomplete="off">
+    <input type="text" id="orgInput" placeholder="organizationâ€¦" autocomplete="off">
   </div>
   <div class="filter-group f-entity">
     <span class="filter-label">Place</span>
-    <input type="text" id="locationInput" placeholder="location…" autocomplete="off">
+    <input type="text" id="locationInput" placeholder="locationâ€¦" autocomplete="off">
   </div>
   <div class="filter-group f-entity">
     <span class="filter-label">Theme</span>
-    <input type="text" id="themeInput" placeholder="theme…" autocomplete="off">
+    <input type="text" id="themeInput" placeholder="themeâ€¦" autocomplete="off">
   </div>
   <div class="filter-group">
     <span class="filter-label">Domain</span>
-    <input type="text" id="domainInput" placeholder="nytimes.com…" autocomplete="off">
+    <input type="text" id="domainInput" placeholder="nytimes.comâ€¦" autocomplete="off">
   </div>
   <div class="filter-group">
     <span class="filter-label">Outlet</span>
-    <input type="text" id="outletInput" placeholder="outlet name…" autocomplete="off">
+    <input type="text" id="outletInput" placeholder="outlet nameâ€¦" autocomplete="off">
   </div>
   <div class="filter-group">
     <span class="filter-label">From</span>
@@ -208,5 +208,5 @@
 {% block scripts %}
 <script src="/static/js/rum.js?v=18"></script>
 <script src="/static/js/dashboard.js?v=21"></script>
-<script src="/static/js/markdown.js?v=24"></script>
+<script src="/static/js/markdown.js?v=26"></script>
 {% endblock %}

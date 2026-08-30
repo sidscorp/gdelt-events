@@ -21,6 +21,33 @@ Newest first.
 
 ---
 
+## 2026-08-30 — Repair a cp1252/UTF-8 double-encode in index.html and sw.js
+
+**What** — The served homepage had been rendering "âœ¦ AI Briefing", "·", "…", "–", "●" etc. as
+mojibake glyphs. 15 corrupted runs in `dashboard/templates/index.html` and 2 comment lines in
+`dashboard/static/sw.js` repaired to the intended characters; cache bumped v29→v30 so clients
+pick up a clean shell.
+
+**Why** — The site publicly read "âœ¦ AI Briefing" to every visitor. Root cause: 955f727's edits
+passed the files through a cp1252-reading step (the PowerShell 5.1 transcoding trap, now
+documented in CHANGELOG as at least the second time this exact failure class has shipped).
+Everything else in that commit (prewarm fix, in-paint progress row) is untouched — this commit
+is byte-repair only.
+
+**How it was verified** — `git show e48d8cf:…index.html` clean vs `955f727:…index.html`
+corrupted pins the introduction to the latter; an exact-mapping repair script was applied to
+fetched working copies (diff before/after shows only the suspect sequences); post-deploy curl of
+the live page shows the label decodes to ✦ and a residual-mojibake scan returns zero markers on
+both files. The other six files touched since e48d8cf scanned clean and were not modified.
+
+**Files** — dashboard/templates/index.html, dashboard/static/sw.js, CHANGELOG.md.
+
+**Notes** — same-class mitigation worth considering later: a one-liner `content check` in
+deploy_guard or smoke.sh that asserts the label decodes (the 200-OK-with-mojibake failure passed
+smoke 20/20 this morning, because every smoke assertion is API-JSON, not rendered text).
+
+---
+
 ## 2026-08-29 (later still) - Briefing prewarm: fix an inverted demand signal, and say what is happening while a briefing is written
 
 **What** - Two changes, one cost and one UX.

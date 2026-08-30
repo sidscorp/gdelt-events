@@ -21,6 +21,35 @@ Newest first.
 
 ---
 
+## 2026-08-30 (later) — Methodology rewritten as technical documentation; prose pass on both static pages
+
+**What** — `methodology.html` restructured as numbered sections (Data acquisition / Event clustering /
+Feed ranking / Topic pills / Briefings / Failure modes) with duplicated explanations folded once into
+the section that owns them ("why counts mislead" merged into Ranking, "why keywords weren't enough"
+merged into Pills). All `{{ }}` live-value bindings kept identical. `about.html` keeps its general
+level; only the pass comes for tone: puff subtitle, negative-parallelism openers, and the bio
+rewritten shorter. Neither page's claims changed.
+
+**Why** — Both pages read as LLM-shaped prose. Audited against the Wikipedia field guide for AI
+writing: stacked "not X, but Y" constructions, participle-clause tidbits at sentence ends,
+boldface-lead list items, triads everywhere, and mid-sentence em-dash glue are all over the old
+versions. The rewrite keeps every factual claim and every measured number, and drops the cadence that
+says a machine wrote it: one dash where there were four, plain list items, section numbers doing the
+work of connective adverbs.
+
+**How it was verified** — Rendered on dev :8016 post-deploy; both pages 200 and the Jinja variables
+(judge model, precision figures, weights) resolve identically. Post-rewrite scan of the visible
+text: zero "not X, but Y" constructions (was a dozen), em-dashes on Methodology down to 5, the only
+remaining "rather than" uses being genuine contrasts. Homepage and briefing checks unaffected.
+
+**Files** — dashboard/templates/methodology.html, dashboard/templates/about.html.
+
+**Notes** — The Wikipedia field guide's own caveat applies: those signs are associations, not proof,
+and fixing cadence ≠ making text human. No claims were touched. The editorial-policy line at the foot
+of About ("the mistakes are mine") survived because it was already the most human sentence there.
+
+---
+
 ## 2026-08-30 — Briefing timeline ("scroll back in time")
 
 **What** — Every briefing card now carries a "⏱ N past briefings" affordance listing the snapshots

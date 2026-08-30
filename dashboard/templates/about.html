@@ -4,7 +4,7 @@
 {% block content %}
 
 <h1>About GDELT Monitor</h1>
-<p class="subtitle">A real-time global news intelligence system</p>
+<p class="subtitle">A global news monitor that reads everything, so you don't have to.</p>
 
 <h2>What it does</h2>
 <p>Every 15 minutes the pipeline pulls the newest batch from GDELT's Global Article List and Global Knowledge Graph — roughly 44,000 news outlets worldwide. Articles land in a DuckDB analytical database and are scanned by three independent systems: keyword pattern matching, entity recognition against reference registries, and semantic embeddings from a neural model running on local hardware.</p>
@@ -17,12 +17,12 @@
 {% endfor %}
 </ul>
 {% endif %}
-<p>What makes those feeds work is not the keyword lists. Keyword matching alone was measured at 11–25% precision on the hardest topics — most of what it caught was off-topic. So every candidate article is now read by a language model that answers one question: does this actually belong to this topic? Only approved articles get in, and each one carries its reason. That single change moved the curated feeds to roughly 75–94% precision. Signed-in users can also define their own topics in plain English, matched semantically.</p>
+<p>Keywords proved out to be too rough for the hard topics: when audited, they scored 11–25% precision. So every candidate article is now read by a language model that answers one question: does this actually belong to this topic? Only approved articles get in, and each one carries its reason. That single change moved the curated feeds to a measured median of {{ eval_median or '76%' }} precision (range {{ eval_min or '56%' }}–{{ eval_max or '95%' }}). Signed-in users can also define their own topics in plain English, matched semantically.</p>
 
-<p>Because a major story gets reported by hundreds of outlets at once, near-duplicate articles about the same event are rolled up into a single event card — each with a shareable permalink — so the feed shows distinct stories rather than the same headline forty times. And for any topic or time window, an AI briefing summarizes what's actually happening across the matched coverage, with citations back to the specific numbered sources it was given. There is also semantic search: describe what you're looking for and it finds articles by meaning rather than exact words.</p>
+<p>A major story gets reported by hundreds of outlets at once, so near-duplicate articles about the same event roll up into a single event card — each with a shareable permalink — and the feed shows distinct stories instead of the same headline forty times. For any topic and time window, an AI briefing summarizes what's actually happening across the matched coverage, with citations back to the specific numbered sources it was given. There's semantic search too: describe what you're looking for and it finds articles by meaning rather than exact words.</p>
 
 <h2>How it works</h2>
-<p>Articles are scanned using Aho-Corasick automata — a trie-based algorithm that finds all occurrences of thousands of patterns in a single linear pass. Matches are materialized into indexed cache tables so the dashboard can serve results in under a second. The system maintains a rolling 60-day window and prunes older data to keep storage bounded. New articles are classified every 15 minutes.</p>
+<p>Articles are scanned using Aho-Corasick automata — a trie-based algorithm that finds all occurrences of thousands of patterns in a single linear pass. Matches are materialized into indexed cache tables so the dashboard serves results in under a second. The system keeps a rolling 60-day window and prunes older data to bound storage. New articles are classified every 15 minutes.</p>
 
  <p>Alongside keyword matching, each English article is embedded with a local neural model (nomic-embed-text via Ollama, on our own GPU — no article text leaves the building for this) and indexed in a FAISS vector store. A leader-clustering pass groups articles whose embeddings are near-duplicates into persistent event clusters — this is what powers the rolled-up event cards and their permalinks. The AI briefings are generated on demand from the top events in a view by {% if model %}<code>{{ model }}</code>{% else %}an open-weights model{% endif %} — served by a hosted inference provider (Fireworks) and reached through our self-hosted LiteLLM gateway; the gateway is ours, the model hardware is not — streamed token-by-token and cached so repeat views load instantly. Topic pills are precision-gated by an LLM judge — see the <a href="/methodology">methodology page</a> for the full logic behind everything displayed.</p>
 
@@ -42,9 +42,9 @@
 </ul>
 
 <h2>Built by</h2>
-<p><strong>Sidd Nambiar</strong> — Decision Scientist, computational modeler, and builder of systems that help make sense of the world. This project sits at the intersection of what I do professionally and what I find genuinely interesting: turning large, noisy data streams into useful intelligence.</p>
+<p><strong>Sidd Nambiar</strong> — decision scientist by day; this is the hobby version of the same discipline. The mistakes are mine.</p>
 
-<p class="ai-note">Built with heavy use of AI coding assistants over several years; the design decisions, and the mistakes, are my own.</p>
+<p class="ai-note">Built with heavy use of AI coding assistants over several years.</p>
 
 <p><a href="https://www.linkedin.com/in/siddnambiar" target="_blank" rel="noopener">Connect on LinkedIn</a></p>
 

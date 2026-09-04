@@ -248,8 +248,10 @@ function _briefProgressHost() {
     el.className = 'brief-progress';
     el.setAttribute('role', 'status');      // announced to screen readers…
     el.setAttribute('aria-live', 'polite');  // …without interrupting them
-    const meta = document.getElementById('briefingMeta');
-    meta.parentNode.insertBefore(el, meta.nextSibling);
+    // Anchored ABOVE the briefing text, not below it: a cold-regen notice at the
+    // bottom was invisible to a reader already scrolling through the old text.
+    const textEl = document.getElementById('briefingText');
+    textEl.parentNode.insertBefore(el, textEl);
   }
   return el;
 }

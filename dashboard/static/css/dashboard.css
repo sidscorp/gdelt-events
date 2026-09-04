@@ -998,7 +998,7 @@ body.dark .lang-toggle.active { color: #1a1714; }
    until the first token, because the wait people feel is the ~3s to a finished
    briefing, not the ~0.3s to first text. */
 .brief-progress {
-  margin: 0.45rem 0 0.15rem;
+  margin: 0.15rem 0 0.45rem;
   padding: 0.55rem 0.7rem;
   border: 1px solid var(--border);
   border-radius: var(--radius);

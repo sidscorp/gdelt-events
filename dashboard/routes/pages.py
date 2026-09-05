@@ -295,6 +295,14 @@ def robots():
     )
 
 
+@bp.route("/googlecd0185132db2bdea.html")
+def google_site_verification():
+    return Response(
+        "google-site-verification: googlecd0185132db2bdea.html",
+        mimetype="text/html",
+    )
+
+
 @bp.route("/sw.js")
 def service_worker():
     """Serve the service worker from root scope so it controls the whole site."""

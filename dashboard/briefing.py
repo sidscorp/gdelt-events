@@ -39,7 +39,11 @@ BRIEFING_FRESH_S = 3600  # default cache age that triggers background regenerati
 # visit silently regenerated anyway — paying for prewarm AND on-demand.
 # Keep the shortest window at or above the prewarm interval.
 FRESH_BY_HOURS = {
-    3: 3 * 3600,        # matches the tightest prewarm cadence
+    # NOTE: this does NOT match the prewarm cadence — observed prewarms land every
+    # 4h (00/04/12/16/20 UTC, 2026-09-04), so a 3h TTL guarantees the cache is
+    # stale for ~1h in every 4 and visits pay for on-demand regen on top of the
+    # prewarm. Align one to the other; see the cost note above before changing.
+    3: 3 * 3600,
     6: 4 * 3600,
     24: 6 * 3600,
     72: 12 * 3600,

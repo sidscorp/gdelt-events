@@ -21,6 +21,48 @@ Newest first.
 
 ---
 
+## 2026-09-13 — Briefing showed stale text with no age on it; boot-time TDZ throw was the real cause
+
+**What** — Two linked fixes. (1) `markdown.js` declared its briefing-history state (`_histList`,
+`_histKey`, `_histOpen`, `_histViewing`, `_liveBackup`) below the module-load call to
+`fetchBriefing()`, so `_histExit()` read `_histViewing` inside its temporal dead zone and threw on
+every page load; the five declarations moved above that call. (2) The freshness bar now starts on the
+phase-1 cached payload instead of waiting for `done`, `/api/briefing` sends `cache_ttl_s` on phase 1
+so the bar can compute staleness, `saveSnapshot()` now runs *after* the ticker paints, and
+`restoreBriefing()` re-arms the ticker via a new `_lastFreshness`. Also added a refetch on tab
+refocus when the displayed briefing has outlived its TTL.
+
+**Why** — Sidd read a "Global News — Last 3 Hours" briefing on 2026-09-04 that had been generated
+11.5 hours earlier (snapshot 3159, `2026-09-04 12:00:22`), with no "Generated … ago" line anywhere on
+the card to say so. It had no Lindsay Clancy coverage because the mistrial broke after that text was
+written — the editor selects the story correctly when given the current window (verified: candidate
+#1 of 40, 172 sources, chosen). The cache was long past its 3h TTL and should have regenerated on
+visit, but `briefing_history` shows no regeneration for that visit at all. The TDZ throw explains it:
+`fetchBriefing()` assigns `_briefingView`/`_briefingHours` and *then* calls `_histExit()`, so the
+throw left the unchanged-view guard poisoned and every later call early-returned. The client never
+fetched a briefing; the page served whatever was already rendered, indefinitely.
+
+**How it was verified** — On dev :8016 with `markdown.js?v=30`: console clean on load (was
+`ReferenceError: Cannot access '_histViewing' before initialization` at `_histExit`→`fetchBriefing`
+→ module load, reproduced twice); `_histExit()` called manually returns without throwing; freshness
+renders `Generated 3m ago · Next update in ~23h · From 9 articles`; dismiss blanks it and restore
+brings it back (previously blank forever); phase-1 SSE payload now carries
+`{"done": false, "cached": true, "generated_at": "...", "cache_ttl_s": 86400}`. Prod smoke run after
+promotion.
+
+**Files** — dashboard/static/js/markdown.js, dashboard/static/sw.js (v33→v34),
+dashboard/templates/index.html (markdown.js v28→v30), dashboard/routes/api_briefing.py,
+dashboard/briefing.py (comment only).
+
+**Notes** — `FRESH_BY_HOURS[3]` is left at 3h but its comment was wrong: it claimed to match the
+prewarm cadence, and observed prewarms land every 4h (00/04/12/16/20 UTC), so the cache is stale ~1h
+in every 4 and visits pay for on-demand regen on top of prewarm. Aligning the two is a real decision
+about cost vs freshness and was deliberately not made here. Not yet verified: a genuinely stale
+briefing painting its red `bf-stale` class — dev's slice ends 2026-08-29, so testing used a 720h
+window against a fresh cache.
+
+---
+
 ## 2026-08-30 (later) — Methodology rewritten as technical documentation; prose pass on both static pages
 
 **What** — `methodology.html` restructured as numbered sections (Data acquisition / Event clustering /

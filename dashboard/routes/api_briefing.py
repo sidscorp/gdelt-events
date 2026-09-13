@@ -239,7 +239,11 @@ def api_briefing():
         # Phase 1: serve cached content IMMEDIATELY (even stale)
         if cached and not refresh:
             yield f"data: {json.dumps({'sources': cached_sources})}\n\n"
-            yield f"data: {json.dumps({'text': cached['briefing'], 'done': False, 'cached': True, 'stale': is_stale, 'article_count': cached['article_count'], 'generated_at': cached['generated_at']})}\n\n"
+            # cache_ttl_s rides along on phase 1 so the client can age this text
+            # the instant it paints. Without it the freshness bar has no TTL to
+            # divide by, so it cannot turn amber/red on a briefing that is older
+            # than the window it claims to cover.
+            yield f"data: {json.dumps({'text': cached['briefing'], 'done': False, 'cached': True, 'stale': is_stale, 'article_count': cached['article_count'], 'generated_at': cached['generated_at'], 'cache_ttl_s': fresh_s(hours)})}\n\n"
             if not needs_regen:
                 yield f"data: {json.dumps({'done': True, 'cached': True, 'article_count': cached['article_count'], 'generated_at': cached['generated_at'], 'cache_ttl_s': fresh_s(hours)})}\n\n"
                 return

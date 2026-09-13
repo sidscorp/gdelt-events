@@ -139,6 +139,26 @@ let _briefingAbort = null;
 // Live freshness bar ticker
 let _freshnessTimer = null;
 let _freshnessData = null;
+// Survives stopFreshnessTicker() (which nulls _freshnessData) so dismiss→restore
+// and history→back can re-arm the ticker with what was last known.
+let _lastFreshness = null;
+
+// Briefing-history state. These MUST be declared above the module-load call to
+// fetchBriefing() below, not down in the history section where they are used.
+// fetchBriefing() calls _histExit() on its very first line of real work; the
+// function declaration hoists, but a `let` does not initialize until its own
+// line runs, so declaring these later put them in the temporal dead zone and
+// _histExit() threw `Cannot access '_histViewing' before initialization` on
+// EVERY page load. That throw happened *after* fetchBriefing() had already set
+// _briefingView/_briefingHours, so the unchanged-view guard then swallowed every
+// later call and the briefing was never fetched client-side at all — the page
+// showed whatever the server had rendered, however stale, with no freshness line
+// and no regeneration. That was the original bug.
+let _histList = null;     // snapshots for the current view|hours
+let _histKey = null;
+let _histOpen = false;
+let _histViewing = null;  // briefing_history id currently displayed
+let _liveBackup = null;   // {html, meta} to restore the live briefing
 
 function stopFreshnessTicker() {
   if (_freshnessTimer) { clearInterval(_freshnessTimer); _freshnessTimer = null; }
@@ -174,6 +194,7 @@ function startFreshnessTicker(generatedAt, ttlS, articleCount) {
   if (!generatedAt) return;
   stopFreshnessTicker();
   _freshnessData = { generatedAt, ttlS: ttlS || 0, articleCount: articleCount || 0 };
+  _lastFreshness = _freshnessData;
   updateFreshnessBar();
   _freshnessTimer = setInterval(updateFreshnessBar, 15000);
 }
@@ -195,6 +216,11 @@ function restoreBriefing() {
   const r = document.getElementById('briefingRestore');
   if (p) p.style.display = '';
   if (r) r.style.display = 'none';
+  // dismissBriefing() blanked the freshness line and stopped its ticker; without
+  // re-arming here the restored briefing sits there with no age on it forever.
+  if (_lastFreshness) {
+    startFreshnessTicker(_lastFreshness.generatedAt, _lastFreshness.ttlS, _lastFreshness.articleCount);
+  }
 }
 
 async function fetchBriefing() {
@@ -375,6 +401,14 @@ function hideBriefProgress() {
           textEl.dataset.key = wantKey; // this content now belongs to this view/window
         }
         if (data.article_count) articleCount = data.article_count;
+        // Phase 1 hands us cached text that can be HOURS older than the window it
+        // claims to summarize (a 3h briefing served 11h stale was the bug that
+        // found this). The server already sends generated_at here, so age the text
+        // the moment it is painted — waiting for `done` means the whole time the
+        // reader is on stale copy there is nothing on screen saying so.
+        if (data.generated_at && !data.done) {
+          startFreshnessTicker(data.generated_at, data.cache_ttl_s, data.article_count);
+        }
         if (data.done) {
           hideBriefProgress();
           // Final repaint with markup complete, so nothing stays trimmed.
@@ -387,11 +421,14 @@ function hideBriefProgress() {
           else label = 'just generated';
           metaEl.textContent = articleCount ? `From ${articleCount} articles · ${label}` : '';
           if (window.perfMark) { window.perfMark(data.cached ? 'briefing_done_cached' : 'briefing_done', performance.now() - briefStart); window.perfFlush(); }
-          if (typeof saveSnapshot === 'function') saveSnapshot();
-          // Start the live freshness countdown: generated_at in UTC, TTL from server
+          // Start the live freshness countdown: generated_at in UTC, TTL from server.
+          // MUST run before saveSnapshot(): the snapshot serializes the freshness
+          // element's innerHTML, so saving first persisted an empty label and the
+          // instant-paint on next boot could never restore it.
           if (data.generated_at || data.cache_ttl_s) {
             startFreshnessTicker(data.generated_at, data.cache_ttl_s, data.article_count);
           }
+          if (typeof saveSnapshot === 'function') saveSnapshot();
           updateBriefHistoryLink();
         }
       } catch (_) {}
@@ -429,6 +466,22 @@ function hideBriefProgress() {
 
 // Trigger briefing on initial page load
 fetchBriefing();
+
+// A tab left open never re-checked: fetchBriefing() only runs at boot and on a
+// view/hours change, and early-returns otherwise. That is how a 3-hour briefing
+// stayed on screen 11 hours after it was written. On refocus, re-fetch only if
+// the text we are showing has actually outlived its TTL — regeneration costs
+// money, so an in-TTL briefing must not trigger one.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (!_lastFreshness || !_lastFreshness.ttlS) return;
+  const gen = new Date(_lastFreshness.generatedAt + 'Z');
+  if (isNaN(gen.getTime())) return;
+  const elapsed = (Date.now() - gen.getTime()) / 1000;
+  if (elapsed < _lastFreshness.ttlS) return;
+  _briefingView = null;   // defeat the unchanged-view guard
+  fetchBriefing();
+});
 
 // ---------------------------------------------------------------------------
 // FDA Regulatory Events panel
@@ -524,11 +577,10 @@ function hideFdaPanel() {
 // stored briefing through the same renderer as the live one on click, and a
 // single click returns to live with the freshness ticker restored.
 // ---------------------------------------------------------------------------
-let _histList = null;     // snapshots for the current view|hours
-let _histKey = null;
-let _histOpen = false;
-let _histViewing = null;  // briefing_history id currently displayed
-let _liveBackup = null;   // {html, meta} to restore the live briefing
+// NOTE: the state these functions read is declared near the top of this file,
+// NOT here. fetchBriefing() runs at module load and calls _histExit(), which
+// reads _histViewing — so a `let` declared at this point in the file is still
+// in its temporal dead zone and throws. See the declaration site for details.
 
 function _histHost() {
   return document.getElementById('briefHist');

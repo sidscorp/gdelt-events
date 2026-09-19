@@ -100,7 +100,11 @@ def _md_inline(s, sources):
 def _briefing_html(view_id, hours):
     """Cached AI briefing rendered to the same HTML markdown.js produces, so
     the server's first paint and the client's re-render are identical. Read-only
-    — never generates. The client still refreshes it via markdown.js."""
+    — never generates. The client still refreshes it via markdown.js.
+
+    Returns (html_or_None, generated_at_or_None) — the timestamp lets the
+    client show a "last generated" note in the loading state on the very
+    first fetchBriefing() call, before any SSE round-trip."""
     from models import get_user_db
     from briefing import _normalize_text
     cache_key = f"{view_id or '_all'}:{hours}"
@@ -113,13 +117,13 @@ def _briefing_html(view_id, hours):
         ).fetchone()
         con.close()
         if not row or not row[0]:
-            return None
+            return None, None
         age_s = (datetime.utcnow()
                  - datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S")).total_seconds()
         if age_s > 48 * 3600:
-            return None
+            return None, None
     except Exception:
-        return None
+        return None, None
 
     try:
         sources = json.loads(row[2]) if row[2] else []
@@ -158,7 +162,7 @@ def _briefing_html(view_id, hours):
         flush_list()
         para.append(line)
     flush_para(); flush_list()
-    return "".join(out) if out else None
+    return ("".join(out) if out else None), row[1]
 
 
 @bp.route("/")
@@ -177,7 +181,7 @@ def index():
             "date_from", "date_to", "page"))
     )
     feed = _ssr_feed(view_id, hours) if ssr_ok else None
-    briefing = _briefing_html(view_id, hours) if ssr_ok else None
+    briefing, briefing_generated_at = _briefing_html(view_id, hours) if ssr_ok else (None, None)
 
     if view:
         page_title = f"{view['name']} — {SITE_TITLE}"
@@ -199,6 +203,7 @@ def index():
         ssr_snap_key=f"snap:{view_id}|{hours}|1|importance" if feed else None,
         ssr_briefing=briefing,
         ssr_briefing_key=f"{view_id}|{hours}",
+        ssr_briefing_generated_at=briefing_generated_at,
         ssr_view=view_id,
         ssr_hours=hours,
     )

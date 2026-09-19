@@ -265,6 +265,8 @@ async function fetchBriefing() {
 const BRIEF_PROGRESS_SHOW_AFTER_MS = 700;
 let _briefProgressTick = null;
 let _briefProgressDelay = null;
+let _briefProgressPriorAt = null;   // generated_at of the briefing this one is replacing, if known
+let _briefProgressRepaint = null;   // current paint() closure, so a late-arriving prior can repaint in place
 
 function _briefProgressHost() {
   let el = document.getElementById('briefingProgress');
@@ -282,9 +284,10 @@ function _briefProgressHost() {
   return el;
 }
 
-function showBriefProgress(coldStart) {
+function showBriefProgress(coldStart, priorGeneratedAt) {
   hideBriefProgress();
   const t0 = performance.now();
+  _briefProgressPriorAt = priorGeneratedAt || null;
   _briefProgressDelay = setTimeout(() => {
     const host = _briefProgressHost();
     // The panel is the single status voice once it appears. Without this the
@@ -294,6 +297,16 @@ function showBriefProgress(coldStart) {
     if (meta) meta.textContent = '';
     const paint = () => {
       const secs = Math.round((performance.now() - t0) / 1000);
+      // Wove as a sentence rather than a terse timestamp tag, so the reader
+      // gets the "why" (a version already exists, this replaces it) along
+      // with the "when" — a bare "· 14:12" reads as cryptic on first glance.
+      const priorSentence = _briefProgressPriorAt
+        ? (coldStart
+            ? 'The last version of this briefing was generated ' + _histFmt(_briefProgressPriorAt) +
+              '; a fresh one is being written now to reflect the latest coverage. '
+            : 'You’re currently viewing the version generated ' + _histFmt(_briefProgressPriorAt) +
+              '; it’s being refreshed now. ')
+        : '';
       host.innerHTML =
         '<div class="brief-progress-row">' +
           '<span class="brief-spinner" aria-hidden="true"></span>' +
@@ -302,11 +315,13 @@ function showBriefProgress(coldStart) {
             (secs >= 1 ? ' · ' + secs + 's' : '') +
           '</span>' +
         '</div>' +
-        '<div class="brief-progress-note">Usually ready in a few seconds. ' +
+        '<div class="brief-progress-note">' + priorSentence +
+          'Usually ready in a few seconds. ' +
           'Only the most-read views are written ahead of time — this one is generated ' +
           'on demand, which keeps the running costs of the site down.' +
         '</div>';
     };
+    _briefProgressRepaint = paint;
     paint();
     host.style.display = '';
     _briefProgressTick = setInterval(paint, 1000);
@@ -316,8 +331,19 @@ function showBriefProgress(coldStart) {
 function hideBriefProgress() {
   if (_briefProgressDelay) { clearTimeout(_briefProgressDelay); _briefProgressDelay = null; }
   if (_briefProgressTick) { clearInterval(_briefProgressTick); _briefProgressTick = null; }
+  _briefProgressRepaint = null;
+  _briefProgressPriorAt = null;
   const el = document.getElementById('briefingProgress');
   if (el) { el.style.display = 'none'; el.innerHTML = ''; }
+}
+
+// Called when a stale cache's generated_at lands mid-stream (SSE phase 1),
+// i.e. after showBriefProgress() already ran not knowing it existed. No-op
+// once the progress panel has been hidden.
+function noteBriefProgressPrior(generatedAt) {
+  if (!generatedAt || _briefProgressPriorAt === generatedAt) return;
+  _briefProgressPriorAt = generatedAt;
+  if (_briefProgressRepaint) _briefProgressRepaint();
 }
 
   const panel = document.getElementById('briefingPanel');
@@ -329,6 +355,7 @@ function hideBriefProgress() {
   // shimmer skeleton — never another view's briefing posing as current.
   const wantKey = `${view}|${hours}`;
   const keepText = textEl.dataset.key === wantKey && textEl.textContent.trim().length > 0;
+  const priorGeneratedAt = keepText ? (textEl.dataset.generatedAt || null) : null;
   if (!keepText) {
     textEl.innerHTML =
       '<div class="brief-skel" aria-hidden="true">' +
@@ -339,7 +366,7 @@ function hideBriefProgress() {
       '</div>';
   }
   metaEl.textContent = keepText ? 'Updating…' : 'Generating briefing…';
-  showBriefProgress(!keepText);
+  showBriefProgress(!keepText, priorGeneratedAt);
   panel.style.display = '';
   const restoreEl = document.getElementById('briefingRestore');
   if (restoreEl) restoreEl.style.display = 'none';
@@ -408,6 +435,8 @@ function hideBriefProgress() {
         // reader is on stale copy there is nothing on screen saying so.
         if (data.generated_at && !data.done) {
           startFreshnessTicker(data.generated_at, data.cache_ttl_s, data.article_count);
+          textEl.dataset.generatedAt = data.generated_at;
+          noteBriefProgressPrior(data.generated_at);
         }
         if (data.done) {
           hideBriefProgress();
@@ -428,6 +457,7 @@ function hideBriefProgress() {
           if (data.generated_at || data.cache_ttl_s) {
             startFreshnessTicker(data.generated_at, data.cache_ttl_s, data.article_count);
           }
+          if (data.generated_at) textEl.dataset.generatedAt = data.generated_at;
           if (typeof saveSnapshot === 'function') saveSnapshot();
           updateBriefHistoryLink();
         }

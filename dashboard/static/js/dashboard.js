@@ -550,6 +550,8 @@ function saveSnapshot() {
       briefing: (document.getElementById('briefingText') || {}).innerHTML || '',
       briefingMeta: (document.getElementById('briefingMeta') || {}).textContent || '',
       briefingFreshness: (document.getElementById('briefingFreshness') || {}).innerHTML || '',
+      briefingGeneratedAt: (document.getElementById('briefingText') || {}).dataset
+        ? (document.getElementById('briefingText').dataset.generatedAt || '') : '',
       briefingShown: bp ? bp.style.display !== 'none' : false,
     }));
   } catch (e) {}
@@ -569,6 +571,7 @@ function restoreSnapshot() {
       const bt = document.getElementById('briefingText');
       bt.innerHTML = s.briefing;
       bt.dataset.key = `${state.view}|${state.hours}`; // lets fetchBriefing keep it visible
+      bt.dataset.generatedAt = s.briefingGeneratedAt || '';
       document.getElementById('briefingMeta').textContent = s.briefingMeta || '';
       const fr = document.getElementById('briefingFreshness');
       if (fr && s.briefingFreshness) fr.innerHTML = s.briefingFreshness;

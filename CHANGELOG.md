@@ -21,6 +21,52 @@ Newest first.
 
 ---
 
+## 2026-09-19 — Briefing loading banner had no sense of what it was replacing
+
+**What** — When the briefing panel shows "Writing this briefing now" / "Updating this
+briefing" while a briefing regenerates, it now weaves in a sentence naming when the version
+it's about to replace was written, e.g. "The last version of this briefing was generated
+today 14:12; a fresh one is being written now..." (cold start) or "You're currently viewing
+the version generated today 14:12; it's being refreshed now..." (warm/keepText). Threaded
+`generated_at` through three paths that previously only carried the cache key: the SSE
+phase-1/`done` events (`markdown.js` now stamps `textEl.dataset.generatedAt` alongside
+`dataset.key`, and `showBriefProgress`/a new `noteBriefProgressPrior` repaint the banner
+in place if the timestamp arrives after the banner is already showing), the localStorage
+snapshot (`saveSnapshot`/`restoreSnapshot` in `dashboard.js`), and the SSR fast path
+(`_briefing_html()` in `pages.py` now returns `(html, generated_at)` instead of discarding
+the timestamp, threaded into `index.html` as `data-generated-at`). No backend/DB change —
+`briefing_cache.generated_at` already existed everywhere needed; the gap was purely that
+nothing client-side carried a *prior* value into the loading state, and `#briefingFreshness`
+(the only other place recency shows) is explicitly cleared at the top of every
+`fetchBriefing()` call, so the loading state truly had zero temporal context before this.
+
+**Why** — Sidd noticed the loading spinner reads as a bare "please wait" with no sense of
+whether the briefing it's replacing is an hour old or three weeks old.
+
+**How it was verified** — Tested live against the dev instance (:8016) in a real browser
+session (localStorage cleared to isolate cases): (1) cold-client/warm-backend case (switching
+to a never-visited-this-session tab with a stale server cache, e.g. `nih-news:720` cached
+2026-08-02) showed the banner starting plain, then repainting in place within the SSE
+round-trip to "The last version of this briefing was generated Aug 2 13:05; a fresh one is
+being written now..."; (2) warm/keepText case (revisiting that same tab) showed "You're
+currently viewing the version generated Aug 2 13:05; it's being refreshed now..." synchronously,
+no repaint needed; (3) SSR path confirmed via direct DOM read — `#briefingText`'s
+`data-generated-at` matched the `briefing_cache` row for the default view on a fresh page
+load with no localStorage. No console errors across all three, no server errors in
+`dashboard.log`, `node --check` clean on both edited JS files, `ast.parse` clean on `pages.py`.
+
+**Files** — `dashboard/static/js/markdown.js`, `dashboard/static/js/dashboard.js`,
+`dashboard/routes/pages.py`, `dashboard/templates/index.html`.
+
+**Notes** — Deliberately did not put the timestamp in `.brief-progress-row` next to the
+seconds counter (a terse "· 14:12" tag); Sidd asked for it woven into an actual sentence a
+reader would understand, so it lives in `.brief-progress-note` instead, which is why no CSS
+change was needed — the row's layout is unchanged. True-cold-start (no cache row ever for
+that key) needed no new code: the backend already skips the SSE phase-1 event entirely when
+there's no cache row, so the prior-sentence branch is simply never reached.
+
+---
+
 ## 2026-09-13 — Briefing showed stale text with no age on it; boot-time TDZ throw was the real cause
 
 **What** — Two linked fixes. (1) `markdown.js` declared its briefing-history state (`_histList`,

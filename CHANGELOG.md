@@ -21,6 +21,42 @@ Newest first.
 
 ---
 
+## 2026-09-20 — Review-first Bluesky event signals
+
+**What** — Added a dedicated social publishing subsystem for GDELT Monitor: read-only
+selection of fresh multi-source events from Cybersecurity, Supply Chain, FDA and Public
+Health; a separately stored admin review queue; source-grounded plain-language explainers
+with deterministic factual fallback; bounded/idempotent AT Protocol publishing; Bluesky
+attribution on persistent event pages; pilot calibration; and an S4U scheduled-task
+registration script. The publisher defaults to review mode and auto mode remains locked
+until at least 50 decisions pass chronological holdout, edit-rate and grounding checks.
+
+**Why** — The useful social product is not another headline firehose. GDELT Monitor can
+show when multiple publishers converge on the same event and expose the complete source
+set. Publishing the existing AI briefing directly would attach predictions and causal
+claims to an automated account, so the social writer has a narrower evidence contract and
+falls back to the neutral event title whenever generation or verification is uncertain.
+
+**How it was verified** — On rainbow-boi, the focused social/importance/SSR suite reported
+24 passed in 3.05s; the Flask route/Jinja import check and PowerShell parser check also passed.
+A production-DuckDB replay found 217 clusters and eight operational-topic
+clusters in the latest 24 hours; it also showed why topic assignment must operate at cluster
+level (one judged member can represent many near-duplicate sources). With the corrected rule,
+the six-hour dry run completed with the explicit `HEALTHY:` contract and correctly emitted no
+late posts: the only currently active operational clusters began more than 24 hours earlier.
+
+**Files** — `pipeline/social_publisher.py`, `dashboard/social_store.py`,
+`dashboard/routes/social.py`, `dashboard/routes/pages.py`, social admin/event templates and
+CSS, `scripts/register_social_task.ps1`, `tests/test_social.py`, and
+`docs/bluesky_setup.md`.
+
+**Notes** — No account or secret was created. The dedicated Bluesky account, custom-domain
+verification, app password and separately attributed gateway key require Sidd's interactive
+setup. Until then the worker safely builds factual-fallback review candidates and cannot
+publish. Posts link to `/event/<id>?src=bsky`; attribution stores daily aggregate counts only.
+
+---
+
 ## 2026-09-19 — Briefing loading banner had no sense of what it was replacing
 
 **What** — When the briefing panel shows "Writing this briefing now" / "Updating this

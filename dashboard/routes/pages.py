@@ -375,7 +375,19 @@ def event_detail(cluster_id):
         "latest_seen": _fmt_event_ts(latest_seen),
         "members": members,
     }
-    return render_template("event_detail.html", cluster=cluster, error=None)
+    social = None
+    try:
+        from social_store import published_context, record_visit
+        social = published_context(cluster_id)
+        record_visit(cluster_id, request.args.get("src", ""))
+    except Exception:
+        # Social attribution/context must never make an evidence page fail.
+        social = None
+    return render_template(
+        "event_detail.html", cluster=cluster, social=social, error=None,
+        canonical=f"{CANON_BASE}/event/{cid}",
+        og_image=f"{CANON_BASE}/static/og-card.png",
+    )
 
 
 

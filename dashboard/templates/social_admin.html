@@ -1,0 +1,108 @@
+{% extends "base.html" %}
+{% block title %}Social Review — GDELT Monitor{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/social_admin.css">{% endblock %}
+{% block content %}
+<main class="social-wrap">
+  <header class="social-head">
+    <div>
+      <p class="eyebrow">GDELT Monitor</p>
+      <h1>Bluesky signal review</h1>
+      <p class="sub">Review-first publishing. Approvals are queued for the worker; rejection labels teach the launch threshold.</p>
+    </div>
+    <a href="/admin/users">User admin</a>
+  </header>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+      <div class="flash {{ category }}">{{ message }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  <section class="status-grid">
+    <div><span>Mode</span><strong>{{ summary.mode }}</strong></div>
+    <div><span>Pending</span><strong>{{ summary.counts.get('pending', 0) }}</strong></div>
+    <div><span>Reviewed</span><strong>{{ summary.reviewed }}</strong></div>
+    <div><span>Approval rate</span><strong>{{ ((summary.approval_rate or 0) * 100)|round|int }}%</strong></div>
+    <div><span>Bluesky visits · 30d</span><strong>{{ summary.bluesky_visits_30d }}</strong></div>
+  </section>
+
+  <section class="setup">
+    <div class="setup-row {{ 'ready' if credentials_ready else 'waiting' }}">
+      <strong>Bluesky publisher</strong>
+      <span>{{ 'credentials configured' if credentials_ready else 'waiting for dedicated account app password' }}</span>
+    </div>
+    <div class="setup-row {{ 'ready' if gateway_ready else 'waiting' }}">
+      <strong>Grounded explainers</strong>
+      <span>{{ 'dedicated gateway key configured' if gateway_ready else 'using factual fallback until dedicated key is configured' }}</span>
+    </div>
+    <div class="setup-row {{ 'ready' if summary.auto_ready else 'waiting' }}">
+      <strong>Autopost calibration</strong>
+      <span>{{ 'pilot gate passed' if summary.auto_ready else 'locked until 50+ reviewed candidates pass holdout checks' }}</span>
+    </div>
+  </section>
+
+  <form class="mode-form" method="post" action="/admin/social/mode">
+    <label for="mode">Publisher mode</label>
+    <select id="mode" name="mode">
+      {% for mode in ['off', 'review', 'auto'] %}
+        <option value="{{ mode }}" {{ 'selected' if summary.mode == mode else '' }}>{{ mode }}</option>
+      {% endfor %}
+    </select>
+    <button type="submit">Save mode</button>
+    <small>Auto stays locked until calibration passes.</small>
+  </form>
+
+  {% if summary.last_run %}
+  <p class="runline">Last worker run: {{ summary.last_run.started_at }} UTC · {{ summary.last_run.outcome }} ·
+    scanned {{ summary.last_run.scanned }}, queued {{ summary.last_run.queued }}, published {{ summary.last_run.published }}
+    {% if summary.last_run.error_message %}· {{ summary.last_run.error_message }}{% endif %}
+  </p>
+  {% endif %}
+
+  <section class="queue">
+    <h2>Candidate queue</h2>
+    {% if not candidates %}<p class="empty">No candidates yet. The worker will add fresh multi-source events.</p>{% endif %}
+    {% for c in candidates %}
+    <article class="candidate candidate-{{ c.status }}">
+      <div class="candidate-meta">
+        <span class="topic">{{ c.topic_name }}</span>
+        <span>{{ c.source_count }} sources</span>
+        <span>{{ c.coverage_span_hours|round(1) }}h span</span>
+        <span>score {{ '%.3f'|format(c.importance_score) }}</span>
+        <span class="status">{{ c.status }}</span>
+      </div>
+      <h3><a href="/event/{{ c.cluster_id }}" target="_blank">{{ c.title }}</a></h3>
+      <pre class="post-preview">{{ c.post_text }}</pre>
+      <p class="grounding {{ 'pass' if c.grounding.get('supported') else 'fallback' }}">
+        {{ 'Grounded explainer' if c.explanation_kind == 'generated' else 'Factual fallback' }}:
+        {{ c.grounding.get('reason', 'no reason recorded') }}
+      </p>
+      <details>
+        <summary>Inspect {{ c.members|length }} stored source variants</summary>
+        <ol class="sources">
+          {% for m in c.members[:20] %}
+            <li><a href="{{ m.url }}" target="_blank" rel="noopener">{{ m.outlet or m.domain or 'source' }} — {{ m.title }}</a></li>
+          {% endfor %}
+        </ol>
+      </details>
+      {% if c.status in ['pending', 'approved'] %}
+      <form class="review-form" method="post" action="/admin/social/{{ c.cluster_id }}/review">
+        <label>Explanation
+          <textarea name="explanation" maxlength="150" rows="3">{{ c.explanation }}</textarea>
+        </label>
+        <label>Review note <input name="reason" maxlength="500" placeholder="Required when rejecting; note unsupported claims explicitly"></label>
+        <div class="actions">
+          <button type="submit" name="action" value="approve" class="approve">Approve for publishing</button>
+          <button type="submit" name="action" value="reject" class="reject">Reject</button>
+        </div>
+      </form>
+      {% elif c.rejection_reason %}
+        <p class="review-note">Review note: {{ c.rejection_reason }}</p>
+      {% endif %}
+    </article>
+    {% endfor %}
+  </section>
+
+  <footer><a href="/">Dashboard</a> · <a href="/methodology">Methodology</a></footer>
+</main>
+{% endblock %}

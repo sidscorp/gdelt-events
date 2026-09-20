@@ -9,6 +9,7 @@ from flask import Flask, request, g
 
 from models import init_user_db
 from auth import init_auth
+from social_store import init_social_db
 
 from _paths import DB_PATH, LOG_DIR
 LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -18,6 +19,7 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 app = Flask(__name__)
 app.jinja_env.filters["from_json"] = json.loads
 init_user_db()
+init_social_db()
 init_auth(app)
 
 # Dedicated request logger — captures per-request timing so backend slowness
@@ -73,6 +75,7 @@ from routes.api_feed import bp as api_feed_bp
 from routes.api_briefing import bp as api_briefing_bp
 from routes.api_pills import bp as api_pills_bp
 from routes.sec_analysis import bp as sec_bp
+from routes.social import bp as social_bp
 
 app.register_blueprint(pages_bp)
 app.register_blueprint(auth_bp)
@@ -80,6 +83,7 @@ app.register_blueprint(api_feed_bp)
 app.register_blueprint(api_briefing_bp)
 app.register_blueprint(api_pills_bp)
 app.register_blueprint(sec_bp)
+app.register_blueprint(social_bp)
 
 
 if __name__ == "__main__":

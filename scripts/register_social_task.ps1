@@ -27,9 +27,12 @@ CreateObject("WScript.Shell").Run cmd, 0, False
 
 $action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "`"$vbs`""
 $start = (Get-Date).AddMinutes(2)
+# Task Scheduler rejects TimeSpan.MaxValue as an out-of-range ISO duration.
+# Ten years is operationally indefinite while remaining valid task XML.
+$repeatDuration = New-TimeSpan -Days 3650
 $trigger = New-ScheduledTaskTrigger -Once -At $start `
     -RepetitionInterval (New-TimeSpan -Minutes 15) `
-    -RepetitionDuration ([TimeSpan]::MaxValue)
+    -RepetitionDuration $repeatDuration
 $settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
     -AllowStartIfOnBatteries `

@@ -1,21 +1,119 @@
-// Minimal markdown renderer
-function renderMd(text) {
-  // First pass: convert markdown to HTML tokens
-  let html = text
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/^### (.+)$/gm, '<h4 style="font-size:0.85rem;margin:0.5rem 0 0.15rem;font-weight:600;">$1</h4>')
-    .replace(/^## (.+)$/gm, '<h4 style="font-size:0.88rem;margin:0.6rem 0 0.15rem;font-weight:600;">$1</h4>')
-    .replace(/^[•\-\*] (.+)$/gm, '<<LI>>$1<</LI>>');
-  // Wrap consecutive LI tokens in a tight UL
-  html = html.replace(/(<<LI>>.*?<<\/LI>>\n?)+/g, (match) => {
-    const items = match.replace(/<<LI>>/g, '<li>').replace(/<<\/LI>>/g, '</li>');
-    return '<ul style="list-style:disc;padding-left:1.2rem;margin:0.2rem 0;">' + items + '</ul>';
-  });
-  // Clean up newlines — but not inside lists
-  html = html.replace(/\n\n/g, '<br>').replace(/\n/g, ' ');
-  return html;
+// ---------------------------------------------------------------------------
+// Briefing markdown renderer
+//
+// Briefing text reaches this file three ways — streamed raw from the model,
+// replayed from briefing_cache (already run through briefing._normalize_briefing),
+// or re-hydrated from a localStorage snapshot. They must all render identically,
+// so every quirk is smoothed out here rather than upstream.
+// ---------------------------------------------------------------------------
+
+// The model is inconsistent run to run: some briefings cite [3], others 【3】
+// (fullwidth brackets fall back to a CJK font, so they show as unlinked glyphs
+// with a wide gap before the sentence period). It also sprinkles U+202F narrow
+// no-break spaces and U+2011 non-breaking hyphens, which do the same thing
+// mid-word. Fold all of it back to plain ASCII before parsing.
+function normalizeBriefingText(text) {
+  return String(text == null ? '' : text)
+    // \u3010N\u3011 \u3014N\u3015 \uff3bN\uff3d [[N]] [N,M]  ->  [N] / [N][M]
+    .replace(/[\u3010\u3014\uff3b\[]{1,2}\s*(\d+(?:\s*[,\uff0c\u3001]\s*\d+)*)\s*[\u3011\u3015\uff3d\]]{1,2}/g,
+      (_m, nums) => nums.split(/[,\uff0c\u3001]/).map((n) => '[' + n.trim() + ']').join(''))
+    .replace(/[\u00a0\u2009\u202f]/g, ' ')   // nbsp / thin space / narrow no-break space
+    .replace(/\u2011/g, '-')                   // non-breaking hyphen
+    // Citation placement drifts too: one briefing writes "...this week[3].",
+    // the next "...this week. [3]". Pull a line-final period back inside and
+    // drop any space before a marker so citations always hug their clause.
+    .replace(/([.!?])\s*((?:\[\d+\])+)\s*$/gm, '$2$1')
+    .replace(/[ \t]+((?:\[\d+\])+)/g, '$1');
+}
+
+// While the briefing streams, its tail is always mid-token: "**at least nine"
+// has no closing "**" yet. Rendering that verbatim paints raw asterisks that
+// snap to bold a beat later — the flicker you see on every load. Drop the
+// dangling opener instead so the words keep flowing and the syntax never shows.
+function trimOpenMarkup(text) {
+  let s = text;
+  // Two passes: a closing "**" arrives one character at a time, so the frame
+  // where only its first "*" has landed leaves a lone "*" behind once the
+  // unmatched opener is removed.
+  for (let pass = 0; pass < 2; pass++) {
+    // Scan for runs of '*', ignoring any that are a list marker ("* item").
+    const runs = [];
+    for (let i = 0; i < s.length; i++) {
+      if (s[i] !== '*') continue;
+      let j = i;
+      while (s[j] === '*') j++;
+      const len = j - i;
+      const atLineStart = i === 0 || s[i - 1] === '\n';
+      if (!(len === 1 && atLineStart && s[j] === ' ')) runs.push({ i: i, len: len });
+      i = j - 1;
+    }
+    let bold = 0, ital = 0, lastBold = -1, lastItal = -1;
+    for (const r of runs) {
+      if (r.len >= 2) { bold++; lastBold = r.i; } else { ital++; lastItal = r.i; }
+    }
+    if (bold % 2 === 1) s = s.slice(0, lastBold) + s.slice(lastBold + 2);
+    else if (ital % 2 === 1) s = s.slice(0, lastItal) + s.slice(lastItal + 1);
+    else break;
+  }
+  // A half-arrived citation marker or heading hash, likewise.
+  return s.replace(/[\[\u3010\u3014\uff3b][\d,\s]*$/, '').replace(/(^|\n)#{1,4}\s*$/, '$1');
+}
+
+function _mdEscape(s) {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function _mdInline(s) {
+  return _mdEscape(s)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+}
+
+// Block-level render. Emits plain semantic tags with no inline styles — the
+// briefing's look lives entirely in .briefing-body CSS. (The old renderer
+// inline-styled its <ul> with list-style:disc, which beat the stylesheet's
+// list-style:none and drew a second bullet next to the ▸ marker.)
+function renderMd(text, opts) {
+  let src = normalizeBriefingText(text);
+  if (opts && opts.streaming) src = trimOpenMarkup(src);
+
+  const out = [];
+  let list = null;
+  let para = [];
+
+  const flushPara = () => {
+    if (para.length) { out.push('<p>' + _mdInline(para.join(' ')) + '</p>'); para = []; }
+  };
+  const flushList = () => {
+    if (list) { out.push('<ul>' + list.join('') + '</ul>'); list = null; }
+  };
+
+  for (const raw of src.split('\n')) {
+    const line = raw.trim();
+    if (!line) { flushPara(); flushList(); continue; }
+
+    const li = line.match(/^(?:[-*\u2022\u2023\u25aa\u2013]|\d+[.)])\s+(.*)$/);
+    if (li) {
+      flushPara();
+      (list || (list = [])).push('<li>' + _mdInline(li[1]) + '</li>');
+      continue;
+    }
+
+    const h = line.match(/^(#{1,4})\s+(.*)$/);
+    if (h) {
+      flushPara(); flushList();
+      out.push('<h4>' + _mdInline(h[2]) + '</h4>');
+      continue;
+    }
+
+    // Prose. Consecutive non-blank lines are one paragraph, so a hard-wrapped
+    // paragraph doesn't shatter into a stack of one-line <p>s.
+    flushList();
+    para.push(line);
+  }
+  flushPara();
+  flushList();
+  return out.join('');
 }
 
 // Turn [N] citation markers into clickable superscripts linking to the source's
@@ -38,20 +136,91 @@ let _briefingView = null;
 let _briefingHours = null;
 let _briefingAbort = null;
 
+// Live freshness bar ticker
+let _freshnessTimer = null;
+let _freshnessData = null;
+// Survives stopFreshnessTicker() (which nulls _freshnessData) so dismiss→restore
+// and history→back can re-arm the ticker with what was last known.
+let _lastFreshness = null;
+
+// Briefing-history state. These MUST be declared above the module-load call to
+// fetchBriefing() below, not down in the history section where they are used.
+// fetchBriefing() calls _histExit() on its very first line of real work; the
+// function declaration hoists, but a `let` does not initialize until its own
+// line runs, so declaring these later put them in the temporal dead zone and
+// _histExit() threw `Cannot access '_histViewing' before initialization` on
+// EVERY page load. That throw happened *after* fetchBriefing() had already set
+// _briefingView/_briefingHours, so the unchanged-view guard then swallowed every
+// later call and the briefing was never fetched client-side at all — the page
+// showed whatever the server had rendered, however stale, with no freshness line
+// and no regeneration. That was the original bug.
+let _histList = null;     // snapshots for the current view|hours
+let _histKey = null;
+let _histOpen = false;
+let _histViewing = null;  // briefing_history id currently displayed
+let _liveBackup = null;   // {html, meta} to restore the live briefing
+
+function stopFreshnessTicker() {
+  if (_freshnessTimer) { clearInterval(_freshnessTimer); _freshnessTimer = null; }
+  _freshnessData = null;
+}
+
+function updateFreshnessBar() {
+  if (!_freshnessData) return;
+  const el = document.getElementById('briefingFreshness');
+  if (!el) return;
+  const { generatedAt, ttlS, articleCount } = _freshnessData;
+  const now = Date.now();
+  const gen = new Date(generatedAt + 'Z');
+  if (isNaN(gen.getTime())) { el.innerHTML = ''; return; }
+  const elapsed = Math.max(0, Math.floor((now - gen.getTime()) / 1000));
+  const remaining = Math.max(0, ttlS - elapsed);
+
+  const elapsedLabel = elapsed < 60 ? `${elapsed}s` : elapsed < 3600 ? `${Math.floor(elapsed / 60)}m ago` : `${Math.floor(elapsed / 3600)}h ago`;
+  const remainLabel = remaining <= 0 ? 'any moment' : remaining < 60 ? `~${remaining}s` : remaining < 3600 ? `~${Math.floor(remaining / 60)}m` : `~${Math.floor(remaining / 3600)}h`;
+
+  const ratio = ttlS > 0 ? Math.min(1, elapsed / ttlS) : 0;
+  let cls = '';
+  if (ratio > 0.9) cls = 'bf-stale';
+  else if (ratio > 0.5) cls = 'bf-aging';
+
+  el.className = 'briefing-freshness ' + cls;
+  el.innerHTML = '<span class="bf-elapsed">Generated ' + elapsedLabel + '</span>'
+    + (ttlS > 0 ? ' <span class="bf-sep">·</span> <span class="bf-next">Next update in ' + remainLabel + '</span>' : '')
+    + (articleCount ? ' <span class="bf-sep">·</span> <span class="bf-count">From ' + articleCount + ' articles</span>' : '');
+}
+
+function startFreshnessTicker(generatedAt, ttlS, articleCount) {
+  if (!generatedAt) return;
+  stopFreshnessTicker();
+  _freshnessData = { generatedAt, ttlS: ttlS || 0, articleCount: articleCount || 0 };
+  _lastFreshness = _freshnessData;
+  updateFreshnessBar();
+  _freshnessTimer = setInterval(updateFreshnessBar, 15000);
+}
+
 // Dismiss collapses the panel into a small restore pill instead of hiding it
 // outright, so there's always a way back without switching views or waiting
 // on the 15-min auto-refresh.
 function dismissBriefing() {
   const p = document.getElementById('briefingPanel');
   const r = document.getElementById('briefingRestore');
+  const f = document.getElementById('briefingFreshness');
   if (p) p.style.display = 'none';
   if (r) r.style.display = '';
+  if (f) f.innerHTML = '';
+  stopFreshnessTicker();
 }
 function restoreBriefing() {
   const p = document.getElementById('briefingPanel');
   const r = document.getElementById('briefingRestore');
   if (p) p.style.display = '';
   if (r) r.style.display = 'none';
+  // dismissBriefing() blanked the freshness line and stopped its ticker; without
+  // re-arming here the restored briefing sits there with no age on it forever.
+  if (_lastFreshness) {
+    startFreshnessTicker(_lastFreshness.generatedAt, _lastFreshness.ttlS, _lastFreshness.articleCount);
+  }
 }
 
 async function fetchBriefing() {
@@ -73,9 +242,109 @@ async function fetchBriefing() {
   if (_briefingView !== null && view === _briefingView && hours === _briefingHours) return;
   _briefingView = view;
   _briefingHours = hours;
+  if (typeof _histExit === 'function') _histExit();
+  stopFreshnessTicker();
+  const frEl = document.getElementById('briefingFreshness');
+  if (frEl) frEl.innerHTML = '';
 
   // Abort any in-flight briefing
   if (_briefingAbort) { _briefingAbort.abort(); _briefingAbort = null; }
+
+// --- "we are writing your briefing" state -----------------------------------
+// Timings are measured, not guessed (perf_samples, 2026-08-29): a CACHED briefing
+// lands at p50 0.2s / p90 0.8s, a LIVE generation shows its first text at p50 0.34s
+// and finishes at p50 2.9s / p90 10.8s.
+//
+// Two consequences, both deliberate:
+//   * The panel is delayed by SHOW_AFTER_MS. 90% of cached briefings arrive inside
+//     0.8s, so showing it immediately would flash a "generating" message on almost
+//     every warm page load, which reads as slowness rather than transparency.
+//   * It stays up until `done`, not until the first token. First text lands at
+//     ~0.34s; a note that disappears that fast is a note nobody reads, and the
+//     wait people actually feel is the ~3s to a complete briefing.
+const BRIEF_PROGRESS_SHOW_AFTER_MS = 700;
+let _briefProgressTick = null;
+let _briefProgressDelay = null;
+let _briefProgressPriorAt = null;   // generated_at of the briefing this one is replacing, if known
+let _briefProgressRepaint = null;   // current paint() closure, so a late-arriving prior can repaint in place
+
+function _briefProgressHost() {
+  let el = document.getElementById('briefingProgress');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'briefingProgress';
+    el.className = 'brief-progress';
+    el.setAttribute('role', 'status');      // announced to screen readers…
+    el.setAttribute('aria-live', 'polite');  // …without interrupting them
+    // Anchored ABOVE the briefing text, not below it: a cold-regen notice at the
+    // bottom was invisible to a reader already scrolling through the old text.
+    const textEl = document.getElementById('briefingText');
+    textEl.parentNode.insertBefore(el, textEl);
+  }
+  return el;
+}
+
+function showBriefProgress(coldStart, priorGeneratedAt) {
+  hideBriefProgress();
+  const t0 = performance.now();
+  _briefProgressPriorAt = priorGeneratedAt || null;
+  _briefProgressDelay = setTimeout(() => {
+    const host = _briefProgressHost();
+    // The panel is the single status voice once it appears. Without this the
+    // meta line's "Generating briefing…" sits directly above the panel's
+    // "Writing this briefing now · 3s" and the user reads the same fact twice.
+    const meta = document.getElementById('briefingMeta');
+    if (meta) meta.textContent = '';
+    const paint = () => {
+      const secs = Math.round((performance.now() - t0) / 1000);
+      // Wove as a sentence rather than a terse timestamp tag, so the reader
+      // gets the "why" (a version already exists, this replaces it) along
+      // with the "when" — a bare "· 14:12" reads as cryptic on first glance.
+      const priorSentence = _briefProgressPriorAt
+        ? (coldStart
+            ? 'The last version of this briefing was generated ' + _histFmt(_briefProgressPriorAt) +
+              '; a fresh one is being written now to reflect the latest coverage. '
+            : 'You’re currently viewing the version generated ' + _histFmt(_briefProgressPriorAt) +
+              '; it’s being refreshed now. ')
+        : '';
+      host.innerHTML =
+        '<div class="brief-progress-row">' +
+          '<span class="brief-spinner" aria-hidden="true"></span>' +
+          '<span class="brief-progress-label">' +
+            (coldStart ? 'Writing this briefing now' : 'Updating this briefing') +
+            (secs >= 1 ? ' · ' + secs + 's' : '') +
+          '</span>' +
+        '</div>' +
+        '<div class="brief-progress-note">' + priorSentence +
+          'Usually ready in a few seconds. ' +
+          'Only the most-read views are written ahead of time — this one is generated ' +
+          'on demand, which keeps the running costs of the site down.' +
+        '</div>';
+    };
+    _briefProgressRepaint = paint;
+    paint();
+    host.style.display = '';
+    _briefProgressTick = setInterval(paint, 1000);
+  }, BRIEF_PROGRESS_SHOW_AFTER_MS);
+}
+
+function hideBriefProgress() {
+  if (_briefProgressDelay) { clearTimeout(_briefProgressDelay); _briefProgressDelay = null; }
+  if (_briefProgressTick) { clearInterval(_briefProgressTick); _briefProgressTick = null; }
+  _briefProgressRepaint = null;
+  _briefProgressPriorAt = null;
+  const el = document.getElementById('briefingProgress');
+  if (el) { el.style.display = 'none'; el.innerHTML = ''; }
+}
+
+// Called when a stale cache's generated_at lands mid-stream (SSE phase 1),
+// i.e. after showBriefProgress() already ran not knowing it existed. No-op
+// once the progress panel has been hidden.
+function noteBriefProgressPrior(generatedAt) {
+  if (!generatedAt || _briefProgressPriorAt === generatedAt) return;
+  _briefProgressPriorAt = generatedAt;
+  if (_briefProgressRepaint) _briefProgressRepaint();
+}
 
   const panel = document.getElementById('briefingPanel');
   const textEl = document.getElementById('briefingText');
@@ -86,6 +355,7 @@ async function fetchBriefing() {
   // shimmer skeleton — never another view's briefing posing as current.
   const wantKey = `${view}|${hours}`;
   const keepText = textEl.dataset.key === wantKey && textEl.textContent.trim().length > 0;
+  const priorGeneratedAt = keepText ? (textEl.dataset.generatedAt || null) : null;
   if (!keepText) {
     textEl.innerHTML =
       '<div class="brief-skel" aria-hidden="true">' +
@@ -96,6 +366,7 @@ async function fetchBriefing() {
       '</div>';
   }
   metaEl.textContent = keepText ? 'Updating…' : 'Generating briefing…';
+  showBriefProgress(!keepText, priorGeneratedAt);
   panel.style.display = '';
   const restoreEl = document.getElementById('briefingRestore');
   if (restoreEl) restoreEl.style.display = 'none';
@@ -126,27 +397,70 @@ async function fetchBriefing() {
       try {
         const data = JSON.parse(line.slice(6));
         if (data.error) {
+          hideBriefProgress();
           if (data.found !== undefined) {
             textEl.innerHTML = '<span style="color:var(--text-tertiary); font-style:italic;">Not enough recent articles for a briefing — try a wider time range.</span>';
             metaEl.textContent = '';
-          } else {
+          } else if (!textEl.textContent.trim()) {
             panel.style.display = 'none';
+          } else {
+            metaEl.textContent = 'Using cached briefing';
           }
           return true;
         }
-        if (data.sources) sourcesMap = data.sources;
+        // /api/briefing streams in two phases: the cached briefing in full
+        // (done:false), then — if that cache was stale — a freshly generated
+        // one on the same connection. The server re-sends `sources` to open
+        // phase two, which is the only signal that what follows REPLACES what
+        // we have rather than continuing it. Without this reset the reader
+        // sees the cached briefing with the new one appended to it.
+        if (data.sources) {
+          if (fullText) fullText = '';
+          sourcesMap = data.sources;
+        }
         if (data.text) {
           if (!briefFirstMarked && window.perfMark) { briefFirstMarked = true; window.perfMark('briefing_first', performance.now() - briefStart); }
           fullText += data.text;
-          textEl.innerHTML = linkifyCitations(renderMd(fullText), sourcesMap);
+          // streaming:true while tokens are still arriving — the trailing
+          // half-written **bold** is hidden rather than shown as raw asterisks.
+          textEl.innerHTML = linkifyCitations(
+            renderMd(fullText, { streaming: !data.done }), sourcesMap);
           textEl.dataset.key = wantKey; // this content now belongs to this view/window
         }
         if (data.article_count) articleCount = data.article_count;
+        // Phase 1 hands us cached text that can be HOURS older than the window it
+        // claims to summarize (a 3h briefing served 11h stale was the bug that
+        // found this). The server already sends generated_at here, so age the text
+        // the moment it is painted — waiting for `done` means the whole time the
+        // reader is on stale copy there is nothing on screen saying so.
+        if (data.generated_at && !data.done) {
+          startFreshnessTicker(data.generated_at, data.cache_ttl_s, data.article_count);
+          textEl.dataset.generatedAt = data.generated_at;
+          noteBriefProgressPrior(data.generated_at);
+        }
         if (data.done) {
-          const label = data.cached ? 'cached' : 'just generated';
+          hideBriefProgress();
+          // Final repaint with markup complete, so nothing stays trimmed.
+          if (fullText) textEl.innerHTML = linkifyCitations(renderMd(fullText), sourcesMap);
+          // 'refreshed' means stale cached text was just replaced in place.
+          let label;
+          if (data.meta) label = data.meta;
+          else if (data.refreshed) label = 'just refreshed';
+          else if (data.cached) label = 'cached';
+          else label = 'just generated';
           metaEl.textContent = articleCount ? `From ${articleCount} articles · ${label}` : '';
           if (window.perfMark) { window.perfMark(data.cached ? 'briefing_done_cached' : 'briefing_done', performance.now() - briefStart); window.perfFlush(); }
+          // Start the live freshness countdown: generated_at in UTC, TTL from server.
+          // MUST run before saveSnapshot(): the snapshot serializes the freshness
+          // element's innerHTML, so saving first persisted an empty label and the
+          // instant-paint on next boot could never restore it.
+          if (data.generated_at || data.cache_ttl_s) {
+            startFreshnessTicker(data.generated_at, data.cache_ttl_s, data.article_count);
+          }
+          if (data.generated_at) textEl.dataset.generatedAt = data.generated_at;
+          if (typeof setBriefingCoverage === 'function') setBriefingCoverage(sourcesMap);
           if (typeof saveSnapshot === 'function') saveSnapshot();
+          updateBriefHistoryLink();
         }
       } catch (_) {}
       return false;
@@ -168,17 +482,37 @@ async function fetchBriefing() {
     }
     // Flush any final line left without a trailing newline.
     if (buffer && handleLine(buffer)) return;
+    hideBriefProgress();
     if (!fullText.trim()) {
       textEl.innerHTML = '<span style="color:var(--text-tertiary); font-style:italic;">Briefing unavailable — try a wider time range.</span>';
       metaEl.textContent = '';
     }
   } catch (err) {
-    if (err.name !== 'AbortError') panel.style.display = 'none';
+    // Includes the abort path: switching view mid-generation must not leave a
+    // stale "writing…" ticker running under the new view's briefing.
+    hideBriefProgress();
+    if (err.name !== 'AbortError' && !textEl.textContent.trim()) panel.style.display = 'none';
   }
 }
 
 // Trigger briefing on initial page load
 fetchBriefing();
+
+// A tab left open never re-checked: fetchBriefing() only runs at boot and on a
+// view/hours change, and early-returns otherwise. That is how a 3-hour briefing
+// stayed on screen 11 hours after it was written. On refocus, re-fetch only if
+// the text we are showing has actually outlived its TTL — regeneration costs
+// money, so an in-TTL briefing must not trigger one.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (!_lastFreshness || !_lastFreshness.ttlS) return;
+  const gen = new Date(_lastFreshness.generatedAt + 'Z');
+  if (isNaN(gen.getTime())) return;
+  const elapsed = (Date.now() - gen.getTime()) / 1000;
+  if (elapsed < _lastFreshness.ttlS) return;
+  _briefingView = null;   // defeat the unchanged-view guard
+  fetchBriefing();
+});
 
 // ---------------------------------------------------------------------------
 // FDA Regulatory Events panel
@@ -216,11 +550,15 @@ async function loadFdaEvents(hours) {
   const list = document.getElementById('fdaEventsList');
   const countEl = document.getElementById('fdaEventCount');
   if (!panel) return;
-  panel.style.display = '';
+  // display:'' alone does NOT show the panel - the stylesheet keeps the id at
+  // display:none, so clearing the inline style falls back to hidden.
+  panel.style.display = 'block';
   _fdaEventsLoaded = true;
 
-  // Convert hours to days for the API
-  const days = Math.max(1, Math.min(90, Math.ceil((hours || 168) / 24)));
+  // Convert hours to days for the API. Floor at 30: FDA regenerates these feeds
+  // weekly (510(k)s monthly), so a raw 24h feed window almost always reads
+  // "No FDA regulatory actions" — a true-but-misleading empty state.
+  const days = Math.max(30, Math.min(90, Math.ceil((hours || 168) / 24)));
   try {
     const resp = await fetch(`/api/fda_events?days=${days}`);
     const data = await resp.json();
@@ -232,12 +570,20 @@ async function loadFdaEvents(hours) {
     countEl.textContent = `(${data.events.length})`;
     list.innerHTML = data.events.slice(0, 50).map(e => {
       const firm = (e.firm_name || '').substring(0, 40);
-      const desc = (e.product_description || e.reason_for_recall || '').substring(0, 120);
+      const fullDesc = (e.product_description || '').trim();
+      const fullReason = (e.reason_for_recall || '').trim();
+      const descFull = (fullDesc + (fullReason && fullReason !== fullDesc ? ' — Reason: ' + fullReason : '')).trim();
+      const descShort = descFull.substring(0, 120);
       const classLabel = e.recall_class ? ` ${e.recall_class.replace(/^Class\s*/i, 'Class ')}` : '';
-      return `<div class="fda-event-row">
+      // 510(k) clearances have a canonical FDA page keyed by the K-number;
+      // enforcement/recall records have no stable public URL - those rows
+      // expand for the full text and the firm name filters the news instead.
+      const srcUrl = e.event_type === '510k'
+        ? `https://www.accessdata.fda.gov/scripts/cdrh/cfdocs/cfpmn/pmn.cfm?ID=${encodeURIComponent(e.event_id)}` : null;
+      return `<div class="fda-event-row" onclick="this.classList.toggle('open')" title="Click to expand">
         <span class="fda-event-badge ${_fdaBadgeClass(e.event_type)}">${_fdaBadgeLabel(e.event_type)}${classLabel}</span>
-        <span class="fda-event-firm" title="${(e.firm_name||'').replace(/"/g,'&quot;')}" onclick="applyFilter('org','${firm.replace(/'/g,"\'")}') ">${firm}</span>
-        <span class="fda-event-desc" title="${(desc||'').replace(/"/g,'&quot;')}">${desc}</span>
+        <span class="fda-event-firm" title="Filter the news to this company" onclick="event.stopPropagation();applyFilter('org','${firm.replace(/'/g,"\\'")}')">${firm}</span>
+        <span class="fda-event-desc"><span class="d-short">${descShort}</span><span class="d-full">${descFull}</span>${srcUrl ? ` <a class="fda-src" href="${srcUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()">FDA&nbsp;page&nbsp;↗</a>` : ''}</span>
         <span class="fda-event-date">${_fdaDateFmt(e.event_date)}</span>
       </div>`;
     }).join('');
@@ -252,3 +598,134 @@ function hideFdaPanel() {
   _fdaEventsLoaded = false;
 }
 
+
+// ---------------------------------------------------------------------------
+// Briefing timeline ("scroll back in time")
+//
+// briefing_history has kept one row per briefing generation since 2026-07-26
+// (~3k rows, growing ~70/day, mostly prewarm-driven for the popular combos).
+// This module shows a snapshot strip for the current view|hours, renders a
+// stored briefing through the same renderer as the live one on click, and a
+// single click returns to live with the freshness ticker restored.
+// ---------------------------------------------------------------------------
+// NOTE: the state these functions read is declared near the top of this file,
+// NOT here. fetchBriefing() runs at module load and calls _histExit(), which
+// reads _histViewing — so a `let` declared at this point in the file is still
+// in its temporal dead zone and throws. See the declaration site for details.
+
+function _histHost() {
+  return document.getElementById('briefHist');
+}
+function _histPanel() {
+  return document.getElementById('briefHistPanel');
+}
+function _histFmt(ts) {
+  // stored 'YYYY-MM-DD HH:MM:SS' is UTC; render local with day context
+  const d = new Date(ts.replace(' ', 'T') + 'Z');
+  if (isNaN(d)) return ts;
+  const now = new Date();
+  const dayAgo = (now - d) / 864e5;
+  const hhmm = d.toTimeString().slice(0, 5);
+  if (dayAgo < 1 && d.getDate() === now.getDate()) return 'today ' + hhmm;
+  if (dayAgo < 2) return 'yesterday ' + hhmm;
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + hhmm;
+}
+
+async function updateBriefHistoryLink() {
+  const host = _histHost();
+  if (!host) return;
+  const view = (typeof state !== 'undefined' && state.view) ? state.view : '';
+  const hours = (typeof state !== 'undefined' && state.hours) ? state.hours : 24;
+  const key = view + '|' + hours;
+  if (_histKey !== key) {
+    _histKey = key; _histList = null; _histOpen = false;
+    host.innerHTML = '';
+  }
+  try {
+    const r = await fetch('/api/briefing_history?view=' + encodeURIComponent(view) + '&hours=' + hours);
+    if (!r.ok) return;
+    const d = await r.json();
+    if (!d.snapshots || d.snapshots.length < 2) return;  // a list of one shows nothing
+    _histList = d.snapshots;
+    if (_histOpen) _histRenderList();
+    else host.innerHTML =
+      '<button class="brief-hist-toggle" onclick="toggleBriefHistory()" title="See what past briefings said">' +
+      '⏱ ' + d.total + ' past briefings</button>';
+  } catch (_) {}
+}
+
+function toggleBriefHistory() {
+  _histOpen = !_histOpen;
+  const host = _histHost();
+  if (!_histOpen) { hideBriefHistory(); return; }
+  _histRenderList();
+  host.innerHTML =
+    '<button class="brief-hist-toggle open" onclick="toggleBriefHistory()">⏱ hide history</button>';
+}
+
+function hideBriefHistory() {
+  _histOpen = false;
+  const p = _histPanel();
+  if (p) { p.style.display = 'none'; p.innerHTML = ''; }
+  const host = _histHost();
+  if (host && _histList && _histList.length > 1 && !_histViewing) {
+    host.innerHTML = '<button class="brief-hist-toggle" onclick="toggleBriefHistory()">⏱ ' +
+      _histList.length + ' past briefings</button>';
+  }
+}
+
+function _histRenderList() {
+  const p = _histPanel();
+  if (!p || !_histList) return;
+  p.innerHTML = _histList.map(s =>
+    '<button class="brief-hist-item" data-bid="' + s.id + '" onclick="viewBriefSnapshot(' + s.id + ')">' +
+      '<span class="hist-t">' + _histFmt(s.generated_at) + '</span>' +
+      '<span class="hist-meta">' + (s.article_count || 0) + ' articles' +
+        (s.trigger === 'visit' ? ' · viewed live' : '') + '</span>' +
+    '</button>'
+  ).join('');
+  p.style.display = 'block';
+}
+
+async function viewBriefSnapshot(id) {
+  const textEl = document.getElementById('briefingText');
+  const metaEl = document.getElementById('briefingMeta');
+  if (!textEl) return;
+  // Snapshot the live briefing once so "back to latest" is instant and correct.
+  if (!_liveBackup) {
+    _liveBackup = { html: textEl.innerHTML, meta: metaEl ? metaEl.textContent : '' };
+  }
+  try {
+    const r = await fetch('/api/briefing_history/' + id);
+    if (!r.ok) return;
+    const d = await r.json();
+    _histViewing = id;
+    stopFreshnessTicker();
+    textEl.innerHTML =
+      '<div class="hist-banner">You are reading the briefing as of <strong>' +
+        _histFmt(d.generated_at) + '</strong> — ' + (d.article_count || 0) + ' articles then. ' +
+        '<button class="hist-back" onclick="backToLiveBriefing()">back to the live briefing</button></div>' +
+      linkifyCitations(renderMd(d.briefing || ''), d.sources || []);
+    if (metaEl) metaEl.textContent = 'Historical snapshot';
+    textEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
+  } catch (_) {}
+}
+
+function _histExit() {
+  // Called whenever the live flow takes over (view change, refetch, dismiss).
+  if (!_histViewing) return;
+  backToLiveBriefing();
+  hideBriefHistory();
+}
+
+function backToLiveBriefing() {
+  const textEl = document.getElementById('briefingText');
+  const metaEl = document.getElementById('briefingMeta');
+  if (textEl && _liveBackup) textEl.innerHTML = _liveBackup.html;
+  if (metaEl && _liveBackup) metaEl.textContent = _liveBackup.meta;
+  _liveBackup = null;
+  _histViewing = null;
+  if (_freshnessData) startFreshnessTicker(_freshnessData.generatedAt, _freshnessData.ttlS, _freshnessData.articleCount);
+}
+
+document.addEventListener('DOMContentLoaded', () => setTimeout(updateBriefHistoryLink, 2000));

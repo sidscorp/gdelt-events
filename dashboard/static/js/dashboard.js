@@ -13,6 +13,64 @@ const state = {
   en_only: true, // English-only by default; ?en_only=0 to include all languages
 };
 
+// Keep the SSR feed available instantly, while making the briefing the first
+// reading surface for new visitors.
+const SOURCE_DISCLOSURE_KEY = 'gdelt-source-articles-open';
+let sourceDisclosureAutomatic = false;
+function sourceArticles() { return document.getElementById('sourceArticles'); }
+function updateSourceSummary(total) {
+  const el = document.getElementById('sourceArticlesSummary');
+  if (!el) return;
+  const count = Number.isFinite(total) ? ` · ${total.toLocaleString()} articles` : '';
+  el.textContent = `Explore source articles · ${_viewLabel()} · ${hoursLabel(parseInt(state.hours, 10))}${count}`;
+}
+function openSourceArticles() {
+  const el = sourceArticles();
+  if (el && !el.open) {
+    sourceDisclosureAutomatic = true;
+    el.open = true;
+    setTimeout(() => { sourceDisclosureAutomatic = false; }, 0);
+  }
+}
+
+// A briefing is deliberately concise, but the reader should be able to inspect
+// its editorial breadth without leaving the page.  Sources arrive with the
+// briefing SSE payload; `chosen` is persisted by the editor pass.
+function setBriefingCoverage(sources) {
+  const host = document.getElementById('briefingCoverage');
+  if (!host) return;
+  const candidates = Array.isArray(sources) ? sources : [];
+  if (!candidates.length) { host.innerHTML = ''; return; }
+  const selected = candidates.filter(s => s.chosen);
+  const eventList = rows => rows.map(s => {
+    const title = esc(s.title || s.link || 'Untitled event');
+    const outlet = esc(s.outlet || 'source');
+    const sourcesLabel = s.n_sources > 1 ? ` · ${s.n_sources} sources` : '';
+    const link = s.link ? `<a href="${esc(s.link)}" target="_blank" rel="noopener">${title}</a>` : title;
+    return `<li>${link}<span>${outlet}${sourcesLabel}</span></li>`;
+  }).join('');
+  const selectedLabel = selected.length ? `${selected.length} selected` : 'editor selection unavailable';
+  host.innerHTML =
+    `<span class="coverage-label">Coverage:</span>` +
+    `<details class="coverage-detail"><summary>${candidates.length} events considered</summary>` +
+      `<div class="coverage-popover"><strong>Ranked distinct events considered</strong><ul>${eventList(candidates)}</ul></div>` +
+    `</details>` +
+    `<details class="coverage-detail"><summary>${selectedLabel}</summary>` +
+      `<div class="coverage-popover"><strong>Stories selected for this briefing</strong><ul>${eventList(selected)}</ul>` +
+      `<button type="button" class="coverage-more" onclick="showBriefingInfo()">See editorial reasons</button></div>` +
+    `</details>`;
+}
+(function initSourceDisclosure() {
+  const el = sourceArticles();
+  if (!el) return;
+  el.open = localStorage.getItem(SOURCE_DISCLOSURE_KEY) === '1';
+  el.addEventListener('toggle', () => {
+    if (sourceDisclosureAutomatic) return;
+    localStorage.setItem(SOURCE_DISCLOSURE_KEY, el.open ? '1' : '0');
+    if (el.open) beaconEvent('feed_expand');
+  });
+})();
+
 // Unified feed — no source selection needed
 state.source = 'all';
 
@@ -157,6 +215,7 @@ Object.entries(FILTER_INPUT_MAP).forEach(([id, field]) => {
   if (!el) return;
   el.addEventListener('input', (e) => {
     const val = e.target.value;
+    openSourceArticles();
     // Free-text search hits an ILIKE scan server-side — a 1-2 char prefix is
     // never useful and just burns a ~2s query on every keystroke. Wait for a
     // real prefix (or a full clear) and give it a bit longer to settle.
@@ -174,11 +233,13 @@ Object.entries(FILTER_INPUT_MAP).forEach(([id, field]) => {
   });
 });
 document.getElementById('languageSelect').addEventListener('change', (e) => {
+  openSourceArticles();
   state.language = e.target.value;
   state.page = 1;
   fetchArticles();
 });
 document.getElementById('sortSelect').addEventListener('change', (e) => {
+  openSourceArticles();
   const v = e.target.value;
   if (v === 'importance') {
     state.order = 'importance';
@@ -224,9 +285,10 @@ function updateUrl() {
 // view. Called from the view pill click handler and from init (via
 // fetchViews). Data-driven: reads `available_match_types` off the view.
 function renderMatchProfile() {
-  // Show or hide the FDA Events panel based on whether an FDA view is active
+  // Show or hide the FDA Events panel: on FDA-company views (kind fda_match)
+  // and on the FDA agency pill, where the panel complements regulatory news.
   const curView = state.view ? viewsById[state.view] : null;
-  if (curView && curView.kind === 'fda_match') {
+  if (curView && (curView.kind === 'fda_match' || curView.id === 'fda-agency')) {
     if (!_fdaEventsLoaded) loadFdaEvents(state.hours || 168);
   } else {
     hideFdaPanel();
@@ -520,6 +582,35 @@ function _snapKey(overrides) {
   const ord = state.order === 'date' ? 'date-' + state.sort : 'importance';
   return `snap:${view}|${hours}|${state.en_only ? 1 : 0}|${ord}`;
 }
+let _lastBeacon = { key: '', ts: 0 };
+
+function beaconPageview() {
+  const key = (state.view || '_all') + '|' + (state.hours || 24);
+  const now = Date.now();
+  if (key === _lastBeacon.key && now - _lastBeacon.ts < 120000) return;
+  _lastBeacon = { key, ts: now };
+  const payload = {
+    path: location.pathname + location.search,
+    view_id: state.view || '',
+    hours: parseInt(state.hours) || 0,
+    briefing_key: (state.view || '_all') + ':' + (state.hours || 24),
+    screen_w: screen.width,
+    referrer: document.referrer || '',
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || '',
+  };
+  navigator.sendBeacon('/api/pageview', JSON.stringify(payload));
+}
+
+function beaconEvent(event_type) {
+  navigator.sendBeacon('/api/pageview', JSON.stringify({
+    event_type,
+    path: location.pathname + location.search,
+    view_id: state.view || '',
+    hours: parseInt(state.hours) || 0,
+    briefing_key: (state.view || '_all') + ':' + (state.hours || 24),
+  }));
+}
+
 function saveSnapshot() {
   const k = _snapKey(); if (!k) return;
   try {
@@ -529,6 +620,9 @@ function saveSnapshot() {
       feed: document.getElementById('articleList').innerHTML,
       briefing: (document.getElementById('briefingText') || {}).innerHTML || '',
       briefingMeta: (document.getElementById('briefingMeta') || {}).textContent || '',
+      briefingFreshness: (document.getElementById('briefingFreshness') || {}).innerHTML || '',
+      briefingGeneratedAt: (document.getElementById('briefingText') || {}).dataset
+        ? (document.getElementById('briefingText').dataset.generatedAt || '') : '',
       briefingShown: bp ? bp.style.display !== 'none' : false,
     }));
   } catch (e) {}
@@ -548,7 +642,10 @@ function restoreSnapshot() {
       const bt = document.getElementById('briefingText');
       bt.innerHTML = s.briefing;
       bt.dataset.key = `${state.view}|${state.hours}`; // lets fetchBriefing keep it visible
+      bt.dataset.generatedAt = s.briefingGeneratedAt || '';
       document.getElementById('briefingMeta').textContent = s.briefingMeta || '';
+      const fr = document.getElementById('briefingFreshness');
+      if (fr && s.briefingFreshness) fr.innerHTML = s.briefingFreshness;
     }
     return true;
   } catch (e) { return false; }
@@ -613,6 +710,35 @@ async function showBriefingInfo() {
   const threads = (m.threads_used || []).map(t =>
     `<li><strong>${esc(t.title || '')}</strong> (since ${esc(t.first_seen || '?')}): ${esc(t.summary || '')}</li>`).join('');
 
+  // Editorial selection: an LLM editor picks which candidates the briefing
+  // covers, and says why. Showing what it passed over is the point — it is the
+  // only place a reader can see the judgement rather than just its result.
+  const ed = m.editor_selection || null;
+  const titleOf = n => {
+    const s = (data.sources || []).find(x => x.n === n);
+    return s ? (s.title || s.link || '') : `#${n}`;
+  };
+  const vd = (ed && ed.verdicts) || [];
+  const chosenRows = vd.filter(v => v.verdict === 'chosen').map(v =>
+    `<li><strong>[${v.n}]</strong> ${esc(v.title || titleOf(v.n))}` +
+    (v.reason ? `<br><span style="color:var(--text-tertiary);">${esc(v.reason)}</span>` : '') +
+    `</li>`).join('');
+  const rejectedRows = vd.filter(v => v.verdict === 'not_news').map(v =>
+    `<li><strong>[${v.n}]</strong> ${esc(v.title || titleOf(v.n))}` +
+    (v.reason ? `<br><span style="color:var(--text-tertiary);">not a news article &mdash; ${esc(v.reason)}</span>` : '') +
+    `</li>`).join('');
+  const judgedNs = new Set(vd.map(v => v.n));
+  const passedRows = (data.sources || []).filter(s => !s.chosen && !judgedNs.has(s.n)).map(s =>
+    `<li><strong>[${s.n}]</strong> ${esc(s.title || s.link || '')}</li>`).join('');
+  const editorBlock = !ed ? '' : (
+    ed.fell_back
+      ? `<p style="color:var(--text-tertiary);">Editorial selection was unavailable for this briefing; it fell back to the top ${ed.n_chosen} by Importance.</p>`
+      : `<p><strong>Editorial selection:</strong> ${ed.n_candidates} candidates considered, ${ed.n_chosen} chosen.</p>` +
+        (chosenRows ? `<details open><summary style="cursor:pointer;">Chosen, and why (${vd.filter(v => v.verdict === 'chosen').length})</summary><ul style="margin:.4rem 0 .4rem 1.1rem;">${chosenRows}</ul></details>` : '') +
+        (rejectedRows ? `<details><summary style="cursor:pointer;">Rejected as not news (${vd.filter(v => v.verdict === 'not_news').length})</summary><ul style="margin:.4rem 0 .4rem 1.1rem;">${rejectedRows}</ul></details>` : '') +
+        (passedRows ? `<details><summary style="cursor:pointer;">Considered but not selected (${(data.sources || []).filter(s => !s.chosen && !judgedNs.has(s.n)).length})</summary><ul style="margin:.4rem 0 .4rem 1.1rem;">${passedRows}</ul></details>` : '')
+  );
+
   const modal = document.createElement('div');
   modal.className = 'pill-modal';
   modal.innerHTML = `
@@ -622,12 +748,14 @@ async function showBriefingInfo() {
         <p><strong>Model:</strong> ${esc(m.model || 'unknown (generated before metadata capture)')} ·
            <strong>Generated:</strong> ${esc(data.generated_at || '?')} UTC (${age}) ·
            <strong>Cache:</strong> ${m.cache_ttl_s ? Math.round(m.cache_ttl_s / 60) + ' min' : '45 min'}</p>
-        <p>The briefing summarizes the window's <strong>top ${data.article_count || '?'} events ranked by the same
-           Importance score as the feed</strong> (coverage 0.5 &middot; recency 0.3 &middot; velocity 0.2 —
-           <a href="/methodology" target="_blank">full methodology</a>).</p>
+        <p>${ed && !ed.fell_back
+             ? `Candidates are the window's top events by the same Importance score as the feed (coverage 0.5 &middot; recency 0.3 &middot; velocity 0.2); an editor then chose which to cover`
+             : `The briefing summarizes the window's <strong>top ${data.article_count || '?'} events ranked by the same Importance score as the feed</strong> (coverage 0.5 &middot; recency 0.3 &middot; velocity 0.2)`}
+           — <a href="/methodology" target="_blank">full methodology</a>.</p>
+        ${editorBlock}
         ${cont ? `<details><summary style="cursor:pointer;">Continuity: stories the previous briefing covered (${(m.continuity_titles || []).length})</summary><ul style="margin:.4rem 0 .4rem 1.1rem;">${cont}</ul></details>` : ''}
         ${threads ? `<details><summary style="cursor:pointer;">Ongoing story threads it was tracking (${(m.threads_used || []).length})</summary><ul style="margin:.4rem 0 .4rem 1.1rem;">${threads}</ul></details>` : ''}
-        <details><summary style="cursor:pointer;">The ${(data.sources || []).length} ranked source events it was given</summary>
+        <details><summary style="cursor:pointer;">All ${(data.sources || []).length} candidate events (citation numbering)</summary>
           <div style="max-height:220px;overflow-y:auto;margin:.4rem 0;"><table style="font-size:0.78rem;border-collapse:collapse;">${srcRows}</table></div>
         </details>
         ${m.prompt ? `<details><summary style="cursor:pointer;"><strong>The verbatim prompt</strong> (exactly what the model received)</summary>
@@ -720,6 +848,10 @@ function buildArticleParams(s) {
   return params;
 }
 
+function _viewLabel() {
+  return state.view && viewsById[state.view] ? viewsById[state.view].name : 'All topics';
+}
+
 async function fetchArticles() {
   renderActiveFilters();
 
@@ -799,6 +931,7 @@ async function fetchArticles() {
     const meta = document.getElementById('resultsMeta');
 
     if (data.error) {
+      openSourceArticles();
       meta.textContent = '';
       list.innerHTML = `<li class="loading">${data.error}<br><small>The dashboard will populate once the backfill finishes. Refresh in a minute.</small></li>`;
       document.getElementById('pagination').innerHTML = '';
@@ -806,9 +939,11 @@ async function fetchArticles() {
       return;
     }
 
-    meta.textContent = `${data.total.toLocaleString()} articles`;
+    meta.textContent = `${_viewLabel()} \u00b7 ${data.total.toLocaleString()} articles`;
+    updateSourceSummary(data.total);
 
     if (data.articles.length === 0) {
+      openSourceArticles();
       // Auto-widen: an empty time window (with no custom date range) steps out to
       // the next wider window until articles appear — covers the default + sparse pills.
       const curH = parseInt(state.hours, 10);
@@ -853,6 +988,7 @@ async function fetchArticles() {
     }
 
     renderPagination(data);
+    beaconPageview();
   } catch (err) {
     if (myGen !== currentFetchGen) return; // a newer fetch superseded us
     // If content is already on screen (SSR first paint or a kept snapshot),
@@ -874,6 +1010,7 @@ async function fetchArticles() {
       const meta = document.getElementById('resultsMeta');
       if (meta) meta.textContent = 'Refresh failed — showing the last loaded articles.';
     } else {
+      openSourceArticles();
       list.innerHTML = `<li class="loading">Error loading articles: ${err.message}<br><small>The backend may be restarting. Try again in a few seconds.</small></li>`;
     }
   } finally {
@@ -958,35 +1095,33 @@ async function fetchViews() {
     for (const group of orderedGroups) {
       const pills = groups[group];
       if (!pills || !pills.length) continue;
-      const label = document.createElement('div');
-      label.className = 'pill-group-label';
-      label.textContent = group;
-      bar.appendChild(label);
+      const row = document.createElement('div');
+      row.className = 'pill-row';
+      const rowLabel = document.createElement('div');
+      rowLabel.className = 'pill-row-label';
+      rowLabel.textContent = group;
+      row.appendChild(rowLabel);
+      const rowPills = document.createElement('div');
+      rowPills.className = 'pill-row-pills';
       for (const v of pills) {
       const btn = document.createElement('button');
       btn.className = 'view-pill' + (state.view === v.id ? ' active' : '');
-      // no-op; segmented control is rendered after the loop
       btn.textContent = v.name;
       if (v.description) btn.dataset.tip = v.description;
       btn.dataset.viewId = v.id;
 
-      // Hover-prefetch: warm the snapshot for what a click would actually
-      // select (mirrors the click handler's default_hours snap below).
       btn.addEventListener('pointerenter', () => {
-        if (state.view === v.id) return; // hovering the active pill == deselect, nothing to warm
+        if (state.view === v.id) return;
         prefetchCombo(v.id, v.default_hours ? String(v.default_hours) : state.hours);
       });
 
       btn.addEventListener('click', () => {
         if (state.view === v.id) {
           state.view = '';
-          // When deselecting a view, reset match_types to default.
           state.match_types = ['legal'];
           hideFdaPanel();
         } else {
           state.view = v.id;
-          // Snap to the view's default time window (e.g. 24h for sparse
-          // medical device news) so the first click isn't worst-case.
           if (v.default_hours) {
             state.hours = String(v.default_hours);
             state.date_from = '';
@@ -997,8 +1132,6 @@ async function fetchViews() {
               p.classList.toggle('active', p.dataset.hours === state.hours);
             });
           }
-          // Apply the view's default match_types if the current state
-          // doesn't match any of its available profiles.
           if (Array.isArray(v.available_match_types) && v.available_match_types.length) {
             const currentSet = new Set(state.match_types);
             const matchesAny = v.available_match_types.some(p =>
@@ -1016,7 +1149,7 @@ async function fetchViews() {
         });
         renderMatchProfile();
         updateUrl();
-        window.scrollTo({ top: 0 }); // make the transition visible
+        window.scrollTo({ top: 0 });
         fetchArticles();
       });
       if (v.custom) {
@@ -1038,18 +1171,28 @@ async function fetchViews() {
         });
         btn.appendChild(delBtn);
       }
-      bar.appendChild(btn);
+      rowPills.appendChild(btn);
       }
+      row.appendChild(rowPills);
+      bar.appendChild(row);
     }
 
-    // Add [+ New] button if authenticated
     if (data.authenticated) {
+      const newRow = document.createElement('div');
+      newRow.className = 'pill-row';
+      const nl = document.createElement('div');
+      nl.className = 'pill-row-label';
+      newRow.appendChild(nl);
+      const nw = document.createElement('div');
+      nw.className = 'pill-row-pills';
       const newBtn = document.createElement('button');
       newBtn.className = 'new-pill-btn';
       newBtn.textContent = '+ New';
       newBtn.title = 'Create a custom monitoring pill';
       newBtn.addEventListener('click', showNewPillModal);
-      bar.appendChild(newBtn);
+      nw.appendChild(newBtn);
+      newRow.appendChild(nw);
+      bar.appendChild(newRow);
     }
 
     // After the pills are in the DOM, render the profile toggle for
@@ -1065,9 +1208,7 @@ async function fetchViews() {
         (data.user.is_admin ? ` <a href="/admin/users" style="color:var(--text-secondary);text-decoration:none;">Admin</a>` : '') +
         ` <a href="/logout" style="color:var(--text-tertiary);text-decoration:none;">Logout (${data.user.display_name})</a>`;
     } else {
-      // Discreet sign-in link — unlocks custom pills ("+ New" in the pill row).
-      navAuth.innerHTML =
-        `<a href="/login" style="color:var(--text-secondary);text-decoration:none;">Sign in</a>`;
+      navAuth.innerHTML = '';
     }
   } catch (err) {
     document.getElementById('viewsBar').innerHTML = '';

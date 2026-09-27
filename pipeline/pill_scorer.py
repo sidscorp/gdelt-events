@@ -29,9 +29,11 @@ full-corpus backfills into shadow (`__v2`) categories.
 import hashlib
 import json
 import logging
+import os
 import sqlite3
 import struct
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -61,6 +63,7 @@ USERS_DB = DATA_DIR / "users.db"
 VEC_CACHE = embedding_store.BASE_DIR / "pill_vectors.npz"
 VEC_META = embedding_store.BASE_DIR / "pill_vectors_meta.json"
 WATERMARK = embedding_store.BASE_DIR / ".pill_scorer_row"
+JUDGE_HEALTH = DATA_DIR / "pill_judge_health.json"
 
 # Set to "" at flip time; "__v2" writes shadow categories for evaluation.
 SUFFIX = ""  # FLIPPED LIVE 2026-07-09 — judged tags write straight to the real categories
@@ -218,6 +221,29 @@ def _existing_tags(con, category: str, urls: list[str]) -> set[str]:
     return found
 
 
+def _judged_tags(con, category: str, urls: list[str]) -> set[str]:
+    """Articles the judge has ALREADY ruled on for this category.
+
+    Distinct from _existing_tags: a keyword tag means "a candidate was found",
+    not "membership was decided". Gating the judge on _existing_tags is what
+    silently disabled it for every keyword hit once SUFFIX became "" (target
+    category == live category, so the candidate set and the skip set were the
+    same query). Only a judge row means the question has been answered.
+    """
+    found: set[str] = set()
+    for i in range(0, len(urls), IN_BATCH):
+        chunk = urls[i:i + IN_BATCH]
+        ph = ",".join(["?"] * len(chunk))
+        for (u,) in con.execute(
+            f"SELECT DISTINCT article_id FROM article_tags "
+            f"WHERE category = ? AND source_type='gal' AND matched_via = 'judge' "
+            f"AND article_id IN ({ph})",
+            [category] + chunk,
+        ).fetchall():
+            found.add(u)
+    return found
+
+
 def _fda_candidates(con, urls: list[str]) -> set[str]:
     found: set[str] = set()
     for i in range(0, len(urls), IN_BATCH):
@@ -282,7 +308,7 @@ def _open_read(retries: int = 30):
 
 def stage_batch(con, urls: list[str], vectors: np.ndarray,
                 pills: list[dict], pill_vecs: dict[str, np.ndarray],
-                suffix: str = SUFFIX):
+                suffix: str = SUFFIX, breaker=None):
     """Judge-gated membership for one batch of articles — STAGES operations
     without writing. `con` must be a READ-ONLY connection: judge calls take
     minutes and holding the write lock that long 503s the live dashboard.
@@ -294,6 +320,8 @@ def stage_batch(con, urls: list[str], vectors: np.ndarray,
         from . import pill_judge
     except ImportError:
         from pipeline import pill_judge
+
+    breaker = breaker or pill_judge.JudgeCircuitBreaker()
 
     keys = [p["key"] for p in pills]
     scores = _score_matrix(vectors, pill_vecs, keys)
@@ -348,32 +376,54 @@ def stage_batch(con, urls: list[str], vectors: np.ndarray,
             cand = set(kw_tagged)
             cand.update(urls[i] for i in np.nonzero(s >= SEM_NET)[0])
 
-        already = _existing_tags(con, target_cat, urls)
+        # Skip only what the judge has ALREADY ruled on. Using _existing_tags
+        # here meant keyword hits were their own skip set once suffix was ""
+        # and they were never judged at all.
+        already = _judged_tags(con, target_cat, urls)
         to_judge = sorted(cand - already)
         if not to_judge:
             continue
         _ensure_lookups(to_judge)
         items = [{"url": u, "title": titles[u][0], "desc": titles[u][1]}
                  for u in to_judge if u in titles]
-        verdicts = pill_judge.judge(target_cat, items)
+        verdicts = pill_judge.judge(target_cat, items, breaker=breaker)
         if verdicts is None:
-            continue  # gateway down: leave keyword tags as-is, no demotion
+            # Gateway down: keyword tags stay as-is and nothing is demoted.
+            # Flag it so score_new refuses to advance the watermark past these
+            # rows — otherwise they are never judged again (the watermark is a
+            # monotonic row_index with no rewind).
+            counters["judge_failed"] = True
+            counters["failure_code"] = breaker.failure_code or "judge_error"
+            break
         counters["judged"] += len(verdicts)
 
         accept = {"relevant"} if p.get("strict") else pill_judge.ACCEPT
         approved = [u for u, v in verdicts.items() if v in accept]
+        # An article with no crawled_at cannot be inserted (the column is the
+        # feed's time index), so track what actually got a judge row rather
+        # than what was merely approved — the delete below keys off this.
+        inserted = {u for u in approved if crawled.get(u)}
         inserts.extend(
             (u, "gal", target_cat, "judge",
              f"{verdicts[u]}|{s[idx_of[u]]:.3f}" if u in idx_of else verdicts[u],
              crawled.get(u))
-            for u in approved if crawled.get(u))
+            for u in inserted)
 
-        # Demote judged-irrelevant keyword tags from the LIVE category so a
-        # keyword false-positive shows for at most one cycle (post-flip,
-        # suffix == "" makes live and target the same category).
         if suffix == "":
-            deletes.extend((k, u) for u, v in verdicts.items()
-                           if v == "irrelevant" and u in kw_tagged)
+            # Post-flip the live and target categories are the same, so a
+            # verdict on a keyword-tagged article REPLACES its keyword row:
+            #   approved + inserted -> drop the keyword row, judge row stands
+            #   irrelevant          -> drop it (the demotion this gate exists for)
+            # Leaving the keyword row in place on approval would double-tag the
+            # article, and _attach_inclusion_reason picks the badge with
+            # any_value() — so the card would advertise 'keyword' at random.
+            # Approved-but-not-inserted is deliberately left alone: dropping its
+            # keyword row would remove the article from the pill with nothing
+            # replacing it.
+            deletes.extend(
+                (k, u) for u, v in verdicts.items()
+                if u in kw_tagged and (v == "irrelevant" or u in inserted)
+            )
     return inserts, deletes, counters
 
 
@@ -381,17 +431,92 @@ def stage_batch(con, urls: list[str], vectors: np.ndarray,
 # Incremental entry point (chained from embed_new_articles.py)
 # ---------------------------------------------------------------------------
 
-def score_new(suffix: str = SUFFIX) -> dict:
+def _write_judge_health(totals: dict, watermark_before: int,
+                        watermark_after: int) -> None:
+    """Atomically publish a non-secret receipt for outcome-based monitoring."""
+    payload = {
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "status": "failed" if totals.get("halted_on_judge_failure") else "ok",
+        "failure_code": totals.get("failure_code"),
+        "articles": totals.get("articles", 0),
+        "judged": totals.get("judged", 0),
+        "judge_calls": totals.get("judge_calls", 0),
+        "inserted": totals.get("inserted", 0),
+        "demoted": totals.get("demoted", 0),
+        "watermark_before": watermark_before,
+        "watermark_after": watermark_after,
+        "elapsed_s": totals.get("elapsed_s"),
+    }
+    tmp = JUDGE_HEALTH.with_name(f"{JUDGE_HEALTH.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+        os.replace(tmp, JUDGE_HEALTH)
+    except OSError as exc:
+        log.warning("could not write pill judge health receipt: %s", exc)
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+# Backlog guard (2026-09-27). If the judge was down long enough for the watermark
+# to fall far behind, draining it in one go is a surprise bill: after a 7-day key
+# outage the catch-up burned ~$1.90 in five hours and tripped the provider's
+# spending limit. Past MAX_LAG_ROWS (~2 days at ~22k rows/day) skip to near the
+# head instead; the skipped articles keep their keyword tags (pre-judge behavior)
+# and age out of the feed within days. rescore_pills.py can judge a window later.
+MAX_LAG_ROWS = 50_000
+SKIP_KEEP_ROWS = 2_000
+
+
+def score_new(suffix: str = SUFFIX, chunk_rows: int = 50_000,
+              max_chunks: int | None = None) -> dict:
     t0 = time.time()
     pills = load_pill_defs()
     if not pills:
         return {"skipped": "no pills"}
-    pill_vecs = get_pill_vectors(pills)
 
     try:
         next_row = int(WATERMARK.read_text().strip())
     except (OSError, ValueError):
         next_row = embedding_store.total_rows()  # first run: start from now
+
+    skipped_rows = 0
+    head = embedding_store.total_rows()
+    if head - next_row > MAX_LAG_ROWS:
+        skip_to = head - SKIP_KEEP_ROWS
+        skipped_rows = skip_to - next_row
+        log.warning(
+            "pill_scorer: watermark %s is %s rows behind the store head %s "
+            "(> %s) — skipping %s rows of backlog instead of paying to judge them",
+            next_row, head - next_row, head, MAX_LAG_ROWS, skipped_rows,
+        )
+        next_row = skip_to
+        WATERMARK.write_text(str(next_row))
+
+    try:
+        from . import pill_judge
+    except ImportError:
+        from pipeline import pill_judge
+
+    breaker = pill_judge.JudgeCircuitBreaker()
+    has_judged_pills = any(p["kind"] != "custom" for p in pills)
+    if has_judged_pills and not pill_judge.preflight(breaker):
+        totals = {
+            "inserted": 0,
+            "demoted": 0,
+            "articles": 0,
+            "judged": 0,
+            "judge_calls": 0,
+            "halted_on_judge_failure": True,
+            "failure_code": breaker.failure_code or "credential_missing",
+            "elapsed_s": round(time.time() - t0, 1),
+        }
+        _write_judge_health(totals, next_row, next_row)
+        log.error("pill_scorer: %s", totals)
+        return totals
+
+    pill_vecs = get_pill_vectors(pills)
 
     # Phase 1: stage everything on a READ-ONLY connection (judge calls take
     # minutes — never hold the write lock through them).
@@ -400,15 +525,39 @@ def score_new(suffix: str = SUFFIX) -> dict:
     all_deletes: list[tuple] = []
     max_row = next_row - 1
     rcon = _open_read()
+    chunks_seen = 0
     try:
         for urls, vectors, last_row in embedding_store.iter_active_chunks(
-                chunk_rows=50_000, min_row_index=next_row):
-            ins, dels, c = stage_batch(rcon, urls, vectors, pills, pill_vecs, suffix=suffix)
+                chunk_rows=max(1, int(chunk_rows)), min_row_index=next_row):
+            chunks_seen += 1
+            ins, dels, c = stage_batch(
+                rcon, urls, vectors, pills, pill_vecs,
+                suffix=suffix, breaker=breaker,
+            )
             all_inserts.extend(ins)
             all_deletes.extend(dels)
             totals["judged"] += c["judged"]
             totals["articles"] += len(urls)
+            if c.get("judge_failed"):
+                # The gateway was down for at least one pill in this chunk.
+                # Stop here WITHOUT advancing past it: the watermark is a
+                # monotonic row_index with no rewind, so advancing would leave
+                # these articles permanently unjudged (keyword-only forever)
+                # with nothing reporting it. Next run retries the same rows.
+                totals["halted_on_judge_failure"] = True
+                totals["failure_code"] = (
+                    c.get("failure_code") or breaker.failure_code or "judge_error"
+                )
+                log.warning(
+                    "pill_scorer: judge unavailable at row %s — holding watermark "
+                    "at %s so these articles are retried, not skipped",
+                    last_row, max_row + 1,
+                )
+                break
             max_row = last_row
+            if max_chunks is not None and chunks_seen >= max_chunks:
+                totals["bounded_run_complete"] = True
+                break
     finally:
         rcon.close()
 
@@ -429,9 +578,14 @@ def score_new(suffix: str = SUFFIX) -> dict:
                 for i in range(0, len(del_urls), IN_BATCH):
                     chunk = del_urls[i:i + IN_BATCH]
                     ph = ",".join(["?"] * len(chunk))
+                    # matched_via <> 'judge' is load-bearing: inserts are applied
+                    # BEFORE deletes, and an approved article gets both a delete
+                    # (of its keyword row) and a fresh judge row. Without this
+                    # predicate the delete would take the judge row with it and
+                    # silently drop the article from the pill entirely.
                     wcon.execute(
                         f"DELETE FROM article_tags WHERE category = ? AND source_type='gal' "
-                        f"AND article_id IN ({ph})",
+                        f"AND matched_via <> 'judge' AND article_id IN ({ph})",
                         [cat] + chunk,
                     )
             wcon.execute("CHECKPOINT")
@@ -440,7 +594,13 @@ def score_new(suffix: str = SUFFIX) -> dict:
         totals["inserted"] = len(all_inserts)
         totals["demoted"] = len(all_deletes)
 
-    WATERMARK.write_text(str(max_row + 1))
+    totals["judge_calls"] = breaker.calls
+    if skipped_rows:
+        totals["skipped_backlog_rows"] = skipped_rows
+    new_watermark = max_row + 1
+    if new_watermark != next_row:
+        WATERMARK.write_text(str(new_watermark))
     totals["elapsed_s"] = round(time.time() - t0, 1)
+    _write_judge_health(totals, next_row, new_watermark)
     log.info("pill_scorer: %s", totals)
     return totals

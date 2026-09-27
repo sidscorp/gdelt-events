@@ -104,6 +104,18 @@
     color: var(--text-tertiary);
     font-size: 0.7rem;
   }
+  /* 2026-08-29: rows expand on click — title-tooltips do not exist on touch */
+  .fda-event-row { cursor: pointer; }
+  .fda-event-row .d-full { display: none; }
+  .fda-event-row.open { align-items: flex-start; }
+  .fda-event-row.open .fda-event-desc { white-space: normal; overflow: visible; }
+  .fda-event-row.open .d-short { display: none; }
+  .fda-event-row.open .d-full { display: inline; }
+  .fda-src { color: var(--accent-brand); text-decoration: none; white-space: nowrap; }
+  .fda-panel-foot {
+    padding: 0.35rem 0.8rem; font-size: 0.68rem; color: var(--text-tertiary);
+    border-top: 1px solid var(--border); letter-spacing: 0.01em;
+  }
   /* source-tab styles removed — unified feed */
   body.dark .view-pill { background: var(--bg); border-color: var(--border); color: var(--text); }
   body.dark .view-pill.active { background: var(--text); color: var(--bg); }
@@ -246,21 +258,34 @@
   /* Views bar — saved-filter presets above the time pills */
   .views-bar {
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
     gap: 0.4rem;
     margin-bottom: 0.8rem;
     min-height: 0;
   }
-  .pill-group-label {
+  .pill-row {
+    display: flex;
+    align-items: baseline;
+    gap: 0.65rem;
+  }
+  .pill-row-label {
+    flex: 0 0 140px;
+    text-align: right;
     font-size: 0.66rem;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.06em;
     color: var(--text-tertiary);
-    width: 100%;
-    margin: 0.3rem 0 0.15rem 0;
     font-weight: 600;
+    padding-top: 0.44rem;
+    line-height: 1;
   }
-  .pill-group-label:first-child { margin-top: 0; }
+  .pill-row-pills {
+    flex: 1;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    min-width: 0;
+  }
   .view-pill {
     font-family: inherit;
     font-size: 0.82rem;
@@ -734,13 +759,12 @@
   .suggestion-item:hover { background: var(--bg-hover); }
   .suggestion-count { color: var(--text-tertiary); font-size: 0.72rem; }
 
-  /* Section label — tiny uppercase hint for what each row does */
   .section-label {
     font-size: 0.66rem;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     color: var(--text-tertiary);
-    margin: 0.6rem 0 0.2rem 0;
+    margin: 1rem 0 0.2rem 0;
   }
   .section-label:first-of-type { margin-top: 0.4rem; }
 
@@ -830,7 +854,13 @@
     font-size: 1.1rem !important; font-weight: 600 !important; margin: 0 0 0.55rem !important;
     color: var(--text); letter-spacing: 0.01em;
   }
-  .briefing-body ul { list-style: none; padding-left: 0; margin: 0.55rem 0; }
+  /* Prose blocks. markdown.js emits bare <p>/<ul>/<li> with no inline styles,
+     so spacing and markers are decided here and nowhere else. */
+  .briefing-body p { margin: 0 0 0.7rem; }
+  .briefing-body > :last-child { margin-bottom: 0; }
+  .briefing-body strong { font-weight: 650; color: var(--text); }
+  .briefing-body em { color: var(--text-secondary); }
+  .briefing-body ul { list-style: none; padding-left: 0; margin: 0.55rem 0 0.7rem; }
   .briefing-body li { position: relative; padding-left: 1.15rem; margin: 0.5rem 0; }
   .briefing-body li::before {
     content: "▸"; position: absolute; left: 0; top: 0.02em; color: var(--accent-brand); font-size: 0.82rem;
@@ -839,6 +869,22 @@
     font-size: 0.7rem; color: var(--text-tertiary); margin-top: 0.8rem; padding-top: 0.55rem;
     border-top: 1px solid var(--surface-border);
   }
+
+  .briefing-freshness {
+    font-size: 0.72rem; color: var(--text-secondary);
+    margin-top: 0.65rem; padding-top: 0.5rem;
+    border-top: 1px solid var(--surface-border);
+    display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap;
+    transition: color 0.5s ease;
+  }
+  .briefing-freshness .bf-sep { color: var(--surface-border); }
+  .briefing-freshness .bf-elapsed { font-variant-numeric: tabular-nums; }
+  .briefing-freshness .bf-next { color: var(--accent-brand); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .briefing-freshness .bf-count { color: var(--text-tertiary); }
+  .briefing-freshness.bf-aging .bf-elapsed { color: #b8860b; }
+  .briefing-freshness.bf-aging .bf-next { color: #b8860b; }
+  .briefing-freshness.bf-stale .bf-elapsed { color: #c44; }
+  .briefing-freshness.bf-stale .bf-next { color: #c44; }
 
   /* Citations: legible accent superscripts */
   sup.cite { line-height: 0; white-space: nowrap; }
@@ -876,6 +922,15 @@
   font-size: 0.84rem; color: var(--text-secondary); line-height: 1.45;
   margin: 0.3rem 0 0.15rem;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+@media (max-width: 640px) {
+  .pill-row {
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .pill-row-label {
+    flex: auto; width: auto; text-align: left; padding-top: 0;
+  }
 }
 @media (max-width: 560px) {
   .article-thumb img { width: 84px; height: 62px; }
@@ -936,6 +991,43 @@ body.dark .lang-toggle.active { color: #1a1714; }
 /* Briefing skeleton lines inside the briefing card */
 .brief-skel { display: flex; flex-direction: column; gap: 0.55rem; padding: 0.2rem 0; }
 
+/* --- Briefing "being written now" state (2026-08-29) ------------------------
+   Shown only after 700ms (see markdown.js): 90% of cached briefings land inside
+   0.8s, so painting this immediately would flash "generating" on nearly every
+   warm load and read as slowness. It stays until the briefing is complete, not
+   until the first token, because the wait people feel is the ~3s to a finished
+   briefing, not the ~0.3s to first text. */
+.brief-progress {
+  margin: 0.15rem 0 0.45rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--text-tertiary) 6%, transparent);
+}
+.brief-progress-row { display: flex; align-items: center; gap: 0.5rem; }
+.brief-progress-label {
+  font-size: 0.82rem; font-weight: 600; color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;  /* the seconds counter must not jitter */
+}
+.brief-progress-note {
+  margin-top: 0.3rem; font-size: 0.75rem; line-height: 1.45;
+  color: var(--text-tertiary);
+}
+.brief-spinner {
+  width: 0.72rem; height: 0.72rem; flex: 0 0 auto; border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--text-tertiary) 35%, transparent);
+  border-top-color: var(--text-secondary);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .brief-spinner { animation: brief-spin 0.8s linear infinite; }
+  @keyframes brief-spin { to { transform: rotate(360deg); } }
+}
+/* Reduced motion: a static ring reads as a bullet, so mark the state with a
+   steady dot instead of implying nothing is happening. */
+@media (prefers-reduced-motion: reduce) {
+  .brief-spinner { border-top-color: transparent; background: var(--text-tertiary); }
+}
+
 /* Shimmer sweep + staggered card entrance — motion-safe only */
 @media (prefers-reduced-motion: no-preference) {
   .skel-block::after {
@@ -984,6 +1076,46 @@ body.dark .lang-toggle.active { color: #1a1714; }
 .why-badge:hover { color: var(--accent-brand); border-color: var(--accent-brand); }
 .briefing-head { display: flex; align-items: center; }
 
+/* Briefing breadth: hover previews are supplemental; native details also gives
+   touch and keyboard users a persistent, navigable version of the same list. */
+.briefing-coverage {
+  display: flex; align-items: center; flex-wrap: wrap; gap: .3rem .55rem;
+  margin-top: .55rem; font-family: var(--font-ui); font-size: .72rem; color: var(--text-tertiary);
+}
+.coverage-label { font-weight: 600; }
+.coverage-detail { position: relative; }
+.coverage-detail > summary {
+  cursor: pointer; color: var(--accent-brand); text-decoration: underline;
+  text-underline-offset: 2px; list-style: none;
+}
+.coverage-detail > summary::-webkit-details-marker { display: none; }
+.coverage-popover {
+  display: none; position: absolute; z-index: 25; top: calc(100% + .35rem); left: 0;
+  width: min(420px, calc(100vw - 2rem)); max-height: 270px; overflow: auto;
+  padding: .65rem .75rem; border: 1px solid var(--border); border-radius: 7px;
+  background: var(--surface); box-shadow: 0 8px 24px rgba(0,0,0,.16); color: var(--text);
+}
+.coverage-detail:hover > .coverage-popover,
+.coverage-detail:focus-within > .coverage-popover,
+.coverage-detail[open] > .coverage-popover { display: block; }
+.coverage-popover strong { display: block; font-size: .72rem; margin-bottom: .35rem; }
+.coverage-popover ul { margin: 0; padding-left: 1.1rem; }
+.coverage-popover li { margin: .32rem 0; line-height: 1.3; }
+.coverage-popover li span { display: block; color: var(--text-tertiary); font-size: .68rem; }
+.coverage-more { margin-top: .45rem; font: inherit; color: var(--accent-brand); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+
+/* The full server-rendered research feed lives behind a native disclosure.
+   Native details keeps keyboard behavior, SEO, and instant expansion intact. */
+.source-articles { margin-top: 1rem; border-top: 1px solid var(--border); }
+.source-articles > summary {
+  cursor: pointer; padding: 0.75rem 0; color: var(--text); font-family: var(--font-ui);
+  font-weight: 650; list-style: none;
+}
+.source-articles > summary::-webkit-details-marker { display: none; }
+.source-articles > summary::before { content: '▸'; display: inline-block; margin-right: .45rem; color: var(--accent-brand); }
+.source-articles[open] > summary::before { transform: rotate(90deg); }
+.source-articles-body { padding-top: .2rem; }
+
 /* PWA standalone: the fixed top progress bar sits below the status bar */
 @media (display-mode: standalone) {
   #topProgress { top: env(safe-area-inset-top, 0px); }
@@ -998,7 +1130,7 @@ body.dark .lang-toggle.active { color: #1a1714; }
 /* Type system: serif stays the editorial voice (article titles, summaries,
    briefing prose); everything that is UI chrome speaks sans. */
 button, select, input,
-.section-label, .pill-group-label, .header-nav, .header-tag, .header-stats,
+.section-label, .pill-row-label, .pill-group-label, .header-nav, .header-tag, .header-stats,
 .results-meta, .active-filters, .filter-label, .filters,
 .time-pill, .view-pill, .lang-toggle, .pagination, footer,
 .article-header, .match-line, .briefing-head, .briefing-meta, .feed-notice {
@@ -1059,3 +1191,39 @@ header h1 {
 }
 #stickyMeta { margin-left: auto; color: var(--text-tertiary); font-size: 0.72rem; white-space: nowrap; }
 @media (max-width: 560px) { #stickyMeta { display: none; } }
+
+/* Briefing timeline strip (2026-08-30): snapshot list + history banner */
+.brief-hist { margin-top: 0.25rem; }
+.brief-hist-toggle {
+  font-family: inherit; font-size: 0.72rem; color: var(--text-tertiary);
+  background: none; border: 1px solid var(--border); border-radius: 999px;
+  padding: 0.1rem 0.6rem; cursor: pointer;
+}
+.brief-hist-toggle:hover, .brief-hist-toggle.open {
+  color: var(--accent-brand); border-color: var(--accent-brand);
+}
+.brief-hist-panel {
+  margin-top: 0.35rem; border: 1px solid var(--border); border-radius: 6px;
+  max-height: 190px; overflow-y: auto; background: var(--surface);
+}
+.brief-hist-item {
+  display: flex; gap: 0.6rem; align-items: baseline; width: 100%; text-align: left;
+  font-family: inherit; font-size: 0.75rem; background: none; border: none;
+  border-bottom: 1px solid var(--border); padding: 0.35rem 0.7rem; cursor: pointer;
+  color: var(--text-secondary);
+}
+.brief-hist-item:last-child { border-bottom: none; }
+.brief-hist-item:hover { background: var(--bg-hover); }
+.brief-hist-item .hist-t { font-weight: 600; color: var(--text); white-space: nowrap; }
+.brief-hist-item .hist-meta { color: var(--text-tertiary); font-size: 0.7rem; }
+.hist-banner {
+  font-size: 0.78rem; color: var(--text-secondary); line-height: 1.5;
+  border-left: 2px solid var(--accent-brand); padding: 0.35rem 0.7rem;
+  margin-bottom: 0.7rem; background: var(--surface);
+}
+.hist-back {
+  font-family: inherit; font-size: 0.75rem; cursor: pointer;
+  color: var(--accent-brand); background: none; border: 1px solid var(--accent-brand);
+  border-radius: 999px; padding: 0.05rem 0.5rem; margin-left: 0.4rem;
+}
+.hist-back:hover { background: var(--accent-soft); }

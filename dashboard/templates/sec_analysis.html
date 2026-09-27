@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+{% block title %}{% if company %}{{ company.name }} financials{% else %}Company Financials{% endif %} — GDELT Monitor{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/sec.css?v=7">{% endblock %}
+{% block content %}
+
+<h1>Company Financials</h1>
+<p class="subtitle">Filing-derived fundamentals and company disclosures from SEC EDGAR. No market prices, valuation, estimates, recommendations, or live lookup.</p>
+
+<form class="sec-form" method="get" action="/sec-analysis" autocomplete="off">
+  <input type="text" name="ticker" value="{{ ticker }}" maxlength="60"
+         placeholder="Ticker or company name — AAPL, Microsoft, jp morgan" aria-label="Ticker or company name">
+  <input type="hidden" name="mode" value="{{ mode }}"><button type="submit">Look up</button>
+</form>
+
+{% if not ticker and not error %}
+<p class="sec-hint">Try
+  {% for t, n in suggested %}<a href="/sec-analysis?ticker={{ t }}">{{ n }}</a>{% if not loop.last %} · {% endif %}{% endfor %}
+</p>
+
+<nav class="sec-landing-tabs" aria-label="Company list view">
+  <a class="{{ 'active' if not browse and not metric_view else '' }}" href="/sec-analysis">Recently filed</a>
+  <a class="{{ 'active' if browse else '' }}" href="/sec-analysis?browse=all&sort=filed_desc">Browse cards</a>
+  <a class="{{ 'active' if metric_view else '' }}" href="/sec-analysis?view=metrics&metric_sort=revenue_desc">Metrics table</a>
+</nav>
+
+{% if metric_view %}
+<section class="sec-landing" id="metrics-table" aria-labelledby="metrics-table-title">
+  <div class="sec-landing-head">
+    <div><h2 id="metrics-table-title">Latest quarterly metrics</h2>
+    <p>{{ metric_total }} companies. Each row uses its latest stored quarter; blank means the company did not tag that concept.</p></div>
+    {% if as_of %}<span>{{ fmt_date_context(as_of, label='Dataset refreshed locally') }}</span>{% endif %}
+  </div>
+  <form class="sec-sort" method="get" action="/sec-analysis">
+    <input type="hidden" name="view" value="metrics">
+    <label for="metric-sort">Rank by</label>
+    <select id="metric-sort" name="metric_sort" onchange="this.form.submit()">
+      {% for key, spec in metric_sorts.items() %}<option value="{{ key }}" {{ 'selected' if key == metric_sort else '' }}>{{ spec[0] }}</option>{% endfor %}
+    </select>
+    <button type="submit">Apply</button>
+  </form>
+  <div class="sec-scroll sec-metric-table-wrap">
+    <table class="sec-table sec-metric-table">
+      <thead><tr>
+        <th scope="col"><a href="/sec-analysis?view=metrics&metric_sort=name_asc">Company</a></th>
+        <th scope="col">Period</th>
+        <th scope="col"><a href="/sec-analysis?view=metrics&metric_sort=revenue_desc">Revenue</a></th>
+        <th scope="col"><a href="/sec-analysis?view=metrics&metric_sort=revenue_growth_desc">Revenue YoY</a></th>
+        <th scope="col"><a href="/sec-analysis?view=metrics&metric_sort=operating_income_desc">Operating income</a></th>
+        <th scope="col"><a href="/sec-analysis?view=metrics&metric_sort=net_income_desc">Net income</a></th>
+        <th scope="col"><a href="/sec-analysis?view=metrics&metric_sort=net_margin_desc">Net margin</a></th>
+        <th scope="col"><a href="/sec-analysis?view=metrics&metric_sort=assets_desc">Assets</a></th>
+        <th scope="col"><a href="/sec-analysis?view=metrics&metric_sort=roe_desc">ROE</a></th>
+        <th scope="col"><a href="/sec-analysis?view=metrics&metric_sort=roa_desc">ROA</a></th>
+      </tr></thead>
+      <tbody>
+      {% for row in metric_rows_table %}
+        <tr>
+          <td><a href="/sec-analysis?ticker={{ row.ticker or row.name }}&mode=overview">{{ row.name }}</a><span class="sec-end">{{ row.ticker or 'No ticker' }}</span></td>
+          <td>{{ row.fp }} {{ row.fy }}<span class="sec-end">ended {{ row.period_end }}</span></td>
+          <td>{{ fmt_usd(row.revenue) }}</td>
+          <td class="{{ 'up' if row.revenue_yoy and row.revenue_yoy >= 0 else ('down' if row.revenue_yoy else '') }}">{{ fmt_signed_pct(row.revenue_yoy) or '—' }}</td>
+          <td>{{ fmt_usd(row.operating_income) }}</td>
+          <td>{{ fmt_usd(row.net_income) }}</td>
+          <td>{{ fmt_pct(row.net_margin) }}</td>
+          <td>{{ fmt_usd(row.total_assets) }}</td>
+          <td>{{ fmt_pct(row.return_on_equity) }}</td>
+          <td>{{ fmt_pct(row.return_on_assets) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="sec-note">Revenue and income figures cover the listed quarter. They are not valuations, forecasts, or recommendations.</p>
+  <nav class="sec-pagination" aria-label="Metrics table pages">
+    {% if browse_page > 1 %}<a href="/sec-analysis?view=metrics&metric_sort={{ metric_sort }}&page={{ browse_page - 1 }}#metrics-table">Previous page</a>{% endif %}
+    <span>Showing {{ ((browse_page - 1) * 48) + 1 }}–{{ [browse_page * 48, metric_total]|min }} of {{ metric_total }}</span>
+    {% if browse_page * 48 < metric_total %}<a href="/sec-analysis?view=metrics&metric_sort={{ metric_sort }}&page={{ browse_page + 1 }}#metrics-table">Next page</a>{% endif %}
+  </nav>
+</section>
+{% elif browse %}
+<section class="sec-landing" id="all-companies" aria-labelledby="all-companies-title">
+  <div class="sec-landing-head">
+    <div><h2 id="all-companies-title">All companies</h2>
+    <p>{{ browse_total }} companies with a parsed 10-K or 10-Q. Each row shows the latest filing, then its reporting period.</p></div>
+    {% if as_of %}<span>{{ fmt_date_context(as_of, label='Dataset refreshed locally') }}</span>{% endif %}
+  </div>
+  <form class="sec-sort" method="get" action="/sec-analysis">
+    <input type="hidden" name="browse" value="all">
+    <label for="sec-sort">Sort companies</label>
+    <select id="sec-sort" name="sort" onchange="this.form.submit()">
+      {% for key, spec in browse_sorts.items() %}<option value="{{ key }}" {{ 'selected' if key == browse_sort else '' }}>{{ spec[0] }}</option>{% endfor %}
+    </select>
+    <button type="submit">Apply</button>
+  </form>
+  <div class="sec-card-grid sec-browse-grid">
+  {% for c in browse_cards %}
+    <a class="sec-company-card" href="/sec-analysis?ticker={{ c.ticker or c.name }}&mode=overview">
+      <span class="sec-card-company">{{ c.name }}</span><span class="sec-card-ticker">{{ c.ticker }}</span>
+      <span class="sec-card-dates"><span><strong>Filed</strong> {{ fmt_date_context(c.filing_date) }}</span><span><strong>Period ended</strong> {{ fmt_date_context(c.report_period) }}</span></span>
+      <span class="sec-card-metrics">{{ c.metric_label }} <strong>{{ c.metric }}</strong></span>
+    </a>
+  {% endfor %}
+  </div>
+  <nav class="sec-pagination" aria-label="Company list pages">
+    {% if browse_page > 1 %}<a href="/sec-analysis?browse=all&sort={{ browse_sort }}&page={{ browse_page - 1 }}#all-companies">Newer page</a>{% endif %}
+    <span>Showing {{ ((browse_page - 1) * 48) + 1 }}–{{ [browse_page * 48, browse_total]|min }} of {{ browse_total }}</span>
+    {% if browse_page * 48 < browse_total %}<a href="/sec-analysis?browse=all&sort={{ browse_sort }}&page={{ browse_page + 1 }}#all-companies">Next page</a>{% endif %}
+  </nav>
+</section>
+{% else %}
+
+{% if recent_filings %}
+<section class="sec-landing" aria-labelledby="recent-filings-title">
+  <div class="sec-landing-head">
+    <div><h2 id="recent-filings-title">Recently filed</h2>
+    <p>One latest SEC filing per company, ordered by filed date.</p></div>
+    {% if as_of %}<span>{{ fmt_date_context(as_of, label='Dataset refreshed locally') }}</span>{% endif %}
+  </div>
+  <div class="sec-card-grid">
+  {% for c in recent_filings %}
+    <a class="sec-company-card" href="/sec-analysis?ticker={{ c.ticker or c.name }}&mode=overview">
+      <span class="sec-card-company">{{ c.name }}</span><span class="sec-card-ticker">{{ c.ticker }}</span>
+      <span class="sec-card-dates"><span><strong>Filed</strong> {{ fmt_date_context(c.filing_date) }}</span><span><strong>Period ended</strong> {{ fmt_date_context(c.report_period) }}</span></span>
+      <span class="sec-card-metrics">{{ c.metric_label }} <strong>{{ c.metric }}</strong></span>
+    </a>
+  {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if top_updates %}
+<section class="sec-landing" aria-labelledby="top-updates-title">
+  <div class="sec-landing-head">
+    <div><h2 id="top-updates-title">Notable filing changes</h2>
+    <p>Only deterministic, material observations from stored filed figures; not stock performance or a recommendation.</p></div>
+  </div>
+  <div class="sec-card-grid sec-update-grid">
+  {% for c in top_updates %}
+    <a class="sec-company-card" href="/sec-analysis?ticker={{ c.ticker or c.name }}&mode=overview">
+      <span class="sec-card-company">{{ c.name }}</span><span class="sec-card-ticker">{{ c.ticker }}</span>
+      <span class="sec-card-dates"><span><strong>Filed</strong> {{ fmt_date_context(c.filing_date) }}</span><span><strong>Period ended</strong> {{ fmt_date_context(c.report_period) }}</span></span>
+      <span class="sec-card-move">{{ c.change }}</span>
+    </a>
+  {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endif %}
+{% endif %}
+
+{% if error %}<p class="sec-error">{{ error }}</p>{% endif %}
+
+{% if company and latest %}
+<h2>{{ company.name }}{% if company.ticker %} <span class="sec-tick">{{ company.ticker }}</span>{% endif %}</h2>
+<p class="sec-meta">
+  {% if company.sic_description %}{{ company.sic_description }}{% endif %}
+  {% if matched_by and matched_by != 'ticker' %}<br><span class="sec-matchnote">Matched on {{ matched_by.replace('-', ' ') }} — you typed “{{ ticker }}”.</span>{% endif %}
+</p>
+
+<nav class="sec-modes" aria-label="Financials view"><a class="{{ 'active' if mode == 'overview' else '' }}" href="/sec-analysis?ticker={{ company.ticker or ticker }}&mode=overview">Overview</a><a class="{{ 'active' if mode == 'research' else '' }}" href="/sec-analysis?ticker={{ company.ticker or ticker }}&mode=research">Research</a></nav>
+
+{% if mode == 'overview' %}
+<section class="sec-overview">
+  {% if latest_filing %}<p class="sec-basis"><strong>Latest filing: {{ latest_filing.form }}</strong><br>{{ latest_filing.filing_context }}<br>{{ latest_filing.report_context }} · <a href="{{ latest_filing.filing_url }}" target="_blank" rel="noopener">Open filing at SEC EDGAR</a></p>{% endif %}
+  {% if context and context.business_extract %}<h2>What this company says it does</h2><p class="sec-business">{{ context.business_extract }}</p><p class="sec-note">Short extract from Item 1, Business — <a href="{{ context.business_url }}" target="_blank" rel="noopener">source filing</a>.</p>{% elif company.sic_description %}<p class="sec-note">Industry classification: {{ company.sic_description }}.</p>{% endif %}
+  {% if observations %}<h2>What changed in the latest reported period</h2><ul class="sec-obs">{% for o in observations %}<li class="sec-obs-{{ o.kind }}">{{ o.text }} <span class="sec-claim-context">Source: latest SEC filing; basis: {{ latest.reporting_period_context }}.</span></li>{% endfor %}</ul><p class="sec-note">Computed from filed figures; each statement identifies its filing source and reporting-period basis.</p>{% endif %}
+  <h2>Latest figures</h2><ul class="sec-metrics sec-scorecard">{% for m in metric_rows[:4] %}<li><span class="m-name">{{ m.name }}</span><span class="m-value">{{ m.value }}{% if m.delta %}<em class="m-delta {{ m.dir }}">{{ m.delta }}</em>{% endif %}</span></li>{% endfor %}</ul>
+  {% if filings %}<h2>Recent SEC filings</h2><ul class="sec-filings">{% for f in filings %}<li><strong>{{ f.form }}</strong> · {{ f.filing_context }} · {{ f.report_context }} · <a href="{{ f.filing_url }}" target="_blank" rel="noopener">SEC source</a></li>{% endfor %}</ul>{% endif %}
+</section>
+{% else %}
+
+{% if alternatives %}
+<p class="sec-hint">Did you mean
+  {% for a in alternatives %}<a href="/sec-analysis?ticker={{ a.ticker or a.name }}">{{ a.name[:34] }}</a>{% if not loop.last %} · {% endif %}{% endfor %}?
+</p>
+{% endif %}
+
+<p class="sec-basis"><strong>{{ latest.label }}</strong><br>
+  {{ latest.reporting_period_context }}. From the {{ latest.form }} filing. Quarterly figures cover the quarter alone, not the year so far.</p>
+
+{% if observations %}
+<h2>What stands out</h2>
+<ul class="sec-obs">
+  {% for o in observations %}<li class="sec-obs-{{ o.kind }}">{{ o.text }} <span class="sec-claim-context">Source: latest SEC filing; basis: {{ latest.reporting_period_context }}.</span></li>{% endfor %}
+</ul>
+<p class="sec-note">Computed from the filed figures — no model writes these, so none can state a number that was not filed.</p>
+{% endif %}
+
+{% if filer_framing %}
+<p class="sec-framing"><strong>This is a {{ filer_label }}.</strong> {{ filer_framing }}</p>
+{% endif %}
+
+<div class="sec-grid">
+  <div>
+    <h2>The figures that describe it</h2>
+    <ul class="sec-metrics">
+      {% for m in metric_rows %}
+      <li>
+        <span class="m-name">{{ m.name }}</span>
+        <span class="m-value">{{ m.value }}{% if m.delta %}<em class="m-delta {{ m.dir }}">{{ m.delta }}</em>{% endif %}{% if m.sub %}<em class="m-sub">{{ m.sub }}</em>{% endif %}</span>
+        <span class="m-def">{{ m.definition }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% if missing_metrics %}
+    <p class="sec-note">Not reported by this filer: {{ missing_metrics|join(', ') }}. Blank means untagged in the filing, never zero.</p>
+    {% endif %}
+
+    {% if bs %}
+    <h2>Balance sheet <span class="sec-instant">as of {{ latest.period_end }}</span></h2>
+    <p class="sec-note">Everything owned is funded either by borrowing or by shareholders — the two always add to total assets.</p>
+    <svg viewBox="0 0 560 46" class="sec-bs" role="img" aria-label="Liabilities and equity as shares of assets">
+      <rect x="0" y="6" width="{{ 5.6 * bs.liab_pct }}" height="22" class="bs-liab"><title>Liabilities {{ bs.liab }}</title></rect>
+      <rect x="{{ 5.6 * bs.liab_pct }}" y="6" width="{{ 5.6 * bs.eq_pct }}" height="22" class="bs-eq"><title>Equity {{ bs.eq }}</title></rect>
+      <text x="4" y="42" class="bs-lab">Liabilities {{ bs.liab }} · {{ bs.liab_pct }}%</text>
+      <text x="556" y="42" class="bs-lab" text-anchor="end">Equity {{ bs.eq }} · {{ bs.eq_pct }}%</text>
+    </svg>
+    <p class="sec-note">Total assets {{ bs.assets }}.{% if bs.negative_equity %} Equity is negative — liabilities exceed everything owned.{% endif %}</p>
+    {% endif %}
+  </div>
+
+  <div>
+    <h2>Trend</h2>
+    <p class="cap-trend-intro">Two numbers over the past ten reporting periods. Every bar
+      carries its own value and every bar is labelled, so nothing depends on hovering.
+      The dotted line marks the highest point in the window, for scale.</p>
+    {% macro barchart(c, title, help, cls) %}
+    {% if c %}
+    <figure class="sec-fig">
+      <figcaption>{{ title }} <span class="cap-basis">{{ c.basis }}</span><span class="cap-help">{{ help }}</span></figcaption>
+      <svg viewBox="0 0 {{ c.width }} {{ c.height }}" class="sec-chart {{ cls }}" role="img" aria-label="{{ title }}">
+        <line x1="0" y1="{{ c.zero_y }}" x2="{{ c.width }}" y2="{{ c.zero_y }}" class="axis"/>
+        {% if c.hi_label %}
+        <line x1="0" y1="{{ c.hi_y }}" x2="{{ c.width }}" y2="{{ c.hi_y }}" class="guide"/>
+        <text x="0" y="{{ c.hi_y - 3 }}" class="glab">{{ c.hi_label }}</text>
+        {% endif %}
+        {% for b in c.bars %}
+          <rect x="{{ b.x }}" y="{{ b.y }}" width="{{ b.w }}" height="{{ b.h }}"
+                class="bar{% if b.neg %} neg{% endif %}{% if b.latest %} latest{% endif %}"><title>{{ b.label }}: {{ b.value }}</title></rect>
+          <text x="{{ b.cx }}" y="{{ b.vy }}" class="vlab{% if b.latest %} latest{% endif %}">{{ b.value }}</text>
+          <text x="{{ b.cx }}" y="{{ c.height - 4 }}" class="tick">{{ b.label }}</text>
+        {% endfor %}
+      </svg>
+      {% if c.take %}<p class="cap-take">{{ c.take }}</p>{% endif %}
+    </figure>
+    {% endif %}
+    {% endmacro %}
+
+    {{ barchart(rev_chart, 'Revenue', 'Each bar is one quarter of sales — all money taken in, before costs. Taller means more business was done.', 'rev') }}
+    {{ barchart(ni_chart, 'Net income', 'What is left after every cost, including tax. Bars hanging below the solid line are quarters at a loss.', 'ni') }}
+
+    {% if margin_chart %}
+    <figure class="sec-fig">
+      <figcaption>Operating margin
+        <span class="cap-help">The share of each revenue dollar kept as operating profit — rising means the business is getting more efficient per dollar of sales.</span>
+      </figcaption>
+      <svg viewBox="0 0 {{ margin_chart.width }} {{ margin_chart.height }}" class="sec-chart line" role="img" aria-label="Operating margin trend">
+        {% if margin_chart.zero_y %}<line x1="0" y1="{{ margin_chart.zero_y }}" x2="{{ margin_chart.width }}" y2="{{ margin_chart.zero_y }}" class="axis dashed"/>{% endif %}
+        <line x1="0" y1="{{ margin_chart.hi_y }}" x2="{{ margin_chart.width }}" y2="{{ margin_chart.hi_y }}" class="guide"/>
+        <text x="0" y="{{ margin_chart.hi_y + 9 }}" class="glab">{{ margin_chart.hi }} high</text>
+        <line x1="0" y1="{{ margin_chart.lo_y }}" x2="{{ margin_chart.width }}" y2="{{ margin_chart.lo_y }}" class="guide"/>
+        <text x="0" y="{{ margin_chart.lo_y - 3 }}" class="glab">{{ margin_chart.lo }} low</text>
+        <polyline points="{{ margin_chart.points }}" class="trend"/>
+        {% for d in margin_chart.dots %}<circle cx="{{ d.x }}" cy="{{ d.y }}" r="2.5" class="dot"><title>{{ d.label }}: {{ d.value }}</title></circle>{% endfor %}
+        <text x="{{ margin_chart.last.x }}" y="{{ margin_chart.last.y - 6 }}" class="vlab latest" text-anchor="end">{{ margin_chart.last.value }}</text>
+        <text x="0" y="{{ margin_chart.height + 9 }}" class="tick" text-anchor="start">{{ margin_chart.first.label }}</text>
+        <text x="{{ margin_chart.width }}" y="{{ margin_chart.height + 9 }}" class="tick" text-anchor="end">{{ margin_chart.last.label }}</text>
+      </svg>
+      {% if margin_chart.take %}<p class="cap-take">{{ margin_chart.take }}</p>{% endif %}
+    </figure>
+    {% endif %}
+  </div>
+</div>
+
+{% if periods|length > 1 %}
+<h2>History</h2>
+<div class="sec-scroll">
+<table class="sec-table">
+  <thead><tr><th>Period</th><th>Revenue</th><th>YoY</th><th>Operating income</th><th>Net income</th><th>Net margin</th></tr></thead>
+  <tbody>
+  {% for p in periods %}
+    <tr>
+      <td>{{ p.short }}<span class="sec-end">{{ p.period_end }}</span></td>
+      <td>{{ fmt_usd(p.revenue) }}</td>
+      <td class="{{ 'up' if p.revenue_yoy and p.revenue_yoy >= 0 else ('down' if p.revenue_yoy else '') }}">{{ fmt_signed_pct(p.revenue_yoy) or '—' }}</td>
+      <td>{{ fmt_usd(p.operating_income) }}</td>
+      <td>{{ fmt_usd(p.net_income) }}</td>
+      <td>{{ fmt_pct(p.net_margin) }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="sec-note">Quarters are discrete periods and sum toward the fiscal year rather than repeating it. A blank cell means the company did not tag that concept in that filing — it is not a zero.</p>
+
+<h2>How to read this</h2>
+<dl class="sec-glossary">
+  <dt>Quarter vs fiscal year</dt>
+  <dd>A fiscal year need not match the calendar. Microsoft's ends in June, Apple's in September, Nvidia's in January — so “Q1 2027” can fall in early 2026.</dd>
+
+  <dt>Year over year (YoY)</dt>
+  <dd>This quarter against the <em>same</em> quarter a year earlier, never the previous quarter. Comparing a retailer's Q1 to its Christmas quarter would show a collapse every single year.</dd>
+
+  <dt>Margin</dt>
+  <dd>A profit figure as a share of revenue. It answers “how much of each dollar taken in is kept?”, which lets a small company be compared with a huge one.</dd>
+
+  <dt>Percentage points (pp)</dt>
+  <dd>The gap between two percentages. A margin moving from 30% to 34% rose four percentage points — not 4%, which would be 31.2%.</dd>
+
+  <dt>Operating vs net income</dt>
+  <dd>Operating income is the business. Net income includes investment gains, interest, one-off charges and tax. A large gap between them means something other than trading drove the result.</dd>
+
+  <dt>Why a figure may be blank</dt>
+  <dd>Companies tag their own filings, and not every concept is tagged. Banks and insurers rarely tag a single “revenue” line at all, reporting interest income instead. Blank means not reported, never zero.</dd>
+</dl>
+{% endif %}
+{% endif %}
+{% endif %}
+
+<footer>
+  <a href="/">Back to dashboard</a> · Data from
+  <a href="https://www.sec.gov/edgar" target="_blank" rel="noopener">SEC EDGAR</a>
+  {% if as_of %} · {{ fmt_date_context(as_of, label='Dataset refreshed locally') }}{% endif %}
+</footer>
+
+{% endblock %}

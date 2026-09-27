@@ -3,6 +3,7 @@ search, event detail, about."""
 
 import html
 import json
+import re
 import time
 from datetime import datetime
 
@@ -63,47 +64,105 @@ def _ssr_feed(view_id, hours):
         return None
 
 
+_MD_BOLD = re.compile(r"\*\*([^*]+)\*\*")
+_MD_ITAL = re.compile(r"\*([^*\n]+)\*")
+_MD_LI = re.compile(r"^(?:[-*•‣▪–]|\d+[.)])\s+(.*)$")
+_MD_H = re.compile(r"^#{1,4}\s+(.*)$")
+_MD_CITE = re.compile(r"\[(\d+)\]")
+
+
+def _md_inline(s, sources):
+    """Inline markdown + [N] citations. Mirrors _mdInline/linkifyCitations in
+    static/js/markdown.js — the SSR paint and the client re-render must be the
+    same HTML, or the briefing visibly reflows a beat after load."""
+    s = html.escape(s, quote=False)
+    s = _MD_BOLD.sub(r"<strong>\1</strong>", s)
+    s = _MD_ITAL.sub(r"<em>\1</em>", s)
+
+    def cite(m):
+        idx = int(m.group(1)) - 1
+        src = sources[idx] if 0 <= idx < len(sources) else None
+        if not src or not src.get("link"):
+            return m.group(0)
+        cnt = f" · {src['n_sources']} sources" if (src.get("n_sources") or 0) > 1 else ""
+        tip = html.escape(
+            (src.get("outlet") or "source") + cnt
+            + (f" — {src['title']}" if src.get("title") else ""),
+            quote=True,
+        )
+        link = html.escape(src["link"], quote=True)
+        return (f'<sup class="cite"><a href="{link}" target="_blank" '
+                f'rel="noopener" title="{tip}">{m.group(1)}</a></sup>')
+
+    return _MD_CITE.sub(cite, s)
+
+
 def _briefing_html(view_id, hours):
-    """Cached AI briefing rendered to minimal safe HTML. Read-only — never
-    generates. The client re-renders (and refreshes) it via markdown.js."""
+    """Cached AI briefing rendered to the same HTML markdown.js produces, so
+    the server's first paint and the client's re-render are identical. Read-only
+    — never generates. The client still refreshes it via markdown.js.
+
+    Returns (html_or_None, generated_at_or_None) — the timestamp lets the
+    client show a "last generated" note in the loading state on the very
+    first fetchBriefing() call, before any SSE round-trip."""
     from models import get_user_db
+    from briefing import _normalize_text
     cache_key = f"{view_id or '_all'}:{hours}"
     try:
         con = get_user_db()
         row = con.execute(
-            "SELECT briefing, generated_at FROM briefing_cache WHERE cache_key = ?",
+            "SELECT briefing, generated_at, sources_json FROM briefing_cache "
+            "WHERE cache_key = ?",
             (cache_key,),
         ).fetchone()
         con.close()
         if not row or not row[0]:
-            return None
+            return None, None
         age_s = (datetime.utcnow()
                  - datetime.strptime(row[1], "%Y-%m-%d %H:%M:%S")).total_seconds()
         if age_s > 48 * 3600:
-            return None
+            return None, None
     except Exception:
-        return None
+        return None, None
 
-    out, in_list = [], False
-    for line in row[0].splitlines():
+    try:
+        sources = json.loads(row[2]) if row[2] else []
+    except Exception:
+        sources = []
+
+    # Rows cached before the normalizer learned about 【N】 citations and
+    # non-breaking punctuation still hold the raw model text — clean on read.
+    out, items, para = [], [], []
+
+    def flush_para():
+        if para:
+            out.append(f"<p>{_md_inline(' '.join(para), sources)}</p>")
+            para.clear()
+
+    def flush_list():
+        if items:
+            out.append("<ul>" + "".join(items) + "</ul>")
+            items.clear()
+
+    for line in _normalize_text(row[0]).splitlines():
         line = line.strip()
         if not line:
+            flush_para(); flush_list()
             continue
-        if line.startswith("## "):
-            if in_list:
-                out.append("</ul>"); in_list = False
-            out.append(f"<h2>{html.escape(line[3:])}</h2>")
-        elif line.startswith(("- ", "* ", "• ")):
-            if not in_list:
-                out.append("<ul>"); in_list = True
-            out.append(f"<li>{html.escape(line[2:].strip())}</li>")
-        else:
-            if in_list:
-                out.append("</ul>"); in_list = False
-            out.append(f"<p>{html.escape(line)}</p>")
-    if in_list:
-        out.append("</ul>")
-    return "".join(out) if out else None
+        m = _MD_LI.match(line)
+        if m:
+            flush_para()
+            items.append(f"<li>{_md_inline(m.group(1), sources)}</li>")
+            continue
+        m = _MD_H.match(line)
+        if m:
+            flush_para(); flush_list()
+            out.append(f"<h4>{_md_inline(m.group(1), sources)}</h4>")
+            continue
+        flush_list()
+        para.append(line)
+    flush_para(); flush_list()
+    return ("".join(out) if out else None), row[1]
 
 
 @bp.route("/")
@@ -122,7 +181,7 @@ def index():
             "date_from", "date_to", "page"))
     )
     feed = _ssr_feed(view_id, hours) if ssr_ok else None
-    briefing = _briefing_html(view_id, hours) if ssr_ok else None
+    briefing, briefing_generated_at = _briefing_html(view_id, hours) if ssr_ok else (None, None)
 
     if view:
         page_title = f"{view['name']} — {SITE_TITLE}"
@@ -144,6 +203,7 @@ def index():
         ssr_snap_key=f"snap:{view_id}|{hours}|1|importance" if feed else None,
         ssr_briefing=briefing,
         ssr_briefing_key=f"{view_id}|{hours}",
+        ssr_briefing_generated_at=briefing_generated_at,
         ssr_view=view_id,
         ssr_hours=hours,
     )
@@ -183,8 +243,15 @@ def sitemap():
     entries = [(f"{CANON_BASE}/", feed_mod, "hourly", "1.0")]
     for v in VIEWS:
         entries.append((f"{CANON_BASE}/?view={v['id']}", feed_mod, "hourly", "0.8"))
-    for path in ("/about", "/methodology", "/search"):
+    for path in ("/about", "/methodology", "/search", "/sec-analysis"):
         entries.append((f"{CANON_BASE}{path}", None, "monthly", "0.3"))
+
+    # /sec-analysis is a search form until it is given a ticker, so the bare URL
+    # shows a crawler nothing. Seed the handful the page itself suggests; the store
+    # holds 17,934 filers and listing them would be sitemap spam, not coverage.
+    from routes.sec_analysis import SUGGESTED
+    for tick, _name in SUGGESTED:
+        entries.append((f"{CANON_BASE}/sec-analysis?ticker={tick}", None, "weekly", "0.4"))
 
     # Recent event permalinks: substantial (size>=3), newest first, capped.
     con = get_db()
@@ -230,6 +297,14 @@ def robots():
         "Disallow: /api/\n"
         f"Sitemap: {CANON_BASE}/sitemap.xml\n",
         mimetype="text/plain",
+    )
+
+
+@bp.route("/googlecd0185132db2bdea.html")
+def google_site_verification():
+    return Response(
+        "google-site-verification: googlecd0185132db2bdea.html",
+        mimetype="text/html",
     )
 
 
@@ -300,15 +375,125 @@ def event_detail(cluster_id):
         "latest_seen": _fmt_event_ts(latest_seen),
         "members": members,
     }
-    return render_template("event_detail.html", cluster=cluster, error=None)
+    social = None
+    try:
+        from social_store import published_context, record_visit
+        social = published_context(cluster_id)
+        record_visit(cluster_id, request.args.get("src", ""))
+    except Exception:
+        # Social attribution/context must never make an evidence page fail.
+        social = None
+    return render_template(
+        "event_detail.html", cluster=cluster, social=social, error=None,
+        canonical=f"{CANON_BASE}/event/{cid}",
+        og_image=f"{CANON_BASE}/static/og-card.png",
+    )
+
+
+
+# ── documentation facts ──────────────────────────────────────────────────────
+# /about and /methodology make concrete claims — model names, event limits, cache
+# windows, scoring weights, how many pills exist. Every one of those was hand-copied
+# prose duplicating a constant in code, and on 2026-08-02 six of them were found
+# wrong across three pages at once (GLM-4.7, Gemini 2.5 Flash, OpenRouter, "top 50
+# events", "45 minutes", "a few built-in views" when there were 16). Inject them from
+# the source of truth instead, so the pages cannot drift again.
+def _doc_facts():
+    facts = {}
+    try:
+        from briefing import (BRIEFING_MODEL, BRIEFING_EVENT_LIMIT,
+                              BRIEFING_CANDIDATE_LIMIT, fresh_s)
+        facts["model"] = BRIEFING_MODEL.rsplit("/", 1)[-1]
+        facts["event_limit"] = BRIEFING_EVENT_LIMIT
+        facts["candidate_limit"] = BRIEFING_CANDIDATE_LIMIT
+        facts["fresh_short_h"] = fresh_s(3) // 3600
+        facts["fresh_long_h"] = fresh_s(720) // 3600
+    except Exception:
+        pass
+    try:
+        from importance import IMP_W_COVERAGE, IMP_W_VELOCITY, IMP_W_RECENCY
+        facts["w_coverage"] = IMP_W_COVERAGE
+        facts["w_velocity"] = IMP_W_VELOCITY
+        facts["w_recency"] = IMP_W_RECENCY
+    except Exception:
+        pass
+    try:
+        facts["n_views"] = len(VIEWS)
+        by_group = {}
+        for v in VIEWS:
+            by_group.setdefault(v.get("group", "Other"), []).append(v)
+        facts["view_groups"] = by_group
+    except Exception:
+        pass
+    # The judge is a DIFFERENT model from the briefing writer. The page used to
+    # render BRIEFING_MODEL for both; that was only correct by coincidence and
+    # would have gone quietly wrong the first time either was repointed.
+    try:
+        import sys as _sys
+        from pathlib import Path as _Path
+        _repo = str(_Path(__file__).resolve().parent.parent.parent)
+        if _repo not in _sys.path:
+            _sys.path.insert(0, _repo)
+        from pipeline.pill_eval import JUDGE_MODEL
+        facts["judge_model"] = JUDGE_MODEL.rsplit("/", 1)[-1]
+    except Exception:
+        pass
+    facts.update(_pill_precision_facts())
+    return facts
+
+
+# Precision claims on /methodology are the ones most likely to rot, because they
+# are measurements rather than constants — and stale ones are worse than none:
+# the "75-94%" figure survived six weeks during which the judge was not running
+# at all. Read them from the newest pill_eval report so the page states what was
+# last actually measured, and degrades to the template defaults if none exists.
+def _pill_precision_facts():
+    out = {}
+    try:
+        import glob
+        import json as _json
+        from _paths import DATA_DIR
+        reports = sorted(glob.glob(str(DATA_DIR / "pill_eval" / "*.json")))
+        if not reports:
+            return out
+        data = _json.loads(open(reports[-1], encoding="utf-8").read())
+        scored = {r["category"]: r["precision"] for r in data.get("results", [])
+                  if r.get("precision") is not None
+                  # 'fda' samples the raw FDA name-match cache, which no longer
+                  # backs any live pill — including it would report a 10% floor
+                  # for something no reader can open.
+                  and r["category"] != "fda"}
+        if not scored:
+            return out
+        vals = sorted(scored.values())
+        mid = len(vals) // 2
+        median = vals[mid] if len(vals) % 2 else (vals[mid - 1] + vals[mid]) / 2
+        pct = lambda v: f"{round(v * 100)}%"
+        out["eval_min"], out["eval_max"] = pct(vals[0]), pct(vals[-1])
+        out["eval_median"] = pct(median)
+        out["eval_pills"] = len(vals)
+        out["eval_n"] = data.get("n")
+        ran = (data.get("ran_at") or "")[:10]
+        if ran:
+            # Build the day number by hand: '%-d' is glibc-only and this runs on
+            # Windows, where it raises.
+            d = datetime.strptime(ran, "%Y-%m-%d")
+            out["eval_date"] = f"{d.day} {d.strftime('%B %Y')}"
+        for key, cat in (("eval_supply", "supply_chain"), ("eval_semi", "semiconductors"),
+                         ("eval_aireg", "ai_regulation"), ("eval_cyber", "cyber_attacks")):
+            if cat in scored:
+                out[key] = pct(scored[cat])
+    except Exception:
+        pass
+    return out
 
 
 @bp.route("/about")
 def about():
-    return render_template("about.html")
+    return render_template("about.html", **_doc_facts())
 
 
 @bp.route("/methodology")
 def methodology():
     """Transparency: the logic behind everything the dashboard displays."""
-    return render_template("methodology.html")
+    return render_template("methodology.html", **_doc_facts())

@@ -5,11 +5,16 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% if cluster %}{{ cluster.title }} — GDELT Monitor{% else %}Event not found{% endif %}</title>
   {% if cluster %}
+  <link rel="canonical" href="{{ canonical }}">
   <meta property="og:type" content="article">
   <meta property="og:title" content="{{ cluster.title }}">
-  <meta property="og:description" content="Covered by {{ cluster.size }} source{{ '' if cluster.size == 1 else 's' }} — {{ cluster.first_seen }} to {{ cluster.latest_seen }}.">
-  {% if cluster.image %}<meta property="og:image" content="{{ cluster.image }}">{% endif %}
+  <meta property="og:description" content="{% if social %}{{ social.topic_name }} · {{ social.source_count }} sources. {{ social.explanation }}{% else %}Covered by {{ cluster.size }} source{{ '' if cluster.size == 1 else 's' }} — {{ cluster.first_seen }} to {{ cluster.latest_seen }}.{% endif %}">
+  <meta property="og:url" content="{{ canonical }}">
+  <meta property="og:image" content="{{ og_image }}">
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{ cluster.title }}">
+  <meta name="twitter:description" content="{% if social %}{{ social.topic_name }} · {{ social.source_count }} sources. {{ social.explanation }}{% else %}Covered by {{ cluster.size }} sources.{% endif %}">
+  <meta name="twitter:image" content="{{ og_image }}">
   {% endif %}
   <style>
     :root {
@@ -36,6 +41,10 @@
     .meta { color: var(--muted); font-size: 0.82rem; }
     .rep-link { display: inline-block; margin-top: 0.5rem; font-size: 0.9rem; }
     .event-img { max-width: 100%; border-radius: 6px; margin: 0.9rem 0; border: 1px solid var(--border); }
+    .signal-note { background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 5px; padding: 0.8rem 0.9rem; margin: 1rem 0; }
+    .signal-note-label { color: var(--accent); font-size: 0.7rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; }
+    .signal-note p { margin: 0.3rem 0 0; }
+    .signal-disclosure { color: var(--muted); font-size: 0.74rem; margin-top: 0.35rem; }
     .variants-title { font-size: 0.74rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 1.4rem 0 0.5rem; }
     ul.variants { list-style: none; margin: 0; padding: 0; }
     li.variant { padding: 0.65rem 0; border-bottom: 1px solid var(--border); }
@@ -65,6 +74,16 @@
           <a class="rep-link" href="{{ cluster.rep_url }}" target="_blank" rel="noopener">Read the lead story &rarr;</a>
         {% endif %}
       </div>
+      {% if social %}
+      <div class="signal-note">
+        <div class="signal-note-label">{{ social.topic_name }} signal</div>
+        <p>{{ social.explanation }}</p>
+        <div class="signal-disclosure">
+          {{ 'AI-assisted explanation checked against the sources below.' if social.explanation_kind == 'generated' else 'Deterministic factual fallback.' }}
+          The source set is the evidence; this is not a forecast or recommendation.
+        </div>
+      </div>
+      {% endif %}
       {% if cluster.image %}<img class="event-img" src="{{ cluster.image }}" alt="" loading="lazy">{% endif %}
 
       <div class="variants-title">{{ cluster.members|length }} variant{{ '' if cluster.members|length == 1 else 's' }} of this story</div>

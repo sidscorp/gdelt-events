@@ -81,3 +81,20 @@ body.dark input, body.dark select, body.dark textarea {
     padding-right: env(safe-area-inset-right, 0px);
   }
 }
+
+/* Floating theme toggle from templates/base.html, for pages with no header of
+   their own (/about, /methodology, /sec-analysis).
+   Deliberately NOT called .theme-toggle: the dashboard header already uses that
+   class and dashboard.css styles it, so reusing the name yanked the dashboard's
+   own button into the corner. The script removes this one when a header toggle
+   is present, so no page ever shows two. */
+.page-theme-toggle {
+  position: fixed; right: 1rem; bottom: 1rem; z-index: 50;
+  font-family: inherit; font-size: 0.7rem; letter-spacing: 0.06em;
+  text-transform: uppercase; cursor: pointer;
+  padding: 0.35rem 0.7rem; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--text-tertiary); opacity: 0.8;
+}
+.page-theme-toggle:hover { opacity: 1; color: var(--text); border-color: var(--accent-brand); }
+@media print { .page-theme-toggle { display: none; } }

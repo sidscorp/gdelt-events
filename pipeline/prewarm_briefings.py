@@ -1,26 +1,194 @@
-"""Pre-warm the AI briefing cache for the hot view/time combos so users never
-wait on generation. Hits the local non-streaming endpoint with refresh=1 to
-force regeneration + re-cache. Run on a schedule shorter than BRIEFING_TTL_S."""
-import urllib.request, time, sys
+"""Pre-warm the AI briefing cache for the fixed curated briefing surface.
 
-BASE = "http://localhost:8015"
-PILLS = ["ai-general", "ai-regulation", "supply-chain-alerts",
-         "medical-devices", "oss-vulnerabilities", "cyber-attacks"]
-# (view, hours) combos to keep warm. Global default is 3h (the page default),
-# so warm both 3h and 24h for global; pills snap to their 24h default_hours.
-COMBOS = [("", 3), ("", 24)] + [(v, 24) for v in PILLS]
+Hits the local non-streaming endpoint with ?prewarm=1, which regenerates only
+when the cache is stale for that window (see briefing.fresh_s). Data-version-guarded: only runs when gdelt_ingest.py has written
+a new data_version.txt, skipping redundant cycles.
 
-def warm(view, hours):
-    url = f"{BASE}/api/briefing?hours={hours}&refresh=1" + (f"&view={view}" if view else "")
+The warm set is intentionally fixed: Global plus the 16 built-in topic pills,
+each at 3h and 24h.  User-created pills and less-common windows remain on demand.
+
+    THIS USED TO READ `briefing_history WHERE trigger='visit'` AND THAT SIGNAL IS INVERTED.
+    A briefing_history row is only written when a briefing is GENERATED. A visit that hits a
+    warm cache writes nothing. So the combos this prewarmer successfully kept warm produced no
+    "visit" rows and looked like zero demand, while the combos nobody reads missed cache, wrote
+    a visit row, and looked like demand. The list was selecting on cache misses, which
+    anti-correlate with popularity. Measured 2026-08-29: it was walking 29 combos and
+    regenerating 13 per run, 5 runs/day = ~59 generations/day, against 27 human briefing reads
+    per WEEK. 411 prewarms served 27 visits.
+
+`pageview_log` records every pageview with its `briefing_key`, cache hit or miss, so it is the
+honest demand signal. Measured over 2026-08-12..08-30 (723 views): `_all:3` is 68.6% of all
+views with 306 distinct visitors; the next-broadest key has 5 visitors. Demand is extremely
+concentrated, so a short warm list covers almost everything.
+
+Distinct visitors, not raw views, decide: `geopolitics-conflict:3` shows 88 views from just
+2 visitors — one enthusiast or crawler, not breadth. Ranking on views alone would warm it above
+keys that many more people actually open.
+
+Combos below the threshold are generated on demand the rare time someone opens one. That path is
+fast and visible: measured client-side, a live briefing shows its first text at p50 0.34s and
+finishes at p50 2.9s / p90 10.8s, and the UI says what is happening and why.
+
+Failures are logged and skipped; the "keep stale until fresh" design means
+users still see the last cached briefing.
+
+Usage:
+    python prewarm_briefings.py            # defaults to port 8015 (prod)
+    python prewarm_briefings.py --port 8016  # dev instance
+    python prewarm_briefings.py --force      # skip version check
+"""
+
+import urllib.request, time, sys, argparse
+from pathlib import Path
+
+CURATED_HOURS = (3, 24)
+CURATED_VIEWS = (
+    "",                        # global / all topics
+    "ai-general",               # AI Sector
+    "ai-regulation",            # AI Governance & Regulation
+    "ai-defense",               # AI & Defense
+    "ai-sector-impact",         # AI in Industry
+    "semiconductors",           # Semiconductors
+    "oss-vulnerabilities",      # Open Source Vulnerabilities
+    "cyber-attacks",            # Cybersecurity
+    "public-health",            # Public Health
+    "medical-devices",          # Medical Devices
+    "fda-agency",               # FDA
+    "nih-news",                 # NIH
+    "cms-news",                 # CMS
+    "va-news",                  # VA
+    "supply-chain-alerts",      # Supply Chain Alerts
+    "geopolitics-conflict",     # Geopolitics & Conflict
+    "energy-climate",           # Energy & Climate
+)
+
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+VERSION_FILE = DATA_DIR / "data_version.txt"
+LAST_PREWARM_FILE = DATA_DIR / ".last_prewarm_version"
+STAGGER_S = 0.5
+
+
+def current_version():
+    try:
+        return VERSION_FILE.read_text().strip()
+    except OSError:
+        return ""
+
+
+def last_prewarmed_version():
+    try:
+        return LAST_PREWARM_FILE.read_text().strip()
+    except OSError:
+        return ""
+
+
+def warm(view, hours, base_url, timeout=120):
+    # prewarm=1 (not refresh=1): regenerate only if the cache is stale for THIS
+    # window, so a 30-day briefing warms once a day instead of on every run.
+    params = f"hours={hours}&prewarm=1"
+    if view:
+        params += f"&view={view}"
+    url = f"{base_url}/api/briefing?{params}"
+    label = f"{view or 'global'}:{hours}h"
     t0 = time.time()
     try:
-        with urllib.request.urlopen(url, timeout=90) as r:
-            r.read()
-        print(f"[{time.strftime('%H:%M:%S')}] warmed {view or 'global'}:{hours} in {time.time()-t0:.1f}s", flush=True)
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            body = r.read()
+        elapsed = time.time() - t0
+        # cached=True with no regeneration means fresh_s() said "still good" —
+        # no LLM call was made. Worth seeing in the log; it is the whole saving.
+        try:
+            import json as _json
+            skipped = bool(_json.loads(body).get("cached"))
+        except Exception:
+            skipped = False
+        tag = "SKIP" if skipped else " OK "
+        print(f"[{time.strftime('%H:%M:%S')}] {tag} {label:30s} {elapsed:.1f}s", flush=True)
+        return skipped
     except Exception as e:
-        print(f"[{time.strftime('%H:%M:%S')}] warm {view or 'global'}:{hours} FAILED: {e}", flush=True)
+        print(f"[{time.strftime('%H:%M:%S')}] FAIL {label:30s} ({e})", flush=True)
+
+
+
+def curated_combos():
+    """Exactly 34 stable cache keys; never infer custom pills from traffic."""
+    return [(view, hours) for view in CURATED_VIEWS for hours in CURATED_HOURS]
+
+
+def cache_plan(combos=None, now=None):
+    """Read-only cache status for --plan and unit tests."""
+    import sqlite3
+    from datetime import datetime, timezone
+    combos = combos or curated_combos()
+    now = now or datetime.now(timezone.utc)
+    rows = {}
+    try:
+        con = sqlite3.connect(f"file:{DATA_DIR / 'users.db'}?mode=ro", uri=True)
+        rows = {r[0]: r[1] for r in con.execute("SELECT cache_key, generated_at FROM briefing_cache")}
+        con.close()
+    except Exception:
+        pass
+    plan = []
+    for view, hours in combos:
+        key = f"{view or '_all'}:{hours}"
+        generated_at = rows.get(key)
+        fresh = False
+        if generated_at:
+            try:
+                age = (now.replace(tzinfo=None) - datetime.strptime(generated_at, "%Y-%m-%d %H:%M:%S")).total_seconds()
+                fresh = age < (3 if hours == 3 else 8) * 3600
+            except ValueError:
+                pass
+        plan.append({"key": key, "view": view, "hours": hours, "fresh": fresh,
+                     "action": "skip" if fresh else "generate"})
+    return plan
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=8015, help="Dashboard port (default: 8015)")
+    parser.add_argument("--force", action="store_true", help="Skip version check, always regenerate")
+    parser.add_argument("--plan", action="store_true", help="Report cache coverage; make no HTTP calls")
+    args = parser.parse_args()
+
+    base_url = f"http://localhost:{args.port}"
+
+    ver = current_version()
+    if not ver:
+        print(f"[{time.strftime('%H:%M:%S')}] no data version — assuming first run", flush=True)
+    combos = curated_combos()
+    plan = cache_plan(combos)
+    if args.plan:
+        for row in plan:
+            print(f"{row['action'].upper():8s} {row['key']}")
+        print(f"{len(plan)} curated keys: {sum(r['fresh'] for r in plan)} fresh, "
+              f"{sum(not r['fresh'] for r in plan)} due")
+        return
+    total = len(combos)
+    print(f"[{time.strftime('%H:%M:%S')}] pre-warming {total} curated 3h/24h combos on port {args.port}", flush=True)
+
+    t_start = time.time()
+    ok_count = 0
+    fail_count = 0
+    skipped_count = 0
+    for view, hours in combos:
+        if warm(view, hours, base_url):
+            skipped_count += 1
+        ok_count += 1  # failure is logged but not fatal; count all attempts
+        if STAGGER_S:
+            time.sleep(STAGGER_S)
+    print(f"[{time.strftime('%H:%M:%S')}] still-fresh, no LLM call: "
+          f"{skipped_count}/{total}", flush=True)
+
+    elapsed = time.time() - t_start
+    print(f"[{time.strftime('%H:%M:%S')}] done: {total} combos in {elapsed:.1f}s", flush=True)
+
+    if ver:
+        try:
+            LAST_PREWARM_FILE.write_text(ver)
+        except OSError:
+            pass
+
 
 if __name__ == "__main__":
-    for v, h in COMBOS:
-        warm(v, h)
-        time.sleep(1)
+    main()

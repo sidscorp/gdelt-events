@@ -15,7 +15,7 @@ from parsers import (
     parse_enhanced_list, parse_locations, format_timestamp, time_ago,
 )
 from articles import (
-    _api_articles_inner, _feed_cache, _feed_cache_key, _data_version,
+    _api_articles_inner, _feed_cache, _feed_cache_key, _data_version, _BOOT_ID,
     _FEED_TTL_S, _FEED_CACHE_MAX, _parse_date_filters, GAL_COLS, _gal_table,
 )
 
@@ -331,6 +331,17 @@ _stats_cache = {"at": 0.0, "data": None, "version": None}
 _STATS_TTL_S = 1800  # fallback only — data_version is the real invalidator (see _feed_cache_key)
 
 
+
+@bp.route("/api/warmstate")
+def api_warmstate():
+    """Process identity + feed-cache occupancy, for pipeline/warm_feed.py.
+
+    Deliberately touches no database: /api/stats can return 503 while DuckDB is
+    busy, and a warm loop that can't tell "cache is cold" from "stats is busy"
+    is worse than no probe at all.
+    """
+    return jsonify({"boot": _BOOT_ID, "entries": len(_feed_cache)})
+
 @bp.route("/api/stats")
 def api_stats():
     """Quick stats for the header."""
@@ -419,6 +430,69 @@ def api_perf():
     except Exception:
         pass
     return ("", 204)
+
+
+
+# ── visitor notes ────────────────────────────────────────────────────────────
+# A public, unauthenticated box on /about. Public write endpoints attract spam,
+# so: a honeypot field bots fill and humans never see, a per-IP hourly cap, hard
+# length limits, and a bounded table. The IP is stored only as a salted hash —
+# enough to rate-limit, not enough to identify anyone.
+_NOTE_MAX = 2000
+_NOTE_PER_IP_HOUR = 3
+
+
+def _note_ip_hash():
+    import hashlib
+    ip = (request.headers.get("CF-Connecting-IP")
+          or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+          or request.remote_addr or "?")
+    # Salt rotates daily, so the hash cannot link a visitor across days.
+    salt = datetime.utcnow().strftime("%Y-%m-%d")
+    return hashlib.sha256(f"{salt}:{ip}".encode()).hexdigest()[:32]
+
+
+@bp.route("/api/note", methods=["POST"])
+def api_note():
+    """Accept a short note from a visitor on the About page."""
+    from models import get_user_db
+    payload = request.get_json(force=True, silent=True) or {}
+
+    # Honeypot: a hidden field. Anything that fills it is not a person.
+    if (payload.get("website") or "").strip():
+        return jsonify({"ok": True}), 200          # lie politely to the bot
+
+    note = (payload.get("note") or "").strip()
+    contact = (payload.get("contact") or "").strip()[:200]
+    if not note:
+        return jsonify({"ok": False, "error": "empty"}), 400
+    if len(note) > _NOTE_MAX:
+        return jsonify({"ok": False, "error": "too long"}), 400
+
+    iph = _note_ip_hash()
+    try:
+        uc = get_user_db()
+        uc.execute("""CREATE TABLE IF NOT EXISTS visitor_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, note TEXT,
+            contact TEXT, ip_hash TEXT, ua TEXT, seen INTEGER DEFAULT 0)""")
+        recent = uc.execute(
+            "SELECT count(*) FROM visitor_notes WHERE ip_hash = ? "
+            "AND ts >= datetime('now','-1 hour')", (iph,)).fetchone()[0]
+        if recent >= _NOTE_PER_IP_HOUR:
+            uc.close()
+            return jsonify({"ok": False, "error": "rate"}), 429
+        uc.execute(
+            "INSERT INTO visitor_notes (ts, note, contact, ip_hash, ua) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), note[:_NOTE_MAX],
+             contact, iph, (request.headers.get("User-Agent") or "")[:200]))
+        uc.execute("DELETE FROM visitor_notes WHERE id < "
+                   "(SELECT max(id) - 5000 FROM visitor_notes)")
+        uc.commit()
+        uc.close()
+    except Exception:
+        return jsonify({"ok": False, "error": "server"}), 500
+    return jsonify({"ok": True}), 200
 
 
 # Facets cache for GAL — refreshed lazily with a 10-min TTL.

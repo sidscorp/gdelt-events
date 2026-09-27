@@ -41,6 +41,16 @@ def warm(view, hours):
         print(f"[{time.strftime('%H:%M:%S')}] feed {view or 'global'}:{hours} FAIL {e}", flush=True)
 
 
+def _dashboard_boot() -> str:
+    """Boot id of the running dashboard, or '' if it cannot be reached."""
+    try:
+        with urllib.request.urlopen(f"{BASE}/api/warmstate", timeout=10) as r:
+            import json
+            return str(json.load(r).get("boot", ""))
+    except Exception:
+        return ""
+
+
 def _current_data_version() -> str:
     try:
         return VERSION_FILE.read_text().strip()
@@ -58,12 +68,19 @@ if __name__ == "__main__":
     except OSError:
         last_warmed = None
 
-    if version and version == last_warmed:
-        print(f"[{time.strftime('%H:%M:%S')}] pills: data unchanged (version {version}) — skipping", flush=True)
+    # Guard on data version AND process identity. The feed cache is in-process, so
+    # a restart empties it while the version is unchanged — which left every pill
+    # cold, and their server-rendered first paint empty, until the next ingest.
+    boot = _dashboard_boot()
+    marker = f"{version}|{boot}"
+
+    if version and boot and marker == last_warmed:
+        print(f"[{time.strftime('%H:%M:%S')}] pills: data + process unchanged "
+              f"(version {version}) — skipping", flush=True)
     else:
         for v, h in PILL_COMBOS:
             warm(v, h)
         try:
-            LAST_PILL_WARM_FILE.write_text(version)
+            LAST_PILL_WARM_FILE.write_text(marker)
         except OSError:
             pass

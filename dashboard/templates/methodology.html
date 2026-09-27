@@ -4,48 +4,56 @@
 {% block content %}
 
 <h1>Methodology</h1>
-<p class="subtitle">Exactly how everything on this dashboard is selected, ranked, and written — nothing hidden.</p>
+<p class="subtitle">How items on this site are selected, ranked, and written. All numbers below are drawn from the live system.</p>
 
-<h2>The data</h2>
-<p>Every 15 minutes the pipeline ingests the newest batch from the <a href="https://www.gdeltproject.org/">GDELT Project</a>'s Global Article List (~44,000 outlets worldwide). Articles are kept for a rolling 60 days. GDELT's crawl runs roughly 1–2 hours behind real-time publication, so brand-new stories first appear as single articles and accumulate their "covered by N sources" counts as syndication is crawled.</p>
+<h2>1. Data acquisition</h2>
+<p>Every 15 minutes the pipeline reads the latest batch from the <a href="https://www.gdeltproject.org/">GDELT Project</a>'s Global Article List (~44,000 outlets) and Global Knowledge Graph. Storage is a rolling 60-day window. GDELT's own crawl trails real time by roughly 1–2 hours, so a new story first appears as a single article and grows its coverage count as syndication is crawled after it. Ingestion, tagging, ranking, and the global feed are deterministic code; no model decides what enters the database.</p>
 
-<h2>Event cards ("covered by N sources")</h2>
-<p>Every English article is embedded with a local neural model (nomic-embed-text, running on our own GPU). A clustering pass groups near-duplicate articles about the same event, so the feed shows one card per <em>event</em> instead of the same headline dozens of times. The card links every member article.</p>
+<h2>2. Event clustering</h2>
+<p>Each English article is embedded with <code>nomic-embed-text</code> on our own GPU; no article text leaves the site for this. A single-pass leader-clustering algorithm then groups near-duplicate articles into one <em>event</em>: the first article seeds a cluster, and each later article joins a cluster or starts one.</p>
+<p>This algorithm is chosen cheap on purpose. It is order-dependent, and it occasionally splits one story into two cards or merges two same-day stories. Full pairwise comparison does not run at 25 million rows; linking every member article from its card is the compromise, so wrong merges are visible rather than hidden.</p>
 
-<h2>How the feed is ordered (Importance sort)</h2>
-<p>The default "Importance" ordering ranks each event in your selected time window by a composite score:</p>
+<h2>3. Feed ranking (Importance)</h2>
+<p>The default sort ranks events in the selected window by a composite score with three components, each normalized within that window's candidates:</p>
 <ul style="font-size:0.88rem; margin: 0 0 1rem 1.2rem;">
-  <li><strong>Coverage (weight 0.5)</strong> — log(1 + number of sources covering the event). More outlets = more important.</li>
-  <li><strong>Recency (weight 0.3)</strong> — exponential decay with a 12-hour half-life-style constant: a 12-hour-old event keeps ~37% of its recency weight.</li>
-  <li><strong>Velocity (weight 0.2)</strong> — sources per hour since the event first appeared. Rewards stories breaking fast.</li>
+  <li>Coverage — <code>log(1 + sources)</code>. Weight {{ w_coverage or 0.5 }}.</li>
+  <li>Recency — exponential decay; an event 12 hours old keeps ~37% of its recency weight. Weight {{ w_recency or 0.3 }}.</li>
+  <li>Velocity — sources per hour since first appearance. Weight {{ w_velocity or 0.2 }}.</li>
 </ul>
-<p>Each component is normalized within the current window's candidates, then combined. "Newest"/"Oldest" bypass this entirely and sort by crawl time. There is no editorial input and no personalization — every visitor sees the same ranking.</p>
+<p>"Newest" and "Oldest" bypass the score and order by crawl time. Every visitor sees the same ranking: there is no personalization and no engagement-based ordering.</p>
+<p>Why not count articles: GDELT indexes syndication. A wire story reprinted by 300 regional outlets produces 300 rows; a story covered by six major papers produces six. Article counts track how cheap a story is to reprint. Logging the source count damps this (5 → 50 outlets matters; 200 → 245 does not), and velocity catches stories still breaking. Remaining bias: coverage measures editorial attention, which skews toward English-language and trending material. The score measures what the press covers; deciding what matters is left to the reader.</p>
 
-<h2>How topic pills decide what belongs (since July 2026)</h2>
-<p>Each curated topic pill works in two stages:</p>
+<h2>4. Topic pills</h2>
+<p>Each curated pill selects in two stages:</p>
 <ol style="font-size:0.88rem; margin: 0 0 1rem 1.2rem;">
-  <li><strong>Nomination (recall)</strong> — an article becomes a <em>candidate</em> for a pill if it matches the pill's keyword list, appears in the FDA-registered manufacturer name index (Medical Device Companies only), or its embedding is semantically close to the pill's topic description.</li>
-  <li><strong>Judgment (precision)</strong> — every candidate is then read by an LLM judge (<code>gpt-oss-120b</code>, an open-weights model, called via our self-hosted gateway) which answers one question: <em>does this article actually belong to this topic?</em> Only judge-approved articles get in. For the noisiest topics (Supply Chain, Medical Device Companies, AI &amp; Defense, OSS Vulnerabilities) borderline verdicts are rejected too.</li>
+  <li>Nomination: an article is a candidate if it matches the pill's keyword list or its embedding is close to the pill's written topic description.</li>
+  <li>Approval: an LLM judge (<code>{{ judge_model or 'gpt-oss-120b' }}</code>, an open-weights model hosted by Fireworks and called via our self-hosted gateway) reads each candidate and answers one question: does this article belong to this topic? Only approved articles are tagged. Borderline verdicts count as rejections for the noisiest pills (Supply Chain, AI &amp; Defense, OSS Vulnerabilities).</li>
 </ol>
-<p>This replaced pure keyword matching in July 2026 after a blind LLM audit measured how often each pill's articles were actually on-topic: Supply Chain scored 25% and Medical Device Companies 11% under keywords alone; after judge-gating, every pill measures roughly 75–94%. Every article's inclusion reason is stored and shown as a badge on its card in pill views (judge verdict + semantic similarity, or the matched keyword for non-English articles, which skip the judge).</p>
-<p>Custom pills (for signed-in users) use pure semantic matching against your written description at the strictness you choose — no LLM judge, so expect a bit more noise than the curated pills.</p>
+<p>The two-stage form exists because a July 2026 blind audit found Supply Chain at 25% precision under keywords alone: "Apple's chip supply chain" and "a recipe using apples" look the same to a keyword list, and vocabulary like that is exactly where the failures clustered. Pure embedding similarity was also tried as the approval test and abandoned: relevant and irrelevant articles separated by about 0.02 cosine, too narrow for any threshold to hold both precision and recall. Embeddings nominate; the judge approves.</p>
+<p>Measured precision as of {{ eval_date or '26 August 2026' }} ({{ eval_n or 40 }} sampled articles per pill, judged blind): {{ eval_min or '56%' }} to {{ eval_max or '95%' }}, median {{ eval_median or '76%' }}, across {{ eval_pills or 16 }} pills. Supply Chain moved from 25% to {{ eval_supply or '72%' }}. Strongest pills: Geopolitics &amp; Conflict, FDA, Energy &amp; Climate at 91–95%. Weakest, and being worked on next: Semiconductors ({{ eval_semi or '56%' }}), AI Governance ({{ eval_aireg or '60%' }}), Cybersecurity ({{ eval_cyber or '61%' }}).</p>
+<p>Three operational notes. First, tagging runs at ingest but judging runs minutes behind, so the newest articles may briefly carry a <code>keyword</code> badge before a verdict arrives; a fraction are later removed. Second, non-English articles skip the judge and go in on keyword alone, so pill feeds are noisier outside English. Third, from July to 22 August the judge bypassed all keyword-nominated articles because the "already decided" check was the same query as the "keyword candidate" check; the regression was found by auditing this page's claims against the database, the backfill re-judged 34,000 articles, and Supply Chain shed about four fifths of its rows. That maintenance offset is why the numbers above are re-measured rather than assumed.</p>
+<p>Custom pills (signed-in users) use semantic matching against a written description at a chosen strictness. There is no judge in that path, so expect more noise than the curated set.</p>
 
-<h2>How the AI briefing is written</h2>
-<p>When you open a briefing for a view + time window:</p>
+<h2>5. Briefings</h2>
+<p>For a view and window, the pipeline:</p>
 <ol style="font-size:0.88rem; margin: 0 0 1rem 1.2rem;">
-  <li>The system takes the <strong>top 50 events by the same Importance score as the feed</strong> — the briefing summarizes exactly what the feed shows.</li>
-  <li>A prompt is built containing: the 50 numbered events (title + summary + outlet + source count, explicitly marked as importance-ranked), the titles the <em>previous</em> briefing covered (so the model writes progressions instead of re-explaining), any ongoing story threads it has been tracking, and a hard rule that the top-5 events must be covered.</li>
-  <li>The prompt is sent to <code>GLM-4.7</code> on Cerebras (a fast open-weights model via our self-hosted gateway). Citations like [3] link back to the exact numbered event.</li>
-  <li>The result is cached for 45 minutes per view/window — the "cached" label and timestamp are shown under each briefing.</li>
+  <li>takes the window's top {{ candidate_limit or 40 }} distinct events by the Importance score (near-identical headlines collapsed first);</li>
+  <li>has an editor model read all {{ candidate_limit or 40 }} and select about {{ event_limit or 10 }}, writing one line per choice and rejecting items that are not news (section indexes, job ads, listicles), with an explicit instruction to keep at least one consequential under-covered story;</li>
+  <li>builds the writer's prompt from the selected events, the editor's reasons, the titles the previous briefing covered, and any ongoing threads;</li>
+  <li>sends it to <code>{{ model or 'gpt-oss-120b' }}</code> (Fireworks-hosted, via our self-hosted gateway) and caches the result per view/window — roughly {{ fresh_short_h or 3 }}h fresh at a 3-hour window, {{ fresh_long_h or 24 }}h at 30-day, with the timestamp shown under each briefing.</li>
 </ol>
-<p><strong>Click the ⓘ on any briefing</strong> to see everything that generation used: the model, the full ranked source list, the continuity context, and the <em>verbatim prompt</em>.</p>
+<p>Citations such as [3] are stitched to the numbered events by index; the model has no list beyond those, so a citation cannot point to an event it was not given. The ⓘ control on any briefing shows the model used, all {{ candidate_limit or 40 }} candidates, the editor's chosen and rejected lists with reasons, the continuity context, and the verbatim prompt. If the editor call fails, the briefing falls back to the top {{ event_limit or 10 }} by Importance and the panel marks the fallback.</p>
+<p>Run-to-run formatting varies between the same model, so text is normalized before storage and again before display (citation markers become the superscript links). Content is never rewritten in this step.</p>
 
-<h2>What the AI does <em>not</em> do</h2>
+<h2>6. Where briefings can still be wrong</h2>
 <ul style="font-size:0.88rem; margin: 0 0 1rem 1.2rem;">
-  <li>No model chooses which articles enter the database or the global feed — that's coverage math only.</li>
-  <li>Briefings can only cite the numbered events they were given; they are instructed never to invent numbers or URLs.</li>
-  <li>No personalization, tracking-based ranking, or engagement optimization anywhere.</li>
+  <li>Input bias transfers: if Importance nominates the wrong {{ candidate_limit or 40 }} events, the briefing describes a selected subset of a wrong window.</li>
+  <li>The editor judges from a headline and a one-line summary, not the full article; its own choices are published in the ⓘ panel for disagreement.</li>
+  <li>Summaries are of headlines and descriptions only. Anything living below that level is invisible to the model.</li>
+  <li>Paraphrase shifts meaning at the edges (attribution, hedging, numbers); the [n] next to a claim is the check.</li>
+  <li>Format varies between runs; text is normalized, wording isn't.</li>
 </ul>
+<p>Use the briefing as a triage layer for deciding what to open. The citation is there to be clicked.</p>
 
 <p style="margin-top:1.5rem;"><a href="/">← Back to the dashboard</a> · <a href="/about">About the project</a></p>
 

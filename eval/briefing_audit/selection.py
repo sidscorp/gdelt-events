@@ -31,8 +31,8 @@ def _key(s: dict) -> str:
     return (s.get("link") or s.get("title") or "").strip().lower()
 
 
-def audit(days: int = 7) -> dict:
-    users = store.users_db_ro()
+def audit(days: int = 7, users=None) -> dict:
+    users = users or store.users_db_ro()
     since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     rows = users.execute("SELECT id, view_id, hours, generated_at, sources_json FROM briefing_history "
                          "WHERE generated_at >= ? ORDER BY id", (since,)).fetchall()

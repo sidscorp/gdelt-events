@@ -76,6 +76,7 @@ from routes.api_briefing import bp as api_briefing_bp
 from routes.api_pills import bp as api_pills_bp
 from routes.sec_analysis import bp as sec_bp
 from routes.social import bp as social_bp
+from routes.admin_metrics import bp as admin_metrics_bp
 
 app.register_blueprint(pages_bp)
 app.register_blueprint(auth_bp)
@@ -84,6 +85,7 @@ app.register_blueprint(api_briefing_bp)
 app.register_blueprint(api_pills_bp)
 app.register_blueprint(sec_bp)
 app.register_blueprint(social_bp)
+app.register_blueprint(admin_metrics_bp)
 
 
 if __name__ == "__main__":

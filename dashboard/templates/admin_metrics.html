@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}Metrics — GDELT Monitor{% endblock %}
+{% block meta %}<meta name="robots" content="noindex">{% endblock %}
+{% block page_css %}<link rel="stylesheet" href="/static/css/admin_metrics.css?v=1">{% endblock %}
+
+{% macro pct(w) -%}
+  {%- if w and w.rate is not none -%}{{ (w.rate * 100)|round|int }}%<small> [{{ (w.ci_low * 100)|round|int }}–{{ (w.ci_high * 100)|round|int }}]</small>
+  {%- else -%}—{%- endif -%}
+{%- endmacro %}
+
+{% macro failed(section) -%}
+  <p class="err">Unavailable: {{ section.error }}</p>
+{%- endmacro %}
+
+{% block content %}
+<main class="metrics-wrap">
+  <header class="metrics-head">
+    <div>
+      <p class="eyebrow">GDELT Monitor</p>
+      <h1>Metrics</h1>
+      <p class="sub">Generated {{ m.generated_at }} in {{ m.elapsed_s }}s · cached 60s · <a href="?fresh=1">refresh</a> · <a href="/admin/metrics.json">JSON</a></p>
+    </div>
+    <nav><a href="/admin/users">Users</a> · <a href="/admin/social">Social</a> · <strong>Metrics</strong></nav>
+  </header>
+
+  {# ── health ─────────────────────────────────────────────── #}
+  <section>
+    <h2>Pipeline health</h2>
+    {% if m.health.ok %}
+    <div class="health">
+      {% for h in m.health.data %}
+      <div class="hrow {{ h.status }}"><span class="dot"></span><strong>{{ h.job }}</strong><span class="age">{{ h.age }}</span><span class="detail">{{ h.detail }}</span></div>
+      {% endfor %}
+    </div>
+    <p class="note">Rated from what each job produced (timestamps, status fields, run notes), not exit codes. Amber = up to 2× its expected interval.</p>
+    {% else %}{{ failed(m.health) }}{% endif %}
+  </section>
+
+  {# ── readers ─────────────────────────────────────────────── #}
+  <section>
+    <h2>Readers</h2>
+    {% if m.readers.ok %}{% set r = m.readers.data %}
+    <div class="tiles">
+      <div><span>Visitors · 24h</span><strong>{{ r.d1.visitors }}</strong><small>{{ r.d1.views }} views</small></div>
+      <div><span>Visitors · 7d</span><strong>{{ r.d7.visitors }}</strong><small>{{ r.d7.views }} views</small></div>
+      <div><span>Visitors · 30d</span><strong>{{ r.d30.visitors }}</strong><small>{{ r.d30.views }} views</small></div>
+      <div><span>Returning · 30d</span><strong>{{ r.returning_30d }}</strong><small>seen on 2+ days</small></div>
+      <div><span>Feed opened · 7d</span><strong>{% if r.feed_expand_7d.rate is not none %}{{ (r.feed_expand_7d.rate * 100)|round|int }}%{% else %}—{% endif %}</strong><small>{{ r.feed_expand_7d.expands }} of {{ r.feed_expand_7d.home_views }} home views</small></div>
+    </div>
+    {% set peak = [r.series|map(attribute='views')|max, 1]|max %}
+    <figure class="spark">
+      <svg viewBox="0 0 300 60" preserveAspectRatio="none" role="img" aria-label="Daily pageviews, last 30 days">
+        {% for d in r.series %}
+        <rect x="{{ loop.index0 * 10 + 1 }}" y="{{ 60 - (d.views / peak * 56) }}" width="8" height="{{ d.views / peak * 56 }}"><title>{{ d.day }}: {{ d.views }} views, {{ d.visitors }} visitors</title></rect>
+        {% endfor %}
+      </svg>
+      <figcaption>Daily pageviews, last 30 days (peak {{ peak }}). Hover a bar for the day.</figcaption>
+    </figure>
+    <div class="cols">
+      <div><h3>Briefing views</h3><ol>{% for k, n in r.top_briefings %}<li>{{ k }} <em>{{ n }}</em></li>{% endfor %}</ol></div>
+      <div><h3>Came from</h3><ol>{% for k, n in r.sources %}<li>{{ k }} <em>{{ n }}</em></li>{% endfor %}</ol></div>
+      <div><h3>Countries</h3><ol>{% for k, n in r.countries %}<li>{{ k }} <em>{{ n }}</em></li>{% endfor %}</ol></div>
+    </div>
+    <p class="note">Source: pageview_log (30 days, pageview events only). Only the home dashboard sends this beacon, so event pages and /sec-analysis are not counted here (Cloudflare analytics covers them). Visitors = distinct hashed IPs. {{ r.bot_rows_30d }} bot/crawler rows excluded.</p>
+    {% else %}{{ failed(m.readers) }}{% endif %}
+  </section>
+
+  {# ── briefing quality ────────────────────────────────────── #}
+  <section>
+    <h2>Briefing accuracy</h2>
+    {% if m.quality.ok %}{% set q = m.quality.data %}
+    <table class="qt">
+      <thead><tr><th></th><th>24h</th><th>7d</th></tr></thead>
+      <tbody>
+        <tr><th>Briefings audited</th><td>{{ q.d1.briefings }}</td><td>{{ q.d7.briefings }}</td></tr>
+        <tr><th>Factual sentences with a problem</th><td>{{ pct(q.d1.problem) }}</td><td>{{ pct(q.d7.problem) }}</td></tr>
+        <tr><td class="sub-row">· overstated (certainty or size raised)</td><td>{{ pct(q.d1.overstated) }}</td><td>{{ pct(q.d7.overstated) }}</td></tr>
+        <tr><td class="sub-row">· unsupported (detail not in sources)</td><td>{{ pct(q.d1.unsupported) }}</td><td>{{ pct(q.d7.unsupported) }}</td></tr>
+        <tr><td class="sub-row">· contradicted</td><td>{{ pct(q.d1.contradicted) }}</td><td>{{ pct(q.d7.contradicted) }}</td></tr>
+        <tr><th>Summary sentences with no citation</th><td>{{ pct(q.d1.summary_uncited) }}</td><td>{{ pct(q.d7.summary_uncited) }}</td></tr>
+        <tr><th>Lead story from a single outlet</th><td>{{ pct(q.d1.lead_single_source) }}</td><td>{{ pct(q.d7.lead_single_source) }}</td></tr>
+        <tr><th>Audit cost</th><td>${{ '%.3f'|format(q.d1.cost_usd) }}</td><td>${{ '%.3f'|format(q.d7.cost_usd) }}</td></tr>
+      </tbody>
+    </table>
+    <p class="note">Each briefing sentence judged against the headlines and descriptions the writer saw (judge {{ q.judge_version }}, 95% intervals in brackets). "What to watch" predictions are excluded. The prompt fix shipped 2026-09-27 14:45 ET; the 7-day window mixes before and after until 10-04.</p>
+    {% if q.replay %}<p class="note">Last replay A/B ({{ q.replay.file }}, {{ q.replay.pairs }} pairs): problem rate {{ pct(q.replay.A) }} → {{ pct(q.replay.B) }}, change {{ (q.replay.change.point * 100)|round(1) }}pp [{{ (q.replay.change.ci95[0] * 100)|round(1) }}, {{ (q.replay.change.ci95[1] * 100)|round(1) }}].</p>{% endif %}
+    {% if q.worst %}
+    <h3>Latest flagged sentences</h3>
+    <ul class="worst">
+      {% for w in q.worst %}
+      <li><span class="verdict {{ w.verdict }}">{{ w.verdict }} · {{ w.confidence }}</span> <span class="meta">#{{ w.briefing_id }} · {{ w.view_id }}:{{ w.hours }}h · {{ w.section }} · {{ w.generated_at }}</span>
+        <p>{{ w.text }}</p>
+        {% if w.sources %}<small>Sources: {{ w.sources|join(' · ') }}</small>{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% else %}{{ failed(m.quality) }}{% endif %}
+  </section>
+
+  {# ── selection ───────────────────────────────────────────── #}
+  <section>
+    <h2>Story selection · 7d</h2>
+    {% if m.selection.ok %}{% set s = m.selection.data %}
+    <div class="tiles">
+      <div><span>Picked stories from one outlet</span><strong>{{ pct(s.chosen_single_source) }}</strong></div>
+      <div><span>Briefings skipping a big story</span><strong>{{ pct(s.briefings_skipping_a_big_story) }}</strong><small>≥{{ s.thresholds.big_outlets }} outlets, top {{ s.thresholds.top_rank }}</small></div>
+      <div><span>Picks repeated from last briefing</span><strong>{{ pct(s.chosen_repeated_from_previous) }}</strong></div>
+      <div><span>Briefings</span><strong>{{ s.briefings }}</strong></div>
+    </div>
+    {% if s.most_skipped_big_stories %}<p class="note">Most-skipped big stories: {% for t, n in s.most_skipped_big_stories %}{{ t }} ({{ n }}){% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+    {% else %}{{ failed(m.selection) }}{% endif %}
+  </section>
+
+  {# ── spend ───────────────────────────────────────────────── #}
+  <section>
+    <h2>LLM spend</h2>
+    {% if m.spend.ok %}
+    <div class="spend">
+      {% for k in m.spend.data.rows %}
+      <div class="srow">
+        <div class="slabel"><strong>{{ k.alias }}</strong> <small>{{ k.used_by|join(', ') }}</small></div>
+        <div class="bar"><span style="width: {{ [k.pct or 0, 100]|min }}%" class="{{ 'hot' if (k.pct or 0) >= 80 else '' }}"></span></div>
+        <div class="snum">${{ '%.2f'|format(k.spend) }}{% if k.cap %} / ${{ '%.0f'|format(k.cap) }} · {{ k.period }}, resets {{ k.resets }}{% endif %}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% if m.spend.data.errors %}<p class="err">{{ m.spend.data.errors|join('; ') }}</p>{% endif %}
+    <p class="note">Live from the LLM gateway (per-key spend in the current budget period). Keys that share an alias share one budget.</p>
+    {% else %}{{ failed(m.spend) }}{% endif %}
+  </section>
+
+  {# ── briefing volume ─────────────────────────────────────── #}
+  <section>
+    <h2>Briefing generation</h2>
+    {% if m.briefings.ok %}{% set b = m.briefings.data %}
+    <div class="tiles">
+      <div><span>Generated per day · 7d avg</span><strong>{{ b.avg_per_day_7d }}</strong></div>
+      <div><span>Curated keys within window</span><strong>{{ b.curated.fresh }}/{{ b.curated.keys }}</strong><small>{{ b.curated.stale }} older · {{ b.curated.missing }} never built</small></div>
+    </div>
+    <table class="qt small">
+      <thead><tr><th>Day</th><th>Total</th><th>Prewarm</th><th>Visit</th></tr></thead>
+      <tbody>{% for d in b.per_day|reverse %}<tr><td>{{ d.day }}</td><td>{{ d.total }}</td><td>{{ d.prewarm or 0 }}</td><td>{{ d.visit or 0 }}</td></tr>{% endfor %}</tbody>
+    </table>
+    <p class="note">"Older" = past its freshness window (3h window: 3h; 24h window: 8h). Prewarm runs every 4h, so 3h keys drift past between runs, and a quiet topic with fewer than 2 recent stories keeps serving its last briefing (prewarm logs these as SKIP; the page shows their age).{% if b.curated.stalest %} Oldest: {% for k, h in b.curated.stalest %}{{ k }} ({{ h }}h){% if not loop.last %} · {% endif %}{% endfor %}.{% endif %}</p>
+    {% else %}{{ failed(m.briefings) }}{% endif %}
+  </section>
+</main>
+{% endblock %}

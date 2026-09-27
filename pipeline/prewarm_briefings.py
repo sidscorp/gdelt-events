@@ -1,13 +1,11 @@
-"""Pre-warm the AI briefing cache for every view × time-range combo so the
-dashboard always has pre-generated content to serve instantly (no "Generating…" skeletons).
+"""Pre-warm the AI briefing cache for the fixed curated briefing surface.
 
 Hits the local non-streaming endpoint with ?prewarm=1, which regenerates only
 when the cache is stale for that window (see briefing.fresh_s). Data-version-guarded: only runs when gdelt_ingest.py has written
 a new data_version.txt, skipping redundant cycles.
 
-DEMAND-DRIVEN: the combo list is not the 17x6=102 cross-product. It is read from
-`pageview_log` — the view/window pairs people actually LOOK AT, weighted by how many
-distinct visitors looked.
+The warm set is intentionally fixed: Global plus the 16 built-in topic pills,
+each at 3h and 24h.  User-created pills and less-common windows remain on demand.
 
     THIS USED TO READ `briefing_history WHERE trigger='visit'` AND THAT SIGNAL IS INVERTED.
     A briefing_history row is only written when a briefing is GENERATED. A visit that hits a
@@ -43,8 +41,8 @@ Usage:
 import urllib.request, time, sys, argparse
 from pathlib import Path
 
-HOURS = [3, 6, 24, 72, 168, 720]
-VIEWS = [
+CURATED_HOURS = (3, 24)
+CURATED_VIEWS = (
     "",                        # global / all topics
     "ai-general",               # AI Sector
     "ai-regulation",            # AI Governance & Regulation
@@ -62,7 +60,7 @@ VIEWS = [
     "supply-chain-alerts",      # Supply Chain Alerts
     "geopolitics-conflict",     # Geopolitics & Conflict
     "energy-climate",           # Energy & Climate
-]
+)
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 VERSION_FILE = DATA_DIR / "data_version.txt"
@@ -112,76 +110,45 @@ def warm(view, hours, base_url, timeout=120):
 
 
 
-PREWARM_LOOKBACK_DAYS = 14   # trailing window for the demand signal
-PREWARM_MIN_VISITORS = 2     # distinct visitors a combo needs to earn a warm slot
-PREWARM_MAX_COMBOS = 12      # hard ceiling, so a burst of browsing can't explode cost
-ALWAYS_WARM = [("", 3), ("", 24)]   # global feed: the front page, always instant
+def curated_combos():
+    """Exactly 34 stable cache keys; never infer custom pills from traffic."""
+    return [(view, hours) for view in CURATED_VIEWS for hours in CURATED_HOURS]
 
 
-def _parse_briefing_key(key):
-    """'geopolitics-conflict:24' -> ('geopolitics-conflict', 24); '_all:3' -> ('', 3).
-
-    Returns None for anything malformed. The log contains at least one '_all|3' with a pipe,
-    so this must not assume the separator is present or the window is numeric.
-    """
-    if not key or ":" not in key:
-        return None
-    view, _, hours = key.rpartition(":")
-    try:
-        hours = int(hours)
-    except ValueError:
-        return None
-    if hours not in HOURS:
-        return None
-    return ("" if view in ("_all", "", None) else view), hours
-
-
-def demand_combos():
-    """(view_id, hours) pairs people actually look at, broadest demand first.
-
-    Reads `pageview_log`, which records every pageview whether or not it hit a warm cache.
-    See the module docstring for why `briefing_history` cannot be used for this: its rows exist
-    only when a briefing was generated, so it measures cache misses, not readership.
-
-    Ranked by DISTINCT VISITORS, then views. One person reloading a niche view all week must not
-    outrank a view many different people open once.
-    """
+def cache_plan(combos=None, now=None):
+    """Read-only cache status for --plan and unit tests."""
     import sqlite3
-    db = DATA_DIR / "users.db"
-    combos = []
+    from datetime import datetime, timezone
+    combos = combos or curated_combos()
+    now = now or datetime.now(timezone.utc)
+    rows = {}
     try:
-        con = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-        rows = con.execute(
-            "SELECT briefing_key, count(DISTINCT ip_hash) visitors, count(*) views "
-            "FROM pageview_log "
-            "WHERE ts >= datetime('now', ?) "
-            "  AND briefing_key IS NOT NULL AND briefing_key <> '' "
-            "GROUP BY briefing_key "
-            "HAVING visitors >= ? "
-            "ORDER BY visitors DESC, views DESC",
-            (f"-{PREWARM_LOOKBACK_DAYS} day", PREWARM_MIN_VISITORS),
-        ).fetchall()
+        con = sqlite3.connect(f"file:{DATA_DIR / 'users.db'}?mode=ro", uri=True)
+        rows = {r[0]: r[1] for r in con.execute("SELECT cache_key, generated_at FROM briefing_cache")}
         con.close()
-        for key, _visitors, _views in rows:
-            combo = _parse_briefing_key(key)
-            if combo and combo not in combos:
-                combos.append(combo)
-    except Exception as e:
-        print(f"[{time.strftime('%H:%M:%S')}] demand query failed ({e}) — "
-              f"falling back to ALWAYS_WARM only", flush=True)
-
-    # The front page is warmed regardless of what the window says: it is 68.6% of all views and
-    # the one page a first-time visitor is guaranteed to land on.
-    for c in ALWAYS_WARM:
-        if c not in combos:
-            combos.append(c)
-    return combos[:PREWARM_MAX_COMBOS]
+    except Exception:
+        pass
+    plan = []
+    for view, hours in combos:
+        key = f"{view or '_all'}:{hours}"
+        generated_at = rows.get(key)
+        fresh = False
+        if generated_at:
+            try:
+                age = (now.replace(tzinfo=None) - datetime.strptime(generated_at, "%Y-%m-%d %H:%M:%S")).total_seconds()
+                fresh = age < (3 if hours == 3 else 8) * 3600
+            except ValueError:
+                pass
+        plan.append({"key": key, "view": view, "hours": hours, "fresh": fresh,
+                     "action": "skip" if fresh else "generate"})
+    return plan
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8015, help="Dashboard port (default: 8015)")
     parser.add_argument("--force", action="store_true", help="Skip version check, always regenerate")
+    parser.add_argument("--plan", action="store_true", help="Report cache coverage; make no HTTP calls")
     args = parser.parse_args()
 
     base_url = f"http://localhost:{args.port}"
@@ -189,14 +156,16 @@ def main():
     ver = current_version()
     if not ver:
         print(f"[{time.strftime('%H:%M:%S')}] no data version — assuming first run", flush=True)
-    elif not args.force and ver == last_prewarmed_version():
-        print(f"[{time.strftime('%H:%M:%S')}] data unchanged (version {ver}) — skipping", flush=True)
+    combos = curated_combos()
+    plan = cache_plan(combos)
+    if args.plan:
+        for row in plan:
+            print(f"{row['action'].upper():8s} {row['key']}")
+        print(f"{len(plan)} curated keys: {sum(r['fresh'] for r in plan)} fresh, "
+              f"{sum(not r['fresh'] for r in plan)} due")
         return
-
-    combos = demand_combos()
     total = len(combos)
-    print(f"[{time.strftime('%H:%M:%S')}] pre-warming {total} demand-selected combos "
-          f"(>={PREWARM_MIN_VISITORS} visitors in {PREWARM_LOOKBACK_DAYS}d) on port {args.port}", flush=True)
+    print(f"[{time.strftime('%H:%M:%S')}] pre-warming {total} curated 3h/24h combos on port {args.port}", flush=True)
 
     t_start = time.time()
     ok_count = 0

@@ -30,7 +30,7 @@ OPENROUTER_URL = "https://llm.snambiar.com/v1/chat/completions"
 # per briefing and the single largest line item across the whole LLM fleet.
 # Same reasoning already applied to the pill judge (see pipeline/pill_eval.py).
 BRIEFING_MODEL = "accounts/fireworks/models/gpt-oss-120b"
-BRIEFING_FRESH_S = 3600  # default cache age that triggers background regeneration
+BRIEFING_FRESH_S = 3 * 3600  # default cache age that triggers background regeneration
 
 
 # How long a briefing stays "fresh" depends on the window it summarizes: a 3h
@@ -45,7 +45,7 @@ FRESH_BY_HOURS = {
     # prewarm. Align one to the other; see the cost note above before changing.
     3: 3 * 3600,
     6: 4 * 3600,
-    24: 6 * 3600,
+    24: 8 * 3600,
     72: 12 * 3600,
     168: 24 * 3600,
     720: 24 * 3600,
@@ -63,11 +63,16 @@ def fresh_s(hours) -> int:
     # Unlisted window: scale with it, clamped to the range above.
     return max(3 * 3600, min(24 * 3600, h * 900))
 _OPENROUTER_KEY_PATH = OPENROUTER_KEY_PATH
+_BRIEFING_KEY_PATH = OPENROUTER_KEY_PATH.parent / ".gdelt_briefings_gateway_key"
 
 
 def _get_openrouter_key():
     import os
-    key = os.environ.get("OPENROUTER_API_KEY")
+    # The GDELT briefing virtual key has a separate gateway limit and model
+    # allow-list.  The legacy key is retained only as a local-dev fallback.
+    key = os.environ.get("GDELT_BRIEFINGS_GATEWAY_KEY") or os.environ.get("OPENROUTER_API_KEY")
+    if not key and _BRIEFING_KEY_PATH.exists():
+        key = _BRIEFING_KEY_PATH.read_text().strip()
     if key:
         return key
     if _OPENROUTER_KEY_PATH.exists():
@@ -436,6 +441,26 @@ def _select_events(candidates: list[dict], view_name: str, view_desc: str,
         req_log.warning("briefing editor selected nothing — falling back to importance order")
         return fallback, clean
 
+    # A readable briefing needs a stable breadth promise. Models sometimes
+    # under-select despite the prompt (for example 7 when asked for 12); fill
+    # from the remaining importance-ranked news candidates rather than silently
+    # presenting a narrower briefing. Never revive something the editor marked
+    # as not-news.
+    not_news = {v["n"] for v in clean if v["verdict"] == "not_news"}
+    selected_ns = {s["n"] for s in chosen}
+    if len(chosen) < BRIEFING_SELECT_TARGET:
+        for src in candidates:
+            if src["n"] in selected_ns or src["n"] in not_news:
+                continue
+            src["editor_reason"] = "Included for breadth across the ranked events"
+            chosen.append(src)
+            selected_ns.add(src["n"])
+            clean.append({"n": src["n"], "verdict": "chosen",
+                          "reason": src["editor_reason"],
+                          "title": (src.get("title") or "")[:110]})
+            if len(chosen) >= BRIEFING_SELECT_TARGET:
+                break
+
     # Guard against a runaway selection; keep the editor's own ordering.
     chosen = chosen[:BRIEFING_SELECT_TARGET + 2]
     req_log.info("briefing editor: %d candidates -> %d chosen in %.1fs",
@@ -721,7 +746,7 @@ BRIEFING_EVENT_BUFFER = 400   # articles pulled before dedup (pills/filtered)
 # tokens, so 12->40 costs about $0.24/month. The saving was never the point of
 # that commit — leaving Cerebras and fixing prewarm were.
 BRIEFING_CANDIDATE_LIMIT = 40
-BRIEFING_SELECT_TARGET = 10
+BRIEFING_SELECT_TARGET = 12
 # Kept: imported by routes/api_briefing.py and surfaced on /methodology via
 # _doc_facts(). Now means "how many the editor aims to select".
 BRIEFING_EVENT_LIMIT = BRIEFING_SELECT_TARGET

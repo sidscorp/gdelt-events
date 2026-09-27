@@ -553,6 +553,12 @@ def _build_briefing_prompt(sources: list[dict], view_name: str, view_desc: str,
         f"The topic is \"{view_name}\" and the time window is {time_label}.\n\n"
         f"Then write a 3-5 sentence executive summary that LEADS with the single most "
         f"consequential new development — a specific event, actor, and stake — not a survey. "
+        # Summary citation + lead-source rule: replay A/B 2026-09-27
+        # (eval/briefing_audit/replay.py EDITS_V1) cut uncited summary
+        # sentences 96% -> 16%. Keep the text identical to what was measured.
+        f"Cite every factual sentence of the summary exactly as you cite highlights. "
+        f"Lead with a story covered by 2+ outlets or a primary news outlet; if the lead rests on a single "
+        f"outlet or an aggregator, attribute it ('according to <outlet>'). "
         f"Say why it matters and, where the context below supports it, how it relates to what "
         f"you reported previously. "
         f"Never open with panoramic filler like 'The global landscape is dominated by…' or "
@@ -569,7 +575,7 @@ def _build_briefing_prompt(sources: list[dict], view_name: str, view_desc: str,
         f"less-covered story from the list that could matter later. Pick something genuinely "
         f"under-reported rather than a second take on the lead story. Omit this section only if "
         f"nothing in the list qualifies.\n\n"
-        f"CITATIONS: After each highlight (and any specific factual claim), cite the supporting "
+        f"CITATIONS: After each highlight AND each factual sentence of the executive summary, cite the supporting "
         f"story/stories using ASCII square brackets that match the numbered list below, e.g. '[3]' or "
         f"'[3][7]'. Each number is one story even if covered by many outlets — cite it once, not per "
         f"outlet. Cite only stories that directly support the claim; aim for 1-2 citations per "
@@ -580,7 +586,12 @@ def _build_briefing_prompt(sources: list[dict], view_name: str, view_desc: str,
         f"COVERAGE DUTY: every story in the list below was chosen deliberately for this briefing, "
         f"and most carry a note explaining why. Cover all of them, even where one does not fit "
         f"the prior narrative.\n\n"
-        f"Be specific and concrete. No filler. No hedging. "
+        # "No hedging" is what turned a wn.com headline's "Signals" into "has moved
+        # to shut down the H-1B program" (09-27). Certainty now follows the source.
+        f"Be specific and concrete. No filler. KEEP EACH STORY'S CERTAINTY: if a story describes a plan, "
+        f"proposal, signal, probe, allegation or possibility, say exactly that; never state it as decided, "
+        f"announced or done. Add no names, numbers, causes, reactions, or 'first'/'largest'-style claims "
+        f"that the story text does not contain. "
         f"Use markdown formatting for emphasis and structure.\n\n"
     )
 

@@ -10,6 +10,11 @@ Both outputs get the Tier 1 audit. Rows whose prompt lacks any anchor (older
 prompt versions) are skipped rather than half-edited.
 
 Writes data/replay/<timestamp>.jsonl; prints paired metrics.
+
+EDITS_V1 shipped to dashboard/briefing.py on 2026-09-27, so its anchors no
+longer match newer prompts (those rows are skipped). A/B the next change as
+EDITS_V2 with anchors taken from the current prompt; tests/test_briefing_prompt.py
+pins the shipped text to EDITS_V1's replacements.
 """
 from __future__ import annotations
 

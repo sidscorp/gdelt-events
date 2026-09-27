@@ -21,9 +21,12 @@ from pathlib import Path
 GATEWAY_URL = os.environ.get("GDELT_EVAL_GATEWAY_URL", "https://llm.snambiar.com/v1/chat/completions")
 KEY_FILE = Path(__file__).resolve().parents[2] / "data" / ".gdelt_eval_gateway_key"
 JEV_MODEL = "jev-1.13.0"       # pinned: thresholds are tuned against this version
+WRITER_MODEL = "accounts/fireworks/models/gpt-oss-120b"  # = dashboard/briefing.py BRIEFING_MODEL
 PRICE_PER_MTOK = {             # observed/published input prices; output is free for Jev
     "jev": (0.042, 0.0),
     "fireworks-kimi": (None, None),  # measured from gateway spend in the pilot, never assumed
+    # The briefing writer (replay A/B). Gateway config prices; reasoning tokens bill as output.
+    WRITER_MODEL: (0.15, 0.60),
 }
 
 
@@ -44,13 +47,13 @@ class Gateway:
         self.tokens_in = 0
         self._lock = threading.Lock()
 
-    def _post(self, body: dict, retries: int = 4) -> dict:
+    def _post(self, body: dict, retries: int = 4, timeout: int = 90) -> dict:
         data = json.dumps(body).encode()
         for attempt in range(retries):
             req = urllib.request.Request(GATEWAY_URL, data=data, headers={
                 "Authorization": f"Bearer {self.key}", "Content-Type": "application/json"})
             try:
-                with urllib.request.urlopen(req, timeout=90) as r:
+                with urllib.request.urlopen(req, timeout=timeout) as r:
                     return json.loads(r.read().decode("utf-8", "replace"))
             except urllib.error.HTTPError as e:
                 if e.code in (429, 500, 502, 503, 529) and attempt + 1 < retries:
@@ -91,3 +94,23 @@ class Gateway:
         if not answers:
             raise JudgeError("jev returned an empty answer set")
         return answers
+
+    def write(self, prompt: str) -> str:
+        """Re-run the briefing writer with the exact call shape of
+        dashboard/briefing.py (one user message, max_tokens 8000, temp 0.3).
+        A reasoning model can spend its budget thinking and return truncated
+        or empty text; that is an error, never a briefing."""
+        self._check_budget()
+        r = self._post({"model": WRITER_MODEL, "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": 8000, "temperature": 0.3}, retries=2, timeout=240)
+        self._charge(WRITER_MODEL, r.get("usage") or {})
+        try:
+            choice = r["choices"][0]
+            text = choice["message"].get("content") or ""
+        except (KeyError, IndexError, TypeError) as e:
+            raise JudgeError(f"writer returned no choices: {str(r)[:200]}") from e
+        if choice.get("finish_reason") == "length":
+            raise JudgeError("writer truncated (finish_reason=length)")
+        if len(text.strip()) < 200:
+            raise JudgeError(f"writer returned {len(text.strip())} chars")
+        return text

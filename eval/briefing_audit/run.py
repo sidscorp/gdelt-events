@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from . import store
 from .checks import check_unit, lead_check
 from .gateway import BudgetExceeded, Gateway
-from .judge import JUDGE_VERSION, judge_units
+from .judge import JUDGE_VERSION, METRIC_SECTIONS, judge_units
 from .parse import parse_briefing, parse_sources
 from .stats import wilson
 
@@ -61,6 +61,7 @@ def report(days: int) -> dict:
         "WHERE a.generated_at >= ? AND a.judge_version = ? AND s.judged = 1", (since, JUDGE_VERSION)).fetchall()
     audits = ev.execute("SELECT lead_json FROM audits WHERE generated_at >= ? AND judge_version = ?",
                         (since, JUDGE_VERSION)).fetchall()
+    rows = [r for r in rows if r["section"] in METRIC_SECTIONS]
     factual = [r for r in rows if r["verdict"] != "analysis"]
     n = len(factual)
     by = Counter(r["verdict"] for r in factual)
@@ -89,10 +90,15 @@ def main(argv=None) -> int:
     bf = sub.add_parser("backfill"); bf.add_argument("--days", type=int, default=7); bf.add_argument("--max-usd", type=float, default=0.40)
     bf.add_argument("--ids", default="", help="comma-separated briefing ids (re-audits them even if already done)")
     rp = sub.add_parser("report"); rp.add_argument("--days", type=int, default=7)
+    t3 = sub.add_parser("tier3", help="selection audit (free)"); t3.add_argument("--days", type=int, default=7)
     a = ap.parse_args(argv)
 
     if a.cmd == "report":
         print(json.dumps(report(a.days), indent=1))
+        return 0
+    if a.cmd == "tier3":
+        from .selection import audit
+        print(json.dumps(audit(a.days), indent=1, ensure_ascii=False))
         return 0
     users, ev = store.users_db_ro(), store.eval_db()
     if a.cmd == "backfill" and a.ids:

@@ -49,6 +49,10 @@ QUESTIONS = {
 SECTION_ROLE = {"summary": "executive summary (the briefing's lead)", "highlight": "key highlight",
                 "watch": "what to watch (forward-looking)", "quieter": "quieter but notable", "other": "briefing text"}
 ESCALATE_FLAGS = ("uncited_summary", "number_not_in_sources", "cite_missing", "cite_not_chosen")
+# "What to watch" is forward-looking by design: Jev files 100% of its factual-
+# sounding predictions as problems (replay 09-27, both arms). Judged for the
+# record, but excluded from metrics and never escalated.
+METRIC_SECTIONS = ("summary", "highlight", "quieter", "other")
 
 
 def state_for(unit: Unit, sources: dict[int, Source]) -> tuple[dict, list[int]]:
@@ -77,7 +81,7 @@ def judge_unit(gw: Gateway, unit: Unit, sources: dict[int, Source], flags: list[
         "adds_specifics": (a.get("adds_specifics") or {}).get("noul"),
         "basis": basis, "judged": True,
     }
-    out["escalate"] = bool(
+    out["escalate"] = unit.section in METRIC_SECTIONS and bool(
         out["verdict"] not in ("supported", "analysis")
         or (out["confidence"] is not None and out["confidence"] < 0.5)
         or (out["escalates"] or 0) > 0.6

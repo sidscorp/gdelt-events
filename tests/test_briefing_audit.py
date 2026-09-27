@@ -118,6 +118,16 @@ def test_budget_stop_raises():
         judge.judge_units(FakeGW(ans, max_usd=0.5), parse_briefing(BRIEFING), s, {}, workers=1)
 
 
+def test_replay_edits_apply_exactly_or_skip():
+    from eval.briefing_audit.replay import EDITS_V1, apply_edits
+    current = "…not a survey. Say why. CITATIONS: After each highlight (and any specific factual claim), cite x. " \
+              "Be specific and concrete. No filler. No hedging. Use markdown."
+    out = apply_edits(current, EDITS_V1)
+    assert out and "No hedging" not in out and "KEEP EACH STORY'S CERTAINTY" in out
+    assert "each factual sentence of the executive summary" in out
+    assert apply_edits(current.replace("No hedging. ", ""), EDITS_V1) is None   # older prompt: skip, don't half-edit
+
+
 def test_users_db_is_read_only(tmp_path):
     p = tmp_path / "users.db"
     sqlite3.connect(p).execute("CREATE TABLE briefing_history (id INTEGER)").connection.commit()

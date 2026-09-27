@@ -16,10 +16,14 @@ Cost: ~$0.02 for a full run on cerebras-fast.
 
 import argparse
 import json
+import logging
+import os
 import random
 import re
+import socket
 import sys
 import time
+import urllib.error
 import urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -31,9 +35,39 @@ GATEWAY_URL = "https://llm.snambiar.com/v1/chat/completions"
 # rates ($9.35/day burn on 2026-07-08 -> ~$0.10-0.15/day). Validated against
 # Cerebras-judged pills before the switch (agreement eval in pill_eval history).
 JUDGE_MODEL = "accounts/fireworks/models/gpt-oss-120b"
-KEY_PATH = DATA_DIR / ".openrouter_key"
+KEY_PATH = DATA_DIR / ".gdelt_pill_judge_gateway_key"
+LEGACY_KEY_PATH = DATA_DIR / ".openrouter_key"
 OUT_DIR = DATA_DIR / "pill_eval"
 BATCH = 20  # articles per judge call
+
+log = logging.getLogger("pill_eval")
+_legacy_key_warning_emitted = False
+
+
+class JudgeError(RuntimeError):
+    """Base error for failures that are safe to show in pipeline logs."""
+
+    code = "judge_error"
+
+
+class JudgeConfigurationError(JudgeError):
+    code = "credential_missing"
+
+
+class JudgeAuthenticationError(JudgeError):
+    code = "authentication_failed"
+
+
+class JudgeRateLimitError(JudgeError):
+    code = "rate_limited"
+
+
+class JudgeUnavailableError(JudgeError):
+    code = "provider_unavailable"
+
+
+class JudgeResponseError(JudgeError):
+    code = "invalid_response"
 
 # What each pill is SUPPOSED to contain — the judge's ground truth.
 # Keep these aligned with dashboard/views.py descriptions (and future
@@ -136,31 +170,128 @@ def _intent_for(category: str) -> str:
     raise SystemExit(f"No PILL_INTENT defined for category '{category}'")
 
 
+def _read_key_file(path: Path) -> str | None:
+    try:
+        value = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise JudgeConfigurationError(
+            "pill judge credential file could not be read"
+        ) from exc
+    return value or None
+
+
+def _resolve_key() -> tuple[str, str]:
+    """Return (credential, source label) without ever logging the credential.
+
+    The legacy filename contains a gateway virtual key despite its historical
+    name. Keep it as a migration fallback so code and secret deployment cannot
+    get out of order again.
+    """
+    global _legacy_key_warning_emitted
+
+    env_value = os.environ.get("GDELT_PILL_JUDGE_GATEWAY_KEY", "").strip()
+    if env_value:
+        return env_value, "environment"
+
+    dedicated = _read_key_file(KEY_PATH)
+    if dedicated:
+        return dedicated, "dedicated_file"
+
+    legacy = _read_key_file(LEGACY_KEY_PATH)
+    if legacy:
+        if not _legacy_key_warning_emitted:
+            log.warning(
+                "pill judge is using the legacy gateway credential file; "
+                "provision the dedicated file before removing this fallback"
+            )
+            _legacy_key_warning_emitted = True
+        return legacy, "legacy_file"
+
+    raise JudgeConfigurationError("pill judge credential is not configured")
+
+
 def _get_key() -> str:
-    return KEY_PATH.read_text().strip()
+    return _resolve_key()[0]
+
+
+def judge_preflight() -> str:
+    """Validate local configuration and return a non-secret source label."""
+    _key, source = _resolve_key()
+    return source
+
+
+def _retry_after_seconds(exc: urllib.error.HTTPError, fallback: float) -> float:
+    raw = exc.headers.get("Retry-After") if exc.headers else None
+    try:
+        return min(max(float(raw), 0.0), 30.0) if raw is not None else fallback
+    except (TypeError, ValueError):
+        return fallback
 
 
 def _judge_call(prompt: str, retries: int = 3) -> str:
     payload = json.dumps({
         "model": JUDGE_MODEL,
         "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 3000,
+        # gpt-oss spends 1-3k tokens reasoning before the JSON; at 3000 a batch
+        # could be cut off mid-array ("no JSON array"), and at temperature 0 the
+        # same batch then failed identically every cycle (09-26/27: 45 cycles
+        # re-judging one chunk). Headroom here; truncation is detected below.
+        "max_tokens": 6000,
         "temperature": 0.0,
     }).encode()
     req = urllib.request.Request(GATEWAY_URL, data=payload, headers={
         "Content-Type": "application/json",
         "Authorization": f"Bearer {_get_key()}",
     })
-    last = None
+    retries = max(1, int(retries))
+    last_code = "provider_unavailable"
     for attempt in range(retries):
         try:
             with urllib.request.urlopen(req, timeout=90) as resp:
                 body = json.loads(resp.read().decode("utf-8", "replace"))
-            return (body.get("choices") or [{}])[0].get("message", {}).get("content", "") or ""
-        except Exception as e:  # transient gateway/provider hiccups
-            last = e
-            time.sleep(2 * (attempt + 1))
-    raise RuntimeError(f"judge call failed after {retries} tries: {last}")
+            choices = body.get("choices") if isinstance(body, dict) else None
+            if (choices or [{}])[0].get("finish_reason") == "length":
+                raise JudgeResponseError("judge response truncated at max_tokens")
+            content = ((choices or [{}])[0].get("message") or {}).get("content")
+            if not isinstance(content, str) or not content.strip():
+                raise JudgeResponseError("judge returned an empty response")
+            return content
+        except JudgeResponseError:
+            raise
+        except urllib.error.HTTPError as exc:
+            if exc.code in (401, 403):
+                raise JudgeAuthenticationError(
+                    f"judge gateway rejected authentication (HTTP {exc.code})"
+                ) from exc
+            if exc.code == 429:
+                last_code = "rate_limited"
+                delay = _retry_after_seconds(exc, 2.0 * (attempt + 1))
+            elif exc.code == 529 or 500 <= exc.code < 600:
+                last_code = "provider_unavailable"
+                delay = 2.0 * (attempt + 1)
+            else:
+                raise JudgeUnavailableError(
+                    f"judge gateway returned non-retryable HTTP {exc.code}"
+                ) from exc
+        except (urllib.error.URLError, TimeoutError, socket.timeout,
+                ConnectionError, OSError):
+            last_code = "provider_unavailable"
+            delay = 2.0 * (attempt + 1)
+        except (json.JSONDecodeError, UnicodeError, TypeError, KeyError) as exc:
+            raise JudgeResponseError("judge returned invalid JSON") from exc
+
+        if attempt + 1 < retries:
+            time.sleep(delay)
+
+    if last_code == "rate_limited":
+        raise JudgeRateLimitError(
+            f"judge gateway remained rate limited after {retries} attempts"
+        )
+    raise JudgeUnavailableError(
+        f"judge gateway unavailable after {retries} attempts"
+    )
 
 
 def _parse_verdicts(text: str, expected_n: int) -> list[dict]:
@@ -169,15 +300,20 @@ def _parse_verdicts(text: str, expected_n: int) -> list[dict]:
         text = re.sub(r"^```[a-z]*\s*|\s*```$", "", text)
     start, end = text.find("["), text.rfind("]")
     if start == -1 or end <= start:
-        raise ValueError("no JSON array in judge response")
-    arr = json.loads(text[start:end + 1])
+        raise JudgeResponseError("no JSON array in judge response")
+    try:
+        arr = json.loads(text[start:end + 1])
+    except json.JSONDecodeError as exc:
+        raise JudgeResponseError("invalid JSON array in judge response") from exc
     out = []
     for item in arr:
         if isinstance(item, dict) and item.get("verdict") in ("relevant", "borderline", "irrelevant"):
             out.append({"n": item.get("n"), "verdict": item["verdict"],
                         "reason": str(item.get("reason", ""))[:200]})
     if len(out) < expected_n * 0.8:
-        raise ValueError(f"judge returned {len(out)}/{expected_n} usable verdicts")
+        raise JudgeResponseError(
+            f"judge returned {len(out)}/{expected_n} usable verdicts"
+        )
     return out
 
 

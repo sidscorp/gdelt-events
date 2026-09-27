@@ -259,12 +259,18 @@ def daily(con, tickers: dict, days_back: int = 1) -> tuple[int, int]:
         try:
             facts = json.loads(_get(FACTS_URL.format(cik=cik)))
             n = _store(con, cik, facts, tickers, ts)
-            _refresh_filing_context(con, cik, ts)
             if n:
                 companies += 1
                 rows += n
         except Exception as e:
             log.warning("cik %s failed: %s", cik, e)
+            continue
+        # Provenance is secondary: a submissions/extract failure must not
+        # un-count (or be logged as a failure of) facts that were stored.
+        try:
+            _refresh_filing_context(con, cik, ts)
+        except Exception as e:
+            log.warning("cik %s filing context failed: %s", cik, e)
     con.commit()
     return companies, rows
 

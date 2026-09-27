@@ -28,6 +28,20 @@ def test_business_extract_falls_back_cleanly():
     assert safe_business_extract("<p>Nothing headed here</p>") is None
 
 
+def test_daily_counts_stored_facts_even_when_filing_context_fails(monkeypatch):
+    from pipeline import sec_ingest
+    monkeypatch.setattr(sec_ingest, "filings_that_filed", lambda day: {7})
+    monkeypatch.setattr(sec_ingest, "_get", lambda url, binary=False: "{}" if "companyfacts" in url
+                        else (_ for _ in ()).throw(OSError("submissions down")))
+    monkeypatch.setattr(sec_ingest, "_store", lambda con, cik, facts, tickers, ts: 5)
+
+    class Con:
+        def commit(self):
+            pass
+
+    assert sec_ingest.daily(Con(), {}) == (1, 5)
+
+
 def test_daily_index_parser_uses_archive_cik_not_company_name_digits():
     text = "10-Q  3M COMPANY  66740  2024-04-30  edgar/data/66740/000006674024000012/x.htm\n8-K ACME 1 edgar/data/1/x"
     assert filing_index_entries(text) == [{"cik": 66740, "form": "10-Q", "archive_path": "edgar/data/66740/000006674024000012/x.htm"}]

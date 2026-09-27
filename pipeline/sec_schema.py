@@ -56,6 +56,19 @@ def create(con: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS ix_snapshots_cik_end
             ON snapshots(cik, period_end DESC);
 
+        CREATE TABLE IF NOT EXISTS filings (
+            cik INTEGER NOT NULL, accession TEXT NOT NULL, form TEXT NOT NULL,
+            filing_date TEXT, report_period TEXT, primary_document TEXT,
+            filing_url TEXT NOT NULL, fetched_at TEXT NOT NULL,
+            PRIMARY KEY (cik, accession)
+        );
+        CREATE INDEX IF NOT EXISTS ix_filings_date ON filings(filing_date DESC);
+
+        CREATE TABLE IF NOT EXISTS company_context (
+            cik INTEGER PRIMARY KEY, business_extract TEXT,
+            business_accession TEXT, business_url TEXT, updated_at TEXT NOT NULL
+        );
+
         -- Every run writes a row. A pipeline that silently stops is the failure
         -- mode this system keeps hitting (Ollama, 11 days); make it queryable.
         CREATE TABLE IF NOT EXISTS ingest_log (
@@ -179,6 +192,23 @@ def upsert_snapshots(con: sqlite3.Connection, cik: int, rows: list[dict]) -> int
         for r in rows
     ])
     return len(rows)
+
+
+def upsert_filings(con: sqlite3.Connection, rows: list[dict], ts: str) -> None:
+    con.executemany(
+        "INSERT INTO filings (cik,accession,form,filing_date,report_period,primary_document,filing_url,fetched_at) "
+        "VALUES (:cik,:accession,:form,:filing_date,:report_period,:primary_document,:filing_url,:fetched_at) "
+        "ON CONFLICT(cik,accession) DO UPDATE SET form=excluded.form, filing_date=excluded.filing_date, "
+        "report_period=excluded.report_period, primary_document=excluded.primary_document, filing_url=excluded.filing_url, fetched_at=excluded.fetched_at",
+        [{**row, "fetched_at": ts} for row in rows],
+    )
+
+
+def upsert_context(con: sqlite3.Connection, cik: int, extract: str, accession: str,
+                   source_url: str, ts: str) -> None:
+    con.execute("INSERT INTO company_context (cik,business_extract,business_accession,business_url,updated_at) VALUES (?,?,?,?,?) "
+                "ON CONFLICT(cik) DO UPDATE SET business_extract=excluded.business_extract, business_accession=excluded.business_accession, business_url=excluded.business_url, updated_at=excluded.updated_at",
+                (cik, extract, accession, source_url, ts))
 
 
 def set_meta(con: sqlite3.Connection, key: str, val: str) -> None:

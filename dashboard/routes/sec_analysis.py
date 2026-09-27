@@ -23,6 +23,7 @@ from flask import Blueprint, render_template, request
 
 from _paths import DATA_DIR
 from sec_explain import bars_takeaway, line_takeaway, observations
+from sec_dates import format_date_context
 from sec_search import search as company_search
 
 bp = Blueprint("sec_analysis", __name__)
@@ -32,6 +33,25 @@ SEC_DB = DATA_DIR / "sec.db"
 PERIODS_SHOWN = 8
 CHART_PERIODS = 10
 NEWS_LIMIT = 5
+LANDING_PAGE_SIZE = 48
+LANDING_SORTS = {
+    "filed_desc": ("Most recently filed", "r.filing_date DESC, c.name COLLATE NOCASE ASC"),
+    "filed_asc": ("Oldest filing", "r.filing_date ASC, c.name COLLATE NOCASE ASC"),
+    "period_desc": ("Most recent reporting period", "r.report_period DESC, c.name COLLATE NOCASE ASC"),
+    "name_asc": ("Company name A–Z", "c.name COLLATE NOCASE ASC"),
+    "name_desc": ("Company name Z–A", "c.name COLLATE NOCASE DESC"),
+}
+METRIC_SORTS = {
+    "revenue_desc": ("Revenue", "s.revenue DESC"),
+    "revenue_growth_desc": ("Revenue growth", "d.revenue_yoy DESC"),
+    "operating_income_desc": ("Operating income", "s.operating_income DESC"),
+    "net_income_desc": ("Net income", "s.net_income DESC"),
+    "net_margin_desc": ("Net margin", "d.net_margin DESC"),
+    "assets_desc": ("Total assets", "s.total_assets DESC"),
+    "roe_desc": ("Return on equity", "d.return_on_equity DESC"),
+    "roa_desc": ("Return on assets", "d.return_on_assets DESC"),
+    "name_asc": ("Company name A-Z", "c.name COLLATE NOCASE ASC"),
+}
 
 SUGGESTED = [("AAPL", "Apple"), ("MSFT", "Microsoft"), ("GOOGL", "Alphabet"),
              ("NVDA", "Nvidia"), ("TSLA", "Tesla"), ("JPM", "JPMorgan")]
@@ -329,9 +349,110 @@ def _derive_rows(con, cik: int) -> dict:
         "SELECT * FROM derived WHERE cik = ?", (cik,))}
 
 
+def _filing_cards(con, *, sort: str = "filed_desc", limit: int = 12,
+                  offset: int = 0) -> tuple[list[dict], int]:
+    """One latest 10-K/10-Q per company, with a bounded, validated sort order."""
+    sort = sort if sort in LANDING_SORTS else "filed_desc"
+    order = LANDING_SORTS[sort][1]
+    sql = """WITH ranked AS (
+        SELECT f.*, row_number() over (PARTITION BY f.cik ORDER BY f.filing_date DESC, f.accession DESC) rn
+        FROM filings f WHERE f.form IN ('10-K','10-Q')
+      ) SELECT r.*, c.name, COALESCE((SELECT ticker FROM tickers t WHERE t.cik=r.cik ORDER BY is_primary DESC LIMIT 1),c.ticker) ticker
+      FROM ranked r JOIN companies c ON c.cik=r.cik WHERE r.rn=1
+      ORDER BY """ + order + " LIMIT ? OFFSET ?"
+    count_sql = """WITH ranked AS (
+        SELECT cik, row_number() over (PARTITION BY cik ORDER BY filing_date DESC, accession DESC) rn
+        FROM filings WHERE form IN ('10-K','10-Q')
+      ) SELECT count(*) FROM ranked r JOIN companies c ON c.cik=r.cik WHERE r.rn=1"""
+    cards = [dict(r) for r in con.execute(sql, (limit, offset)).fetchall()]
+    return cards, con.execute(count_sql).fetchone()[0]
+
+
+def _add_card_metrics(con, cards: list[dict], *, collect_changes: bool = False) -> list[dict]:
+    """Attach only values stored in SEC snapshots; never fabricate a card metric."""
+    notable = []
+    for card in cards:
+        rows = [dict(r) for r in con.execute(
+            "SELECT s.*, d.* FROM snapshots s LEFT JOIN derived d USING(cik,period_end,fp) "
+            "WHERE s.cik=? ORDER BY s.period_end DESC", (card["cik"],))]
+        if not rows:
+            card["metric"], card["metric_label"] = "—", "No parsed figures"
+            continue
+        card["metric"] = (_fmt_usd(rows[0].get("revenue")) if rows[0].get("revenue") is not None
+                          else _fmt_usd(rows[0].get("net_income")))
+        card["metric_label"] = "Revenue" if rows[0].get("revenue") is not None else "Net income"
+        if collect_changes and len(rows) > 1:
+            change = _notable_change(rows[0], rows[1])
+            if change:
+                notable.append({**card, "change": change})
+    return notable
+
+
+def _metric_table_rows(con, *, sort: str = "revenue_desc", limit: int = LANDING_PAGE_SIZE,
+                       offset: int = 0) -> tuple[list[dict], int]:
+    """Latest quarterly snapshot per company, sortable only by a fixed SQL allowlist.
+
+    Quarterly periods are deliberately separated from annual reports: ranking a
+    12-month revenue figure alongside a 3-month figure is misleading.
+    """
+    sort = sort if sort in METRIC_SORTS else "revenue_desc"
+    order = METRIC_SORTS[sort][1]
+    cte = """WITH latest AS (
+        SELECT s.*, row_number() over (PARTITION BY s.cik ORDER BY s.period_end DESC) rn
+        FROM snapshots s WHERE s.fp <> 'FY'
+      ) """
+    sql = cte + """SELECT s.*, d.revenue_yoy, d.net_margin, d.return_on_equity, d.return_on_assets,
+        c.name, COALESCE((SELECT ticker FROM tickers t WHERE t.cik=s.cik ORDER BY is_primary DESC LIMIT 1),c.ticker) ticker
+      FROM latest s JOIN companies c ON c.cik=s.cik
+      LEFT JOIN derived d USING(cik,period_end,fp)
+      WHERE s.rn=1
+      ORDER BY (""" + order.split()[0] + " IS NULL) ASC, " + order + " LIMIT ? OFFSET ?"
+    count_sql = cte + "SELECT count(*) FROM latest s JOIN companies c ON c.cik=s.cik WHERE s.rn=1"
+    rows = [dict(row) for row in con.execute(sql, (limit, offset)).fetchall()]
+    return rows, con.execute(count_sql).fetchone()[0]
+
+
+def _notable_change(period: dict, prior: dict) -> str | None:
+    """Conservative templates over stored financial inputs; never a percent ranking."""
+    if period.get("net_income") is not None and period["net_income"] < 0 and prior.get("net_income", 0) >= 0:
+        return "Reported a net loss after a profitable comparable period"
+    if period.get("rev_growth_is_best") and period.get("revenue_yoy") is not None:
+        return f"Reported its strongest stored comparable revenue growth: {_fmt_signed_pct(period['revenue_yoy'])} YoY"
+    if (period.get("decline_streak") or 0) >= 2:
+        return f"Revenue has declined year over year for {period['decline_streak']} comparable periods"
+    if period.get("net_margin_yoy_pp") is not None and abs(period["net_margin_yoy_pp"]) >= .03:
+        return f"Net margin changed {_fmt_signed_pct(period['net_margin_yoy_pp'])} percentage points from the comparable period"
+    return None
+
+
+def _landing_data(con) -> tuple[list[dict], list[dict]]:
+    try:
+        cards, _ = _filing_cards(con)
+        notable = _add_card_metrics(con, cards, collect_changes=True)
+        return cards, notable[:8]
+    except sqlite3.Error as e:
+        log.warning("SEC landing query failed: %s", e)
+        return [], []
+
+
+def _company_context(con, cik: int) -> tuple[dict | None, list[dict]]:
+    context = con.execute("SELECT * FROM company_context WHERE cik=?", (cik,)).fetchone()
+    filings = [dict(r) for r in con.execute("SELECT * FROM filings WHERE cik=? ORDER BY filing_date DESC LIMIT 3", (cik,))]
+    return (dict(context) if context else None), filings
+
+
 @bp.route("/sec-analysis")
 def sec_analysis():
     term = (request.args.get("ticker") or "").strip()
+    mode = request.args.get("mode") if request.args.get("mode") in ("overview", "research") else "overview"
+    browse = request.args.get("browse") == "all"
+    metric_view = request.args.get("view") == "metrics"
+    sort = request.args.get("sort") if request.args.get("sort") in LANDING_SORTS else "filed_desc"
+    metric_sort = request.args.get("metric_sort") if request.args.get("metric_sort") in METRIC_SORTS else "revenue_desc"
+    try:
+        browse_page = max(1, int(request.args.get("page", "1")))
+    except ValueError:
+        browse_page = 1
     ctx = {
         "ticker": term, "suggested": SUGGESTED, "company": None, "periods": [],
         "latest": None, "error": None, "as_of": None, "alternatives": [],
@@ -339,8 +460,15 @@ def sec_analysis():
         "rev_chart": None, "ni_chart": None, "margin_chart": None,
         "metric_rows": [], "missing_metrics": [], "filer_label": None,
         "filer_framing": None, "bs": None,
+        "recent_filings": [], "top_updates": [], "mode": mode, "context": None,
+        "browse": browse, "browse_sort": sort, "browse_sorts": LANDING_SORTS,
+        "browse_page": browse_page, "browse_cards": [], "browse_total": 0,
+        "metric_view": metric_view, "metric_sort": metric_sort, "metric_sorts": METRIC_SORTS,
+        "metric_rows_table": [], "metric_total": 0,
+        "filings": [], "latest_filing": None,
         "fmt_usd": _fmt_usd, "fmt_pct": _fmt_pct, "fmt_num": _fmt_num,
         "fmt_signed_pct": _fmt_signed_pct,
+        "fmt_date_context": format_date_context,
     }
 
     con = _connect()
@@ -353,6 +481,25 @@ def sec_analysis():
         row = con.execute("SELECT val FROM meta WHERE key='data_version'").fetchone()
         ctx["as_of"] = row["val"] if row else None
         if not term:
+            if metric_view:
+                offset = (browse_page - 1) * LANDING_PAGE_SIZE
+                rows, total = _metric_table_rows(con, sort=metric_sort, limit=LANDING_PAGE_SIZE, offset=offset)
+                if offset >= total and total:
+                    browse_page = max(1, (total - 1) // LANDING_PAGE_SIZE + 1)
+                    rows, total = _metric_table_rows(con, sort=metric_sort, limit=LANDING_PAGE_SIZE,
+                                                      offset=(browse_page - 1) * LANDING_PAGE_SIZE)
+                ctx.update(browse_page=browse_page, metric_rows_table=rows, metric_total=total)
+            elif browse:
+                offset = (browse_page - 1) * LANDING_PAGE_SIZE
+                cards, total = _filing_cards(con, sort=sort, limit=LANDING_PAGE_SIZE, offset=offset)
+                if offset >= total and total:
+                    browse_page, offset = max(1, (total - 1) // LANDING_PAGE_SIZE + 1), 0
+                    cards, total = _filing_cards(con, sort=sort, limit=LANDING_PAGE_SIZE,
+                                                  offset=(browse_page - 1) * LANDING_PAGE_SIZE)
+                _add_card_metrics(con, cards)
+                ctx.update(browse_page=browse_page, browse_cards=cards, browse_total=total)
+            else:
+                ctx["recent_filings"], ctx["top_updates"] = _landing_data(con)
             return render_template("sec_analysis.html", **ctx)
 
         hits = company_search(con, term, limit=6)
@@ -384,10 +531,21 @@ def sec_analysis():
             months = 12 if p["fp"] == "FY" else 3
             p["label"] = (f"{p['fp']} {p['fy']} · {months} months ended {p['period_end']}")
             p["short"] = f"{p['fp']} {p['fy']}"
+            p["reporting_period_context"] = format_date_context(p["period_end"], label="Reporting period ended")
             periods.append(p)
 
         ctx["periods"] = periods[:PERIODS_SHOWN]
         ctx["latest"] = periods[0]
+        ctx["context"], ctx["filings"] = _company_context(con, best["cik"])
+        ctx["latest_filing"] = ctx["filings"][0] if ctx["filings"] else None
+        if ctx["latest_filing"]:
+            ctx["latest_filing"]["filing_context"] = format_date_context(
+                ctx["latest_filing"].get("filing_date"), label="Filed")
+            ctx["latest_filing"]["report_context"] = format_date_context(
+                ctx["latest_filing"].get("report_period"), label="Reporting period ended")
+        for filing in ctx["filings"]:
+            filing["filing_context"] = format_date_context(filing.get("filing_date"), label="Filed")
+            filing["report_context"] = format_date_context(filing.get("report_period"), label="Reporting period ended")
         chart_src = periods[:CHART_PERIODS]
         ctx["rev_chart"] = _bar_chart(chart_src, "revenue", "Revenue")
         ctx["ni_chart"] = _bar_chart(chart_src, "net_income", "Net income")

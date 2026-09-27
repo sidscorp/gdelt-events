@@ -19,6 +19,9 @@ class Observation:
     text: str
     score: float          # 0-100; higher surfaces first
     kind: str             # composition | growth | margin | sector | coverage
+    # The route renders this with the filing and reporting-period context.
+    # Keeping it on the object makes a missing claim basis testable.
+    basis: str = "latest filed reporting period"
 
 
 def _usd(n: float | None) -> str:

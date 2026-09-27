@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pipeline.sec_normalize import build_snapshots  # noqa: E402
 from pipeline import sec_schema  # noqa: E402
+from pipeline.sec_context import filing_rows_from_submissions, safe_business_extract  # noqa: E402
 
 REPO = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO / "data"
@@ -42,6 +43,7 @@ BULK_URL = "https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip
 SUBMISSIONS_ZIP = "https://www.sec.gov/Archives/edgar/daily-index/bulkdata/submissions.zip"
 DAILY_IDX = "https://www.sec.gov/Archives/edgar/daily-index/{yr}/QTR{q}/form.{ymd}.idx"
 FACTS_URL = "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik:010d}.json"
+SUBMISSIONS_URL = "https://data.sec.gov/submissions/CIK{cik:010d}.json"
 TICKERS_URL = "https://www.sec.gov/files/company_tickers.json"
 
 RATE_LIMIT_S = 0.12          # ~8 req/s, under SEC's 10/s ceiling
@@ -191,7 +193,25 @@ def submissions(con, limit: int | None = None) -> tuple[int, int]:
     return kept, tick
 
 
-def ciks_that_filed(day: date) -> set[int]:
+def filing_index_entries(text: str) -> list[dict]:
+    """Parse the daily SEC index without mistaking digits in company names for CIKs."""
+    out = []
+    for line in text.splitlines():
+        parts = line.split()
+        if not parts or parts[0] not in ("10-K", "10-Q", "10-K/A", "10-Q/A"):
+            continue
+        path = parts[-1]
+        if "edgar/data/" not in path:
+            continue
+        try:
+            cik = int(path.split("edgar/data/")[1].split("/")[0])
+        except (IndexError, ValueError):
+            continue
+        out.append({"cik": cik, "form": parts[0], "archive_path": path})
+    return out
+
+
+def filings_that_filed(day: date) -> set[int]:
     """CIKs with a 10-K/10-Q in the daily index - the change feed."""
     url = DAILY_IDX.format(yr=day.year, q=(day.month - 1) // 3 + 1,
                            ymd=day.strftime("%Y%m%d"))
@@ -200,27 +220,37 @@ def ciks_that_filed(day: date) -> set[int]:
     except Exception as e:
         log.warning("no daily index for %s (%s)", day, e)
         return set()
-    out: set[int] = set()
-    for line in text.splitlines():
-        parts = line.split()
-        if not parts or parts[0] not in ("10-K", "10-Q", "10-K/A", "10-Q/A"):
-            continue
-        # Take the CIK from the edgar/data/<CIK>/... path, not from the first bare
-        # integer on the line: company names contain digits ("3M", "1-800-FLOWERS"),
-        # and that naive scan was pulling CIK 4 out of a company name.
-        path = parts[-1]
-        if "edgar/data/" in path:
-            try:
-                out.add(int(path.split("edgar/data/")[1].split("/")[0]))
-            except (IndexError, ValueError):
-                continue
-    return out
+    return {entry["cik"] for entry in filing_index_entries(text)}
+
+
+# Kept for existing callers; daily ingestion now enriches these CIKs with filing
+# metadata immediately after the companyfacts refresh.
+ciks_that_filed = filings_that_filed
+
+
+def _refresh_filing_context(con, cik: int, ts: str) -> None:
+    """Persist filing provenance; a failed extract must not break financial data."""
+    payload = json.loads(_get(SUBMISSIONS_URL.format(cik=cik)))
+    rows = filing_rows_from_submissions(cik, payload)
+    sec_schema.upsert_filings(con, rows, ts)
+    ten_k = next((r for r in rows if r["form"] == "10-K"), None)
+    if not ten_k or not ten_k["primary_document"]:
+        return
+    prior = con.execute("SELECT business_accession FROM company_context WHERE cik=?", (cik,)).fetchone()
+    if prior and prior["business_accession"] == ten_k["accession"]:
+        return
+    try:
+        extract = safe_business_extract(_get(ten_k["filing_url"]))
+        if extract:
+            sec_schema.upsert_context(con, cik, extract, ten_k["accession"], ten_k["filing_url"], ts)
+    except Exception as e:
+        log.warning("cik %s Business extract failed: %s", cik, e)
 
 
 def daily(con, tickers: dict, days_back: int = 1) -> tuple[int, int]:
     targets: set[int] = set()
     for d in range(days_back):
-        targets |= ciks_that_filed(date.today() - timedelta(days=d + 1))
+        targets |= filings_that_filed(date.today() - timedelta(days=d + 1))
     log.info("%d filers filed a 10-K/10-Q in the last %dd", len(targets), days_back)
 
     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -229,6 +259,7 @@ def daily(con, tickers: dict, days_back: int = 1) -> tuple[int, int]:
         try:
             facts = json.loads(_get(FACTS_URL.format(cik=cik)))
             n = _store(con, cik, facts, tickers, ts)
+            _refresh_filing_context(con, cik, ts)
             if n:
                 companies += 1
                 rows += n

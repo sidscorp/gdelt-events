@@ -458,6 +458,7 @@ function noteBriefProgressPrior(generatedAt) {
             startFreshnessTicker(data.generated_at, data.cache_ttl_s, data.article_count);
           }
           if (data.generated_at) textEl.dataset.generatedAt = data.generated_at;
+          if (typeof setBriefingCoverage === 'function') setBriefingCoverage(sourcesMap);
           if (typeof saveSnapshot === 'function') saveSnapshot();
           updateBriefHistoryLink();
         }

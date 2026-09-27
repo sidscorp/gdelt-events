@@ -13,6 +13,64 @@ const state = {
   en_only: true, // English-only by default; ?en_only=0 to include all languages
 };
 
+// Keep the SSR feed available instantly, while making the briefing the first
+// reading surface for new visitors.
+const SOURCE_DISCLOSURE_KEY = 'gdelt-source-articles-open';
+let sourceDisclosureAutomatic = false;
+function sourceArticles() { return document.getElementById('sourceArticles'); }
+function updateSourceSummary(total) {
+  const el = document.getElementById('sourceArticlesSummary');
+  if (!el) return;
+  const count = Number.isFinite(total) ? ` · ${total.toLocaleString()} articles` : '';
+  el.textContent = `Explore source articles · ${_viewLabel()} · ${hoursLabel(parseInt(state.hours, 10))}${count}`;
+}
+function openSourceArticles() {
+  const el = sourceArticles();
+  if (el && !el.open) {
+    sourceDisclosureAutomatic = true;
+    el.open = true;
+    setTimeout(() => { sourceDisclosureAutomatic = false; }, 0);
+  }
+}
+
+// A briefing is deliberately concise, but the reader should be able to inspect
+// its editorial breadth without leaving the page.  Sources arrive with the
+// briefing SSE payload; `chosen` is persisted by the editor pass.
+function setBriefingCoverage(sources) {
+  const host = document.getElementById('briefingCoverage');
+  if (!host) return;
+  const candidates = Array.isArray(sources) ? sources : [];
+  if (!candidates.length) { host.innerHTML = ''; return; }
+  const selected = candidates.filter(s => s.chosen);
+  const eventList = rows => rows.map(s => {
+    const title = esc(s.title || s.link || 'Untitled event');
+    const outlet = esc(s.outlet || 'source');
+    const sourcesLabel = s.n_sources > 1 ? ` · ${s.n_sources} sources` : '';
+    const link = s.link ? `<a href="${esc(s.link)}" target="_blank" rel="noopener">${title}</a>` : title;
+    return `<li>${link}<span>${outlet}${sourcesLabel}</span></li>`;
+  }).join('');
+  const selectedLabel = selected.length ? `${selected.length} selected` : 'editor selection unavailable';
+  host.innerHTML =
+    `<span class="coverage-label">Coverage:</span>` +
+    `<details class="coverage-detail"><summary>${candidates.length} events considered</summary>` +
+      `<div class="coverage-popover"><strong>Ranked distinct events considered</strong><ul>${eventList(candidates)}</ul></div>` +
+    `</details>` +
+    `<details class="coverage-detail"><summary>${selectedLabel}</summary>` +
+      `<div class="coverage-popover"><strong>Stories selected for this briefing</strong><ul>${eventList(selected)}</ul>` +
+      `<button type="button" class="coverage-more" onclick="showBriefingInfo()">See editorial reasons</button></div>` +
+    `</details>`;
+}
+(function initSourceDisclosure() {
+  const el = sourceArticles();
+  if (!el) return;
+  el.open = localStorage.getItem(SOURCE_DISCLOSURE_KEY) === '1';
+  el.addEventListener('toggle', () => {
+    if (sourceDisclosureAutomatic) return;
+    localStorage.setItem(SOURCE_DISCLOSURE_KEY, el.open ? '1' : '0');
+    if (el.open) beaconEvent('feed_expand');
+  });
+})();
+
 // Unified feed — no source selection needed
 state.source = 'all';
 
@@ -157,6 +215,7 @@ Object.entries(FILTER_INPUT_MAP).forEach(([id, field]) => {
   if (!el) return;
   el.addEventListener('input', (e) => {
     const val = e.target.value;
+    openSourceArticles();
     // Free-text search hits an ILIKE scan server-side — a 1-2 char prefix is
     // never useful and just burns a ~2s query on every keystroke. Wait for a
     // real prefix (or a full clear) and give it a bit longer to settle.
@@ -174,11 +233,13 @@ Object.entries(FILTER_INPUT_MAP).forEach(([id, field]) => {
   });
 });
 document.getElementById('languageSelect').addEventListener('change', (e) => {
+  openSourceArticles();
   state.language = e.target.value;
   state.page = 1;
   fetchArticles();
 });
 document.getElementById('sortSelect').addEventListener('change', (e) => {
+  openSourceArticles();
   const v = e.target.value;
   if (v === 'importance') {
     state.order = 'importance';
@@ -540,6 +601,16 @@ function beaconPageview() {
   navigator.sendBeacon('/api/pageview', JSON.stringify(payload));
 }
 
+function beaconEvent(event_type) {
+  navigator.sendBeacon('/api/pageview', JSON.stringify({
+    event_type,
+    path: location.pathname + location.search,
+    view_id: state.view || '',
+    hours: parseInt(state.hours) || 0,
+    briefing_key: (state.view || '_all') + ':' + (state.hours || 24),
+  }));
+}
+
 function saveSnapshot() {
   const k = _snapKey(); if (!k) return;
   try {
@@ -860,6 +931,7 @@ async function fetchArticles() {
     const meta = document.getElementById('resultsMeta');
 
     if (data.error) {
+      openSourceArticles();
       meta.textContent = '';
       list.innerHTML = `<li class="loading">${data.error}<br><small>The dashboard will populate once the backfill finishes. Refresh in a minute.</small></li>`;
       document.getElementById('pagination').innerHTML = '';
@@ -868,8 +940,10 @@ async function fetchArticles() {
     }
 
     meta.textContent = `${_viewLabel()} \u00b7 ${data.total.toLocaleString()} articles`;
+    updateSourceSummary(data.total);
 
     if (data.articles.length === 0) {
+      openSourceArticles();
       // Auto-widen: an empty time window (with no custom date range) steps out to
       // the next wider window until articles appear — covers the default + sparse pills.
       const curH = parseInt(state.hours, 10);
@@ -936,6 +1010,7 @@ async function fetchArticles() {
       const meta = document.getElementById('resultsMeta');
       if (meta) meta.textContent = 'Refresh failed — showing the last loaded articles.';
     } else {
+      openSourceArticles();
       list.innerHTML = `<li class="loading">Error loading articles: ${err.message}<br><small>The backend may be restarting. Try again in a few seconds.</small></li>`;
     }
   } finally {

@@ -6,11 +6,13 @@ eval can never hold a write lock on anything the live site uses.
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
-DATA = Path(__file__).resolve().parents[2] / "data"
+# Same override as dashboard/_paths.py, so the dev instance reads its own data.
+DATA = Path(os.environ.get("GDELT_DATA_DIR") or (Path(__file__).resolve().parents[2] / "data"))
 EVAL_DB = DATA / "briefing_eval.db"
 USERS_DB = DATA / "users.db"
 
@@ -46,6 +48,14 @@ def eval_db(path: Path = EVAL_DB) -> sqlite3.Connection:
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.executescript(SCHEMA)
+    return con
+
+
+def eval_db_ro(path: Path = EVAL_DB) -> sqlite3.Connection:
+    """For readers (the admin page): no schema script, no WAL pragma, no writes.
+    Raises sqlite3.OperationalError when the audit has never run."""
+    con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    con.row_factory = sqlite3.Row
     return con
 
 

@@ -67,6 +67,21 @@ class Gateway:
                 raise JudgeError(f"gateway unreachable: {e}") from e
         raise JudgeError("gateway retries exhausted")
 
+    def remaining_budget(self) -> float | None:
+        """max_budget - spend for this key per the gateway; None if unknown
+        (no cap, or the gateway is unreachable — callers then run normally,
+        and the server-side cap still holds)."""
+        url = GATEWAY_URL.split("/v1/")[0] + "/key/info"
+        req = urllib.request.Request(url, headers={"Authorization": f"Bearer {self.key}"})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                info = json.loads(r.read().decode("utf-8", "replace")).get("info") or {}
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+            return None
+        if info.get("max_budget") is None:
+            return None
+        return float(info["max_budget"]) - float(info.get("spend") or 0)
+
     def _charge(self, model: str, usage: dict):
         pin, pout = PRICE_PER_MTOK.get(model, (None, None))
         tin = int(usage.get("prompt_tokens") or 0)

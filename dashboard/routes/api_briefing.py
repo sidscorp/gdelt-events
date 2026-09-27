@@ -537,6 +537,9 @@ def api_briefing_history_item(bid):
 
 # --- Pageview tracking (privacy-safe: daily-salted IP hash, no raw IP) ---
 
+PAGEVIEW_EVENT_TYPES = ("pageview", "feed_expand")
+
+
 def _ip_hash():
     ip = (request.headers.get("CF-Connecting-IP")
           or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
@@ -579,10 +582,20 @@ def api_pageview():
         ]:
             if col not in cols:
                 uc.execute(sql)
+        if "event_type" not in cols:
+            # dashboard.js beaconEvent() has sent {event_type: 'feed_expand'} here
+            # since 09-19 and each one was stored as a pageview. Those beacons carry
+            # no screen_w and real pageviews always do (0 such rows before 09-19),
+            # so relabel them once when the column arrives.
+            uc.execute("ALTER TABLE pageview_log ADD COLUMN event_type TEXT DEFAULT 'pageview'")
+            uc.execute("UPDATE pageview_log SET event_type = 'feed_expand' "
+                       "WHERE screen_w IS NULL AND ts >= '2026-09-19'")
+        event_type = payload.get("event_type")
+        event_type = event_type if event_type in PAGEVIEW_EVENT_TYPES else "pageview"
         uc.execute(
             "INSERT INTO pageview_log "
-            "(ts, path, view_id, hours, briefing_key, ip_hash, ua, screen_w, referrer, country, region, city, timezone) "
-            "VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "(ts, path, view_id, hours, briefing_key, ip_hash, ua, screen_w, referrer, country, region, city, timezone, event_type) "
+            "VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 (payload.get("path") or "")[:300],
                 (payload.get("view_id") or "")[:80],
@@ -596,6 +609,7 @@ def api_pageview():
                 (request.headers.get("CF-Region-Code") or "")[:20],
                 (request.headers.get("CF-IPCity") or "")[:60],
                 (payload.get("timezone") or "")[:60],
+                event_type,
             ),
         )
         uc.execute("DELETE FROM pageview_log WHERE id < "

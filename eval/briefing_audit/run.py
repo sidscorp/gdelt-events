@@ -53,8 +53,14 @@ def audit_rows(rows, max_usd: float, kind: str) -> dict:
             "calls": gw.calls, "cost_usd": round(gw.spent, 5), "note": note}
 
 
-def report(days: int) -> dict:
-    ev = store.eval_db()
+VISITS_ONLY_BELOW_USD = 0.75
+SKIP_BELOW_USD = 0.10
+
+
+def report(days: int, ev=None) -> dict:
+    """Metrics with Wilson CIs. Pass a read-only connection (store.eval_db_ro)
+    from readers such as the admin page; the default opens the writable one."""
+    ev = ev or store.eval_db()
     since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
     rows = ev.execute(
         "SELECT s.section, s.verdict, s.flags, s.escalate FROM sentences s JOIN audits a ON a.briefing_id = s.briefing_id "
@@ -70,6 +76,7 @@ def report(days: int) -> dict:
     out = {
         "window_days": days, "judge_version": JUDGE_VERSION, "briefings": len(audits),
         "sentences_judged": len(rows), "factual_sentences": n,
+        "problem": wilson(by["overstated"] + by["unsupported"] + by["contradicted"], n),
         "supported": wilson(by["supported"], n), "overstated": wilson(by["overstated"], n),
         "unsupported": wilson(by["unsupported"], n), "contradicted": wilson(by["contradicted"], n),
         "summary_uncited": wilson(sum("uncited_summary" in (r["flags"] or "") for r in summary), len(summary)),
@@ -110,10 +117,18 @@ def main(argv=None) -> int:
         since = (datetime.now(timezone.utc) - timedelta(days=a.days)).strftime("%Y-%m-%d %H:%M:%S")
         rows = store.pending_briefings(users, ev, since=since)
     else:
-        # New rows only: anything generated since the newest audited briefing (minus a small overlap).
+        # Budget-adaptive: the key's 30-day cap is shared with replays and Kimi,
+        # so the 15-min task narrows to visit-triggered briefings when it runs low
+        # and stops before the cap, rather than failing on it mid-run.
+        remaining = Gateway(max_usd=0).remaining_budget()
+        visits_only = a.visits_only or (remaining is not None and remaining < VISITS_ONLY_BELOW_USD)
+        if remaining is not None and remaining < SKIP_BELOW_USD:
+            print(json.dumps({"skipped": f"key budget remaining ${remaining:.2f} < ${SKIP_BELOW_USD}"}))
+            return 0
+        # New rows only: anything generated since the newest audited briefing.
         last = ev.execute("SELECT max(generated_at) FROM audits").fetchone()[0]
         since = last or (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
-        rows = store.pending_briefings(users, ev, since=since, triggers=("visit",) if a.visits_only else None)
+        rows = store.pending_briefings(users, ev, since=since, triggers=("visit",) if visits_only else None)
     print(json.dumps(audit_rows(rows, a.max_usd, a.cmd)))
     return 0
 

@@ -960,10 +960,7 @@ def should_update_threads(cache_key: str, trigger: str) -> bool:
 
 
 def _update_threads(cache_key: str, old_threads: list[dict], briefing_text: str):
-    from urllib.request import Request, urlopen
-
-    key = _get_openrouter_key()
-    if not key:
+    if not _get_openrouter_key():
         return
     today = datetime.utcnow().strftime("%Y-%m-%d")
     prompt = (
@@ -987,30 +984,14 @@ def _update_threads(cache_key: str, old_threads: list[dict], briefing_text: str)
         f'"last_update": "YYYY-MM-DD", "summary": "...", "status": "active"}}. '
         f"Preserve 'slug' and 'first_seen' of existing threads exactly."
     )
-    payload = json.dumps({
-        "model": BRIEFING_MODEL,
-        "messages": [{"role": "user", "content": prompt}],
-        "max_tokens": 1500,
-        "temperature": 0.1,
-    }).encode()
-    req = Request(OPENROUTER_URL, data=payload, headers={
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {key}",
-    })
     t0 = time.monotonic()
-    with urlopen(req, timeout=60) as resp:
-        body = json.loads(resp.read().decode("utf-8", "replace"))
-    text = (body.get("choices") or [{}])[0].get("message", {}).get("content", "") or ""
-    # Tolerate a stray code fence despite instructions.
-    text = text.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```[a-z]*\s*|\s*```$", "", text)
-    start, end = text.find("["), text.rfind("]")
-    if start == -1 or end <= start:
-        raise ValueError("no JSON array in thread-update response")
-    threads = json.loads(text[start:end + 1])
-    if not isinstance(threads, list):
-        raise ValueError("thread-update response is not a list")
+    text, usage = _chat(
+        prompt,
+        max_tokens=EDITOR_MAX_TOKENS,
+        temperature=0.1,
+        reasoning_effort="low",
+    )
+    threads = _json_array(text)
     threads = [t for t in threads if isinstance(t, dict) and t.get("title")][:THREADS_MAX]
 
     from models import get_user_db
@@ -1026,7 +1007,6 @@ def _update_threads(cache_key: str, old_threads: list[dict], briefing_text: str)
     lf = _get_langfuse()
     if lf:
         try:
-            usage = body.get("usage") or {}
             with lf.start_as_current_observation(
                 name="gdelt-thread-update", as_type="generation", model=BRIEFING_MODEL,
                 input=f"[{cache_key}] {len(old_threads)} threads in",

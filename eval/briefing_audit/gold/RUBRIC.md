@@ -29,17 +29,27 @@ the headlines and descriptions provided, not against world knowledge.
 **Superlatives and descriptors**
 - Unsupported, severity *minor*, even when they are common knowledge.
 
+**Ambient colour vs invention**
+- An unsourced interpretive mechanism on a sourced fact is still supported
+  ("reinforcing optimism for memory supply amid AI-driven data growth").
+- Unsupported is reserved for *checkable* inventions: a name, number, event, actor/action, cause or superlative.
+
+**Opposite impression = contradicted**
+- Asserting the opposite on the same dimension as the source is contradicted
+  (source "operated stably" → "exposed the fragility"), like "higher" → "slipped".
+
 **Stock consequence phrases** ("prompting calls for…", "prompting reassessments of…")
-- These are **open (Sidd to decide)**.
-- Proposed: unsupported, severity *minor*.
+- They invent actors performing an action → unsupported, severity *minor*
+  (major only if the invented reaction is the story).
 
 **Severity**
 - *minor*: a small add-on that doesn't change the story.
 - *major*: changes what a reader would believe happened.
-- The public headline metric should count **major** problems only; minor problems are tracked separately.
+- **Headline metric = major problems only.** The all-problems rate is secondary, so minor-rate drift stays visible.
 
 ## Provenance
 - **Claude (first labeller):** labelled all 50 with judge verdicts hidden.
 - **review_2 (second agent):** labelled all 50 blind.
 - **Agreement:** exact 74%, problem vs not 88% (44/50).
-- **Adjudication:** 8 labels were moved to review_2's view; 3 are disputed (`disputed: true`), and a `sidd` value overrides them.
+- **Adjudication:** 8 labels were moved to review_2's view. The 3 disputed labels were resolved on 2026-09-27
+  (review_2's ruling, relayed by Sidd). A `sidd` value on any record still overrides.

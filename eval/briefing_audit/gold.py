@@ -103,7 +103,7 @@ def regress(gold_path: Path, live: bool = False, max_usd: float = 0.02) -> dict:
             g["label"] = g["sidd"]
     gold = [g for g in gold if g.get("label") and g["label"] != "exclude"]
     fresh = _live_verdicts(gold, max_usd) if live else {}
-    pairs, missing = [], 0
+    pairs, majors, missing = [], [], 0
     for g in gold:
         if live:
             verdict = fresh.get(g["id"])
@@ -116,6 +116,8 @@ def regress(gold_path: Path, live: bool = False, max_usd: float = 0.02) -> dict:
             missing += 1
             continue
         pairs.append((g["label"], verdict))
+        if g.get("severity") == "major":
+            majors.append(verdict)
     agree = sum(a == b for a, b in pairs)
     # The decision that matters operationally: is this sentence a PROBLEM
     # (overstated/unsupported/contradicted) or not?
@@ -134,6 +136,9 @@ def regress(gold_path: Path, live: bool = False, max_usd: float = 0.02) -> dict:
         "exact_agreement": wilson(agree, len(pairs)),
         # The public-note gate (>= 85%): does the judge agree on problem vs not?
         # supported<->analysis swaps don't change what a reader is told.
+        # Headline metric per RUBRIC.md: of the problems that change what a
+        # reader believes (gold severity=major), how many does the judge flag?
+        "major_recall": wilson(sum(v in prob for v in majors), len(majors)),
         "problem_agreement": wilson(sum((a in prob) == (b in prob) for a, b in pairs), len(pairs)),
         "problem_detection": {"precision": round(tp / max(1, tp + fp), 3), "recall": round(tp / max(1, tp + fn), 3),
                               "tp": tp, "fp": fp, "fn": fn},

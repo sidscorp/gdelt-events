@@ -3,109 +3,71 @@
   "queries": [
     {
       "id": "gal_1h_baseline",
-      "params": {"source": "gal", "hours": 1},
-      "min_results": 100,
+      "params": {"hours": 1, "order": "date"},
+      "min_results": 1,
       "max_latency_s": 2.5,
-      "description": "GAL 1h baseline — must have hundreds of recent articles."
+      "response_shape": {"page": 1, "per_page": 50},
+      "description": "Chronological feed availability. Ingest volume is monitored separately."
     },
     {
       "id": "gal_search_apple",
-      "params": {"source": "gal", "hours": 24, "q": "apple"},
+      "params": {"hours": 24, "q": "apple"},
       "min_results": 1,
       "max_latency_s": 2.5
     },
     {
       "id": "gal_title_recall",
-      "params": {"source": "gal", "hours": 168, "title": "recall"},
-      "min_results": 10,
+      "params": {"hours": 168, "title": "recall"},
+      "min_results": 1,
       "max_latency_s": 8.0,
       "description": "Recall keyword in titles — key signal for FDA supply chain use case. Slow because ILIKE full-scans GAL (no text index yet)."
     },
     {
       "id": "gal_language_english",
-      "params": {"source": "gal", "hours": 1, "language": "en"},
-      "min_results": 50,
+      "params": {"hours": 1, "language": "en"},
+      "min_results": 1,
       "max_latency_s": 2.5
     },
     {
       "id": "gal_language_spanish",
-      "params": {"source": "gal", "hours": 6, "language": "es"},
-      "min_results": 10,
-      "max_latency_s": 2.5
-    },
-    {
-      "id": "gal_domain_reuters",
-      "params": {"source": "gal", "hours": 24, "domain": "reuters"},
+      "params": {"hours": 6, "language": "es"},
       "min_results": 1,
       "max_latency_s": 2.5
     },
     {
       "id": "gal_supply_chain_3d",
-      "params": {"source": "gal", "hours": 72, "q": "supply chain"},
+      "params": {"hours": 72, "q": "supply chain"},
       "min_results": 1,
       "max_latency_s": 15.0,
       "description": "Supply chain sanity floor. ILIKE on 4 GAL text columns is a full scan; larger time windows hit the per-connection memory limit and 503. Needs an FTS index or a materialized candidate table to scale."
     },
     {
       "id": "gal_factory_fire_week",
-      "params": {"source": "gal", "hours": 168, "q": "factory fire"},
+      "params": {"hours": 168, "q": "factory fire"},
       "min_results": 1,
       "max_latency_s": 20.0,
       "description": "Narrower text-search regression. Tracks real current performance — failures here mean text-search has gotten worse since the split."
     },
     {
-      "id": "gkg_1h_baseline",
-      "params": {"source": "gkg", "hours": 1},
-      "min_results": 100,
-      "max_latency_s": 2.5
-    },
-    {
-      "id": "gkg_person_biden",
-      "params": {"source": "gkg", "hours": 24, "person": "Biden"},
-      "min_results": 1,
-      "max_latency_s": 2.5
-    },
-    {
-      "id": "gkg_org_microsoft",
-      "params": {"source": "gkg", "hours": 24, "org": "Microsoft"},
-      "min_results": 1,
-      "max_latency_s": 2.5
-    },
-    {
-      "id": "all_1h_baseline",
-      "params": {"source": "all", "hours": 1},
-      "min_results": 200,
-      "max_latency_s": 3.0,
-      "description": "All sources merged — should exceed GAL alone because GKG contributes."
-    },
-    {
       "id": "supply_chain_gal_24h",
-      "params": {"source": "gal", "view": "supply-chain-alerts", "hours": 24},
-      "min_results": 50,
+      "params": {"view": "supply-chain-alerts", "hours": 24},
+      "min_results": 1,
       "max_latency_s": 2.5,
-      "description": "Supply Chain Alerts on GAL — should have hundreds of keyword-matched articles per day."
+      "description": "Supply Chain Alerts live availability. Volume is monitored separately."
     },
     {
       "id": "supply_chain_gal_7d",
-      "params": {"source": "gal", "view": "supply-chain-alerts", "hours": 168},
-      "min_results": 1000,
+      "params": {"view": "supply-chain-alerts", "hours": 168},
+      "min_results": 1,
       "max_latency_s": 2.5
     },
     {
       "id": "nonsense_empty",
-      "params": {"source": "gal", "hours": 24, "q": "xyzzy12345neverreal"},
+      "params": {"hours": 24, "q": "xyzzy12345neverreal"},
       "min_results": 0,
       "max_results": 0,
       "max_latency_s": 3.0,
       "description": "Regression: impossible query must return empty, not crash."
-    },
-    {
-      "id": "gal_has_source_field",
-      "params": {"source": "gal", "hours": 1},
-      "min_results": 1,
-      "max_latency_s": 2.5,
-      "response_shape": {"source": "gal"},
-      "description": "Contract: API response must echo the source field."
     },
     {
       "id": "importance_global_24h",
@@ -124,7 +86,7 @@
     {
       "id": "date_global_24h_regression",
       "params": {"hours": 24, "order": "date"},
-      "min_results": 50,
+      "min_results": 1,
       "max_latency_s": 3.0,
       "description": "Regression: the classic reverse-chronological feed must still work under order=date."
     }

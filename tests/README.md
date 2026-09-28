@@ -1,10 +1,12 @@
 # Dashboard test harness
 
-Three layers, each independently runnable. Layers 1 and 2 are live and green. Layer 3 is a manual-run scaffold for when we start tuning the transformer classifier.
+Three layers, each independently runnable. The live layers require a running
+dashboard and mutable current-news data, so the default offline pytest suite
+excludes them. Layer 3 is a manual relevance tool and never gates CI.
 
 ## Layer 1 — smoke tests (bash)
 
-Fast (<10s), no dependencies beyond `curl` and `python3`.
+No dependencies beyond `curl` and `python3`.
 
 ```bash
 bash tests/smoke.sh
@@ -14,22 +16,24 @@ BASE=http://localhost:8015 bash tests/smoke.sh
 
 Each check prints `PASS` or `FAIL` with wall-clock timing. Covers:
 - `/api/stats`, `/api/views`, `/api/gal_facets` endpoint shapes
-- Every `source=gal|gkg|all` × time-window combo
-- Each source-specific filter (language, domain, outlet, person, org, theme)
-- FDA Medical Device Companies view under every source
-- Regression: nonsense queries return empty, unknown sources fall back to gal
+- GAL reading-feed time windows and filters
+- Curated view availability
+- Regression: nonsense queries return empty
+
+The API's old GKG/all source selector is retired. GKG remains pipeline metadata,
+not a reader-facing feed mode.
 
 ## Layer 2 — pytest golden queries
 
 ```bash
 pip install pytest   # if you don't already have it
-pytest tests/test_queries.py -v
+pytest -m live tests/test_queries.py -v
 
 # Or target a specific case
-pytest tests/test_queries.py -v -k gal_supply_chain_week
+pytest -m live tests/test_queries.py -v -k gal_supply_chain
 
 # Against a local dashboard
-BASE=http://localhost:8015 pytest tests/test_queries.py -v
+BASE=http://localhost:8015 pytest -m live tests/test_queries.py -v
 ```
 
 Each query in `golden_queries.json` becomes one parametrized test with latency and result-count assertions. **Add a query by appending to the JSON — no code change required.** Schema:
@@ -37,17 +41,19 @@ Each query in `golden_queries.json` becomes one parametrized test with latency a
 ```json
 {
   "id": "unique_slug",
-  "params": { "source": "gal", "hours": 24, "q": "..." },
-  "min_results": 5,
+  "params": { "hours": 24, "q": "..." },
+  "min_results": 1,
   "max_results": 100,
   "max_latency_s": 2.5,
   "description": "What you're checking and why",
-  "response_shape": { "source": "gal" },
+  "response_shape": { "page": 1 },
   "llm_check": true
 }
 ```
 
-Only `id`, `params`, and `max_latency_s` are required. Everything else is optional.
+Only `id`, `params`, and `max_latency_s` are required. Everything else is
+optional. Keep content floors low: publisher presence and article volume change
+with the news cycle and are checked by operational health metrics instead.
 
 ## Layer 3 — LLM relevance validation (scaffold, manual)
 
@@ -71,7 +77,7 @@ To opt a query into LLM scoring, add `"llm_check": true` to its entry in `golden
 ## Running everything
 
 ```bash
-bash tests/smoke.sh && pytest tests/test_queries.py -v
+bash tests/smoke.sh && pytest -m live tests/test_queries.py -v
 ```
 
 If smoke.sh fails, look for the `[FAIL]` line — the assertion it tripped is printed with the first 200 bytes of the response. For pytest failures, run with `-v -s` to see HTTP status and timing per case.

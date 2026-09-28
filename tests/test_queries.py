@@ -1,12 +1,13 @@
-"""Dashboard API regression tests driven by `golden_queries.json`.
+"""Live dashboard API regression tests driven by `golden_queries.json`.
 
 Run with:
-    pytest tests/test_queries.py -v
-    BASE=http://localhost:8015 pytest tests/test_queries.py -v
+    pytest -m live tests/test_queries.py -v
+    BASE=http://localhost:8015 pytest -m live tests/test_queries.py -v
 
 Each query in golden_queries.json becomes one parametrized test case. Cases
-assert shape (articles key present, source echoed), latency (<= max_latency_s),
-and result-count bounds (min_results, max_results).
+assert stable response shape, latency (<= max_latency_s), and deliberately low
+availability floors. Current-news volume and publisher presence are volatile;
+ingest freshness/volume belong in operational health checks, not CI.
 """
 import json
 import os
@@ -16,6 +17,9 @@ import urllib.request
 from pathlib import Path
 
 import pytest
+
+
+pytestmark = pytest.mark.live
 
 BASE = os.environ.get("BASE", "https://gdeltmonitor.com")
 CASES_FILE = Path(__file__).parent / "golden_queries.json"
@@ -118,7 +122,7 @@ class TestArticleRelevance:
     """Verify that returned articles contain the expected keywords."""
 
     def test_supply_chain_titles_contain_keywords(self):
-        data = _fetch_articles({"source": "gal", "view": "supply-chain-alerts", "hours": 168})
+        data = _fetch_articles({"view": "supply-chain-alerts", "hours": 168})
         assert data["total"] > 0
         keywords = {
             "recall", "shortage", "disruption", "supply chain", "tariff",
@@ -136,43 +140,39 @@ class TestArticleRelevance:
             f"({hits}/{len(data['articles'])} articles contain expected keywords)"
         )
 
-    def test_medical_devices_titles_contain_device_terms(self):
-        data = _fetch_articles({"source": "gal", "view": "medical-devices", "hours": 168})
+    def test_medical_devices_articles_explain_inclusion(self):
+        data = _fetch_articles({"view": "medical-devices", "hours": 168})
         if data["total"] == 0:
             pytest.skip("no medical device articles in window")
-        terms = {
-            "mri", "ct scan", "ultrasound", "pacemaker", "catheter",
-            "implant", "ventilator", "dialysis", "prosthetic", "endoscope",
-            "surgical robot", "x-ray", "defibrillator", "stent",
-        }
-        hits = 0
         for a in data["articles"]:
-            text = ((a.get("title") or "") + " " + (a.get("description") or "")).lower()
-            if any(t in text for t in terms):
-                hits += 1
-        precision = hits / len(data["articles"]) if data["articles"] else 0
-        assert precision >= 0.6, (
-            f"medical devices precision {precision:.0%} < 60%"
-        )
+            inclusion = a.get("inclusion") or {}
+            assert inclusion.get("via") in {
+                "judge", "keyword", "theme", "semantic",
+            }
+            assert inclusion.get("detail"), "missing inclusion evidence"
 
 class TestSortOrder:
     """Verify sort parameter actually changes article ordering."""
 
-    def test_newest_first_is_default(self):
-        data = _fetch_articles({"source": "gal", "hours": 6})
-        if len(data["articles"]) < 2:
+    def test_importance_is_default(self):
+        default = _fetch_articles({"hours": 6})
+        explicit = _fetch_articles({"hours": 6, "order": "importance"})
+        if len(default["articles"]) < 2 or len(explicit["articles"]) < 2:
             pytest.skip("not enough articles")
-        times = [a.get("time_ago", "") for a in data["articles"][:5]]
-        assert times == sorted(times), f"not sorted newest-first: {times}"
+        default_urls = [a.get("url") for a in default["articles"][:5]]
+        explicit_urls = [a.get("url") for a in explicit["articles"][:5]]
+        assert default_urls == explicit_urls
 
-    def test_oldest_reverses_order(self):
-        newest = _fetch_articles({"source": "gal", "view": "supply-chain-alerts", "hours": 72})
-        oldest = _fetch_articles({"source": "gal", "view": "supply-chain-alerts", "hours": 72, "sort": "oldest"})
+    def test_oldest_reverses_explicit_date_order(self):
+        params = {
+            "view": "supply-chain-alerts", "hours": 72,
+            "order": "date", "rollup": 0,
+        }
+        newest = _fetch_articles(dict(params))
+        oldest = _fetch_articles({**params, "sort": "oldest"})
         if len(newest["articles"]) < 2 or len(oldest["articles"]) < 2:
             pytest.skip("not enough articles")
-        assert newest["articles"][0]["time_ago"] != oldest["articles"][0]["time_ago"], (
-            "newest and oldest should show different first articles"
-        )
+        assert newest["articles"][0].get("url") != oldest["articles"][0].get("url")
 
 
 class TestFilterStacking:
@@ -180,7 +180,7 @@ class TestFilterStacking:
 
     def test_language_filter_on_pill_view(self):
         data = _fetch_articles({
-            "source": "gal", "view": "medical-devices",
+            "view": "medical-devices",
             "hours": 168, "language": "en",
         })
         for a in data["articles"]:
@@ -190,7 +190,7 @@ class TestFilterStacking:
 
     def test_domain_filter_returns_matching_domains(self):
         data = _fetch_articles({
-            "source": "gal", "hours": 24, "domain": "yahoo",
+            "hours": 24, "domain": "yahoo",
         })
         if data["total"] == 0:
             pytest.skip("no yahoo articles in 24h")
@@ -212,8 +212,8 @@ class TestAuthEndpoints:
         with urllib.request.urlopen(req, timeout=10) as r:
             assert r.status == 200
             body = r.read().decode()
-            assert "Siddhartha Nambiar" in body
-            assert "GDELT" in body
+            assert "GDELT Monitor" in body
+            assert "methodology" in body.lower()
 
     def test_pill_info_returns_keywords(self):
         data = _get_json(f"{BASE}/api/pill_info/supply-chain-alerts", timeout=10)

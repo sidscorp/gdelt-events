@@ -1,44 +1,16 @@
-"""Pre-warm the AI briefing cache for the fixed curated briefing surface.
+"""Refresh the fixed curated briefing cache through authenticated local POSTs.
 
-Hits the local non-streaming endpoint with ?prewarm=1, which regenerates only
-when the cache is stale for that window (see briefing.fresh_s). Data-version-guarded: only runs when gdelt_ingest.py has written
-a new data_version.txt, skipping redundant cycles.
+Public requests only read cached briefings. This worker loads its authorization
+from GDELT_BRIEFING_WORKER_TOKEN or data/.briefing_worker_token (host-local).
+It generates Global plus the 16 curated views at 3h/24h, respecting cache TTLs.
+Other windows and custom views remain readable only when a cache already exists.
+Failed or stale responses produce a nonzero exit and do not advance the version.
 
-The warm set is intentionally fixed: Global plus the 16 built-in topic pills,
-each at 3h and 24h.  User-created pills and less-common windows remain on demand.
-
-    THIS USED TO READ `briefing_history WHERE trigger='visit'` AND THAT SIGNAL IS INVERTED.
-    A briefing_history row is only written when a briefing is GENERATED. A visit that hits a
-    warm cache writes nothing. So the combos this prewarmer successfully kept warm produced no
-    "visit" rows and looked like zero demand, while the combos nobody reads missed cache, wrote
-    a visit row, and looked like demand. The list was selecting on cache misses, which
-    anti-correlate with popularity. Measured 2026-08-29: it was walking 29 combos and
-    regenerating 13 per run, 5 runs/day = ~59 generations/day, against 27 human briefing reads
-    per WEEK. 411 prewarms served 27 visits.
-
-`pageview_log` records every pageview with its `briefing_key`, cache hit or miss, so it is the
-honest demand signal. Measured over 2026-08-12..08-30 (723 views): `_all:3` is 68.6% of all
-views with 306 distinct visitors; the next-broadest key has 5 visitors. Demand is extremely
-concentrated, so a short warm list covers almost everything.
-
-Distinct visitors, not raw views, decide: `geopolitics-conflict:3` shows 88 views from just
-2 visitors — one enthusiast or crawler, not breadth. Ranking on views alone would warm it above
-keys that many more people actually open.
-
-Combos below the threshold are generated on demand the rare time someone opens one. That path is
-fast and visible: measured client-side, a live briefing shows its first text at p50 0.34s and
-finishes at p50 2.9s / p90 10.8s, and the UI says what is happening and why.
-
-Failures are logged and skipped; the "keep stale until fresh" design means
-users still see the last cached briefing.
-
-Usage:
-    python prewarm_briefings.py            # defaults to port 8015 (prod)
-    python prewarm_briefings.py --port 8016  # dev instance
-    python prewarm_briefings.py --force      # skip version check
+Use --plan for a read-only cache inventory without HTTP or model calls.
 """
 
 import urllib.request, time, sys, argparse
+import os
 from pathlib import Path
 
 CURATED_HOURS = (3, 24)
@@ -62,7 +34,7 @@ CURATED_VIEWS = (
     "energy-climate",           # Energy & Climate
 )
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(os.environ.get("GDELT_DATA_DIR") or (Path(__file__).resolve().parent.parent / "data"))
 VERSION_FILE = DATA_DIR / "data_version.txt"
 LAST_PREWARM_FILE = DATA_DIR / ".last_prewarm_version"
 STAGGER_S = 0.5
@@ -92,21 +64,32 @@ def warm(view, hours, base_url, timeout=120):
     label = f"{view or 'global'}:{hours}h"
     t0 = time.time()
     try:
-        with urllib.request.urlopen(url, timeout=timeout) as r:
+        token = os.environ.get("GDELT_BRIEFING_WORKER_TOKEN", "").strip()
+        if not token:
+            token = (DATA_DIR / ".briefing_worker_token").read_text(encoding="utf-8").strip()
+        if not token:
+            raise ValueError("Scheduled generation token is not configured")
+        # Keep this token on the host; never put it in a URL or diagnostic output.
+        req = urllib.request.Request(url, data=b"", method="POST",
+                                     headers={"X-GDELT-Briefing-Token": token})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             body = r.read()
         elapsed = time.time() - t0
         # cached=True with no regeneration means fresh_s() said "still good" —
         # no LLM call was made. Worth seeing in the log; it is the whole saving.
         try:
             import json as _json
-            skipped = bool(_json.loads(body).get("cached"))
+            payload = _json.loads(body)
+            if payload.get("error") or payload.get("stale") or not payload.get("briefing"):
+                raise ValueError("Briefing was not refreshed")
+            skipped = bool(payload.get("cached"))
         except Exception:
-            skipped = False
+            raise ValueError("Invalid scheduled generation response") from None
         tag = "SKIP" if skipped else " OK "
         print(f"[{time.strftime('%H:%M:%S')}] {tag} {label:30s} {elapsed:.1f}s", flush=True)
         return skipped
-    except Exception as e:
-        print(f"[{time.strftime('%H:%M:%S')}] FAIL {label:30s} ({e})", flush=True)
+    except Exception:
+        print(f"[{time.strftime('%H:%M:%S')}] FAIL {label:30s} (scheduled request failed)", flush=True)
 
 
 
@@ -172,23 +155,30 @@ def main():
     fail_count = 0
     skipped_count = 0
     for view, hours in combos:
-        if warm(view, hours, base_url):
+        result = warm(view, hours, base_url)
+        if result is None:
+            fail_count += 1
+        elif result:
             skipped_count += 1
-        ok_count += 1  # failure is logged but not fatal; count all attempts
+            ok_count += 1
+        else:
+            ok_count += 1
         if STAGGER_S:
             time.sleep(STAGGER_S)
     print(f"[{time.strftime('%H:%M:%S')}] still-fresh, no LLM call: "
           f"{skipped_count}/{total}", flush=True)
 
     elapsed = time.time() - t_start
-    print(f"[{time.strftime('%H:%M:%S')}] done: {total} combos in {elapsed:.1f}s", flush=True)
+    print(f"[{time.strftime('%H:%M:%S')}] done: {ok_count} successful, {fail_count} failed "
+          f"of {total} combos in {elapsed:.1f}s", flush=True)
 
-    if ver:
+    if ver and not fail_count:
         try:
             LAST_PREWARM_FILE.write_text(ver)
         except OSError:
             pass
+    return 1 if fail_count else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

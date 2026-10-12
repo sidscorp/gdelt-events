@@ -6,6 +6,7 @@ import hashlib
 from datetime import datetime, timedelta
 
 from flask import Blueprint, request, jsonify
+from briefing_access import parse_key, worker_authorized
 
 import time as _time
 
@@ -21,9 +22,9 @@ from briefing import (
 
 bp = Blueprint("api_briefing", __name__)
 
-# Concurrent regeneration guard: at most one fresh generation per cache_key
-# at a time. Subsequent requests for the same stale key serve cached content
-# only (no duplicate LLM calls).
+# One scheduled generation at a time in the single Waitress process. Public
+# requests never enter this guard or invoke the model. Multiple server processes
+# require a shared lock before enabling generation on them.
 _regen_lock = threading.Lock()
 _regen_in_flight: set = set()
 
@@ -31,7 +32,7 @@ _regen_in_flight: set = set()
 def _try_start_regen(cache_key: str) -> bool:
     """Acquire regeneration slot. Returns True if this caller should generate."""
     with _regen_lock:
-        if cache_key in _regen_in_flight:
+        if _regen_in_flight:
             return False
         _regen_in_flight.add(cache_key)
         return True
@@ -68,17 +69,15 @@ def _editor_pass(candidates, view_name, view_desc, hours, threads):
     return selected, payload, editor_meta
 
 
-@bp.route("/api/briefing")
+@bp.route("/api/briefing", methods=["GET", "POST"])
 def api_briefing():
-    """AI-generated briefing with SSE streaming.
-
-    Serve cached content immediately (even if stale), then if the cache is
-    older than BRIEFING_FRESH_S, generate fresh content on the same SSE
-    connection so the user sees old text instantly with a seamless update."""
+    """Cache-only public JSON/SSE reads; authenticated scheduled POST generation."""
     from flask import Response
 
-    view_id = (request.args.get("view") or "").strip()
-    hours = request.args.get("hours", 24, type=int)
+    try:
+        view_id, hours = parse_key(request.args)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
     stream = request.args.get("stream", "0") == "1"
     # Two non-visitor modes, deliberately different:
     #   refresh=1  force regeneration, ignoring freshness (manual / debugging)
@@ -88,6 +87,14 @@ def api_briefing():
     # meant five regenerations a day of content that had barely moved.
     refresh = request.args.get("refresh") == "1"
     prewarm = request.args.get("prewarm") == "1"
+
+    is_worker = request.method == "POST"
+    if (refresh or prewarm or is_worker) and (not is_worker or not worker_authorized(request.headers)):
+        return jsonify({"error": "Scheduled generation authorization required"}), 403
+    if is_worker:
+        from pipeline.prewarm_briefings import CURATED_VIEWS, CURATED_HOURS
+        if stream or not (refresh or prewarm) or view_id not in CURATED_VIEWS or hours not in CURATED_HOURS:
+            return jsonify({"error": "Unsupported scheduled generation request"}), 400
 
     cache_key = f"{view_id or '_all'}:{hours}"
     # Both modes tag history as 'prewarm', which also suppresses the thread
@@ -116,6 +123,31 @@ def api_briefing():
         is_stale = age_s >= fresh_s(hours)
     elif not cached:
         is_stale = True  # no cache at all — must generate
+
+    if not is_worker:
+        # GET is always cache-only, including misses, stale entries, and SSE.
+        # No ambient browser credentials can grant generation authority.
+        payload = {
+            "briefing": cached["briefing"] if cached else None,
+            "sources": cached_sources,
+            "article_count": cached["article_count"] if cached else 0,
+            "generated_at": cached["generated_at"] if cached else None,
+            "cache_ttl_s": fresh_s(hours), "cached": bool(cached),
+            "stale": is_stale, "view": view_id or None, "hours": hours,
+        }
+        if not cached:
+            payload["error"] = "No cached briefing; scheduled update pending"
+        if not stream:
+            return jsonify(payload), (200 if cached else 503)
+        def cached_stream():
+            if cached:
+                yield f"data: {json.dumps({'sources': cached_sources})}\n\n"
+                yield f"data: {json.dumps({'text': cached['briefing'], 'cached': True, 'done': False, 'stale': is_stale, 'generated_at': cached['generated_at'], 'cache_ttl_s': fresh_s(hours)})}\n\n"
+            terminal = {k: v for k, v in payload.items() if k not in ('briefing', 'sources')}
+            terminal["done"] = True
+            yield f"data: {json.dumps(terminal)}\n\n"
+        return Response(cached_stream(), mimetype="text/event-stream",
+                        headers={"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no"})
 
     needs_regen = is_stale or refresh
     should_regen = needs_regen and _try_start_regen(cache_key)
@@ -156,9 +188,9 @@ def api_briefing():
                         "sources": cached_sources}
             except Exception:
                 prev = None
-        threads = get_threads(cache_key)
-        sources, view_name, view_desc = _fetch_briefing_events(view_id, hours)
         try:
+            threads = get_threads(cache_key)
+            sources, view_name, view_desc = _fetch_briefing_events(view_id, hours)
             if len(sources) < 2:
                 if cached:
                     return jsonify({
@@ -234,124 +266,6 @@ def api_briefing():
         finally:
             _finish_regen(cache_key)
 
-    # ── SSE streaming path ──
-    def sse_stream():
-        # Phase 1: serve cached content IMMEDIATELY (even stale)
-        if cached and not refresh:
-            yield f"data: {json.dumps({'sources': cached_sources})}\n\n"
-            # cache_ttl_s rides along on phase 1 so the client can age this text
-            # the instant it paints. Without it the freshness bar has no TTL to
-            # divide by, so it cannot turn amber/red on a briefing that is older
-            # than the window it claims to cover.
-            yield f"data: {json.dumps({'text': cached['briefing'], 'done': False, 'cached': True, 'stale': is_stale, 'article_count': cached['article_count'], 'generated_at': cached['generated_at'], 'cache_ttl_s': fresh_s(hours)})}\n\n"
-            if not needs_regen:
-                yield f"data: {json.dumps({'done': True, 'cached': True, 'article_count': cached['article_count'], 'generated_at': cached['generated_at'], 'cache_ttl_s': fresh_s(hours)})}\n\n"
-                return
-
-        # Phase 2: if stale or no cache, attempt regeneration
-        if not should_regen:
-            # Another request is regenerating — serve stale and be done
-            if cached:
-                meta_label = "Updating — another request is refreshing this briefing"
-                yield f"data: {json.dumps({'done': True, 'cached': True, 'stale': True, 'meta': meta_label, 'article_count': cached['article_count'], 'generated_at': cached['generated_at'], 'cache_ttl_s': fresh_s(hours)})}\n\n"
-            else:
-                yield f"data: {json.dumps({'error': 'Generation in progress', 'done': True})}\n\n"
-            return
-
-        try:
-            prev = None
-            if cached:
-                try:
-                    prev = {"briefing": cached["briefing"], "generated_at": cached["generated_at"],
-                            "sources": cached_sources}
-                except Exception:
-                    prev = None
-            threads = get_threads(cache_key)
-            sources, view_name, view_desc = _fetch_briefing_events(view_id, hours)
-
-            if len(sources) < 2:
-                if cached:
-                    yield f"data: {json.dumps({'done': True, 'cached': True, 'stale': True, 'article_count': cached['article_count'], 'generated_at': cached['generated_at'], 'cache_ttl_s': fresh_s(hours)})}\n\n"
-                else:
-                    yield f"data: {json.dumps({'error': 'Not enough articles', 'found': len(sources), 'done': True})}\n\n"
-                return
-
-            # The editor call runs before the first token, so tell the reader
-            # what is happening. 'meta' is a literal label the client renders.
-            yield f"data: {json.dumps({'meta': f'Selecting from {len(sources)} stories...'})}\n\n"
-            candidates = sources
-            sources, sources_payload, editor_meta = _editor_pass(
-                candidates, view_name, view_desc, hours, threads)
-            sources_json = json.dumps(sources_payload)
-            prompt = _build_briefing_prompt(sources, view_name, view_desc, hours,
-                                            prev=prev, threads=threads)
-            gen_t0 = _time.time()
-
-            # Send fresh sources map (may differ from cached). Must be sent
-            # exactly once: the client resets its accumulated text on it.
-            yield f"data: {json.dumps({'sources': sources_payload})}\n\n"
-
-            full_text = []
-            try:
-                for chunk in _generate_briefing_stream(sources, view_name, view_desc, hours,
-                                                        prev=prev, threads=threads, prompt=prompt):
-                    full_text.append(chunk)
-                    yield f"data: {json.dumps({'text': chunk})}\n\n"
-            except Exception as e:
-                yield f"data: {json.dumps({'error': str(e), 'done': True})}\n\n"
-                return
-
-            briefing = _normalize_briefing("".join(full_text).strip(), view_name, hours)
-            # Bound unconditionally: the terminal event below reports it, and
-            # when _normalize_briefing returned falsy this raised
-            # UnboundLocalError mid-stream, which reaches the client as a
-            # silently truncated response rather than an error.
-            generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
-            if briefing:
-                meta_json = json.dumps({
-                    "model": BRIEFING_MODEL, "prompt": prompt, "n_sources": len(sources),
-                    "editor_selection": editor_meta,
-                    "continuity_titles": [
-                        (s.get("title") or "")[:110] for s in (prev or {}).get("sources", [])[:8]
-                    ] if prev else [],
-                    "threads_used": [
-                        {"title": t.get("title"), "first_seen": t.get("first_seen"),
-                         "summary": t.get("summary")}
-                        for t in (threads or []) if (t.get("status") or "active") == "active"
-                    ],
-                    "elapsed_s": round(_time.time() - gen_t0, 2),
-                    "briefing_chars": len(briefing), "cache_ttl_s": fresh_s(hours),
-                })
-                try:
-                    uc = get_user_db()
-                    uc.execute(
-                        "INSERT OR REPLACE INTO briefing_cache "
-                        "(cache_key, briefing, article_count, generated_at, sources_json, meta_json) "
-                        "VALUES (?, ?, ?, ?, ?, ?)",
-                        (cache_key, briefing, len(sources), generated_at, sources_json, meta_json),
-                    )
-                    uc.commit()
-                    uc.close()
-                except Exception:
-                    pass
-                record_briefing_history(
-                    cache_key, view_id or "_all", hours, briefing,
-                    sources_json, len(sources), meta_json, generated_at,
-                    trigger=history_trigger,
-                )
-                # Threads used to be skipped on prewarm entirely, which froze
-                # every list (some since July) while the prompt kept telling the
-                # model they were live. They now update on prewarm too, gated by
-                # should_update_threads: once per view per few hours, and only
-                # for views someone actually reads.
-                if should_update_threads(cache_key, history_trigger):
-                    update_threads_async(cache_key, threads, briefing)
-            yield f"data: {json.dumps({'done': True, 'refreshed': is_stale, 'article_count': len(sources), 'generated_at': generated_at, 'cache_ttl_s': fresh_s(hours)})}\n\n"
-        finally:
-            _finish_regen(cache_key)
-
-    return Response(sse_stream(), mimetype="text/event-stream",
-                    headers={"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no"})
 
 
 @bp.route("/api/briefing_meta")

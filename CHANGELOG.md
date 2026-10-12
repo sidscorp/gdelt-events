@@ -21,6 +21,24 @@ Newest first.
 
 ---
 
+## 2026-10-12 — Separate cached reads from scheduled briefing generation
+
+**What** — Public JSON/SSE reads only serve cache. Scheduled POSTs require a
+host-local token and an allowed curated key. At most one generation runs in the
+single server process; failures release ownership. Prewarm reports failed content
+and does not advance its version marker after failures.
+**Why** — Visitor-controlled refresh and cache-key variation could start model work.
+**How it was verified** — Eleven request-boundary regression cases failed against
+baseline e4ec438. The changed route, caller and briefing contracts pass 19 focused
+checks using synthetic SQLite and mocked model boundaries. Existing public SSR
+checks pass 11/11; these inspect current production, not the candidate deployment.
+**Files** — briefing_access.py, routes/api_briefing.py, prewarm_briefings.py,
+test_briefing_access.py, methodology.html.
+**Notes** — NOT DEPLOYED. Requires coordinated caller/server rollout and a host-local
+worker token. Public uncached/custom-window briefings no longer generate on demand;
+the source feed remains available. The lock is per process; do not enable multiple
+generation server processes without shared coordination. No provider/model change.
+
 ## 2026-09-20 — Review-first Bluesky event signals
 
 **What** — Added a dedicated social publishing subsystem for GDELT Monitor: read-only

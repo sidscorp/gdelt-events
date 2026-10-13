@@ -1,116 +1,82 @@
 <#
-Deploy guard for the shared production tree.
+Atomic ownership for a committed production release. Existing lock files are
+preserved; no automatic age-based takeover. Windows named mutex serializes
+claim/assert/release/recover; exclusive CreateNew also protects initial creation.
+SCP itself does not honor this lock: only the authorized release operator writes
+production, after claim and version checks. Workers have no deployment authority.
 
-Several agents (claude-code, OpenCode/DeepSeek, ...) deploy into this ONE working
-tree by scp, with no coordination. On 2026-08-02 two of them overwrote each other
-ten minutes apart: the second reverted a completed renderer fix and left
-routes/pages.py importing a briefing._normalize_text that no longer existed, so
-gdeltmonitor.com returned 500 until it was restored. Nothing was permanently lost
-only because the work had already been committed to a branch.
-
-This cannot make scp safe - scp does not ask permission. What it does is make a
-collision LOUD and make the tree's real state visible before you overwrite it:
-
-  status   who holds the lock, what is uncommitted, how far the tree has drifted
-  claim    take the lock; refuses if someone else holds one younger than 45 min
-  release  give it back
-
-restart_dash.ps1 calls `status` on entry and shouts if a foreign lock is held,
-because every deploy ends in a restart - the one choke point every agent uses.
-
-Usage:
-  powershell -File scripts\deploy_guard.ps1 status
-  powershell -File scripts\deploy_guard.ps1 claim claude-code "briefing renderer"
-  powershell -File scripts\deploy_guard.ps1 release claude-code
-  ... add -Force to steal a lock you are sure is abandoned.
+claim <owner> <reason> -Token <unique-guid>
+assert <owner> -Token <guid>
+release <owner> -Token <guid>
+recover -Force -ExpectedHash <SHA256>   # owner-approved abandoned-lock recovery
 #>
 param(
-  [Parameter(Position = 0)][ValidateSet('claim', 'release', 'status')][string]$Action = 'status',
-  [Parameter(Position = 1)][string]$Owner = '',
-  [Parameter(Position = 2)][string]$Reason = '',
-  [switch]$Force
+    [Parameter(Position=0)][ValidateSet('claim','assert','release','status','recover')][string]$Action='status',
+    [Parameter(Position=1)][string]$Owner='',
+    [Parameter(Position=2)][string]$Reason='',
+    [string]$Token='',
+    [switch]$Force,
+    [string]$ExpectedHash='',
+    [string]$RepoRoot=(Split-Path $PSScriptRoot -Parent)
 )
-
-$Repo = 'C:\Users\siddh\Code_Library\gdelt-events'
-$Lock = Join-Path $Repo 'data\.deploy_lock'
-$StaleMinutes = 45
-
-function Read-Lock {
-  if (-not (Test-Path $Lock)) { return $null }
-  try { return Get-Content $Lock -Raw | ConvertFrom-Json } catch { return $null }
-}
-
-function Lock-AgeMin($l) {
-  if (-not $l) { return $null }
-  return [math]::Round(((Get-Date) - [datetime]$l.taken_at).TotalMinutes, 1)
-}
-
-function Show-Status {
-  $l = Read-Lock
-  if ($l) {
-    $age = Lock-AgeMin $l
-    $state = if ($age -gt $StaleMinutes) { 'STALE' } else { 'ACTIVE' }
-    Write-Output "LOCK $state  owner=$($l.owner)  age=${age}m  reason=$($l.reason)"
-  }
-  else {
-    Write-Output 'LOCK none'
-  }
-
-  Push-Location $Repo
-  try {
-    $dirty = @(git status --short 2>$null)
-    if ($dirty.Count) {
-      Write-Output "UNCOMMITTED $($dirty.Count) file(s) - commit before deploying, or a"
-      Write-Output "            collision will bury work whose rationale nobody recorded:"
-      $dirty | Select-Object -First 12 | ForEach-Object { Write-Output "   $_" }
+$ErrorActionPreference='Stop'
+$RepoRoot=[IO.Path]::GetFullPath($RepoRoot)
+$Lock=Join-Path $RepoRoot 'data\.deploy_lock'
+$sha=[Security.Cryptography.SHA256]::Create()
+$identity=[BitConverter]::ToString($sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($RepoRoot.ToLowerInvariant()))).Replace('-','')
+$sha.Dispose()
+$mutex=New-Object Threading.Mutex($false, "Global\GDELTDeploy-$identity")
+$held=$false
+$code=0
+try {
+    try { $held=$mutex.WaitOne(10000) } catch [Threading.AbandonedMutexException] { $held=$true }
+    if (-not $held) { throw 'Deployment guard busy; retry after the active operation' }
+    if ($Action -eq 'claim') {
+        $parsed=[guid]::Empty
+        if (-not $Owner -or -not [guid]::TryParse($Token,[ref]$parsed) -or $parsed -eq [guid]::Empty) {
+            throw 'claim requires an owner and a unique nonempty GUID token'
+        }
+        if ($Force) { throw 'claim cannot force takeover; use explicit recover with the expected lock hash' }
+        if (-not (Test-Path (Split-Path $Lock))) { New-Item -ItemType Directory -Path (Split-Path $Lock) | Out-Null }
+        # Do not remove a partial lock on failure: interruption requires explicit recovery.
+        $stream=[IO.File]::Open($Lock,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+        try {
+            $payload=@{owner=$Owner;token=$Token;reason=$Reason;taken_at=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json -Compress
+            $bytes=[Text.Encoding]::UTF8.GetBytes($payload)
+            $stream.Write($bytes,0,$bytes.Length)
+            $stream.Flush($true)
+        } finally { $stream.Dispose() }
+        Write-Output 'CLAIMED'
+    } elseif ($Action -eq 'recover') {
+        if (-not $Force -or $ExpectedHash -notmatch '^[a-fA-F0-9]{64}$') { throw 'recover requires -Force and the inspected lock SHA256' }
+        if (-not (Test-Path $Lock)) { throw 'No lock to recover' }
+        $actual=(Get-FileHash $Lock -Algorithm SHA256).Hash
+        if ($actual -ne $ExpectedHash) { throw 'Lock changed since inspection; recovery refused' }
+        Remove-Item $Lock
+        Write-Output 'RECOVERED; acquire a new token before deployment'
+    } else {
+        if (-not (Test-Path $Lock)) {
+            if ($Action -ne 'status') { throw 'No deployment lock held' }
+            Write-Output 'LOCK none'
+        } else {
+            $record=Get-Content $Lock -Raw | ConvertFrom-Json
+            if (-not $record.owner -or -not $record.token) { throw 'Invalid or legacy lock; explicit recovery required' }
+            if ($Action -eq 'status') {
+                Write-Output "LOCK held owner=$($record.owner) taken_at=$($record.taken_at)"
+            } else {
+                if (-not $Owner -or -not $Token -or $record.owner -cne $Owner -or $record.token -cne $Token) {
+                    throw 'Deployment ownership mismatch'
+                }
+                if ($Action -eq 'release') { Remove-Item $Lock; Write-Output 'RELEASED' }
+                else { Write-Output 'OWNERSHIP_OK' }
+            }
+        }
     }
-    else {
-      Write-Output 'UNCOMMITTED none - tree is clean'
-    }
-    $branch = git rev-parse --abbrev-ref HEAD 2>$null
-    $head = git rev-parse --short HEAD 2>$null
-    Write-Output "BRANCH $branch @ $head"
-  }
-  finally { Pop-Location }
+} catch {
+    Write-Output "REFUSED: $($_.Exception.Message)"
+    $code=1
+} finally {
+    if ($held) { $mutex.ReleaseMutex() }
+    $mutex.Dispose()
 }
-
-switch ($Action) {
-
-  'status' { Show-Status }
-
-  'claim' {
-    if (-not $Owner) { Write-Output 'ERROR: claim needs an owner, e.g. claim claude-code "reason"'; exit 2 }
-    $l = Read-Lock
-    if ($l -and -not $Force) {
-      $age = Lock-AgeMin $l
-      if ($l.owner -ne $Owner -and $age -le $StaleMinutes) {
-        Write-Output "REFUSED: '$($l.owner)' has held the deploy lock for ${age}m"
-        Write-Output "         reason: $($l.reason)"
-        Write-Output "         Another agent is probably mid-deploy. Wait, coordinate, or"
-        Write-Output "         re-run with -Force if you are certain it is abandoned."
-        exit 1
-      }
-      if ($l.owner -ne $Owner) {
-        Write-Output "note: taking over a STALE lock from '$($l.owner)' (${age}m old)"
-      }
-    }
-    $payload = @{
-      owner = $Owner; reason = $Reason
-      taken_at = (Get-Date).ToString('o'); host = $env:COMPUTERNAME
-    } | ConvertTo-Json -Compress
-    Set-Content -Path $Lock -Value $payload -Encoding UTF8
-    Write-Output "CLAIMED by $Owner"
-    Show-Status
-  }
-
-  'release' {
-    $l = Read-Lock
-    if (-not $l) { Write-Output 'no lock held'; break }
-    if ($l.owner -ne $Owner -and -not $Force) {
-      Write-Output "REFUSED: lock belongs to '$($l.owner)', not '$Owner'. Use -Force to override."
-      exit 1
-    }
-    Remove-Item $Lock -Force
-    Write-Output "RELEASED (was $($l.owner))"
-  }
-}
+exit $code

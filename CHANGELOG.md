@@ -39,6 +39,22 @@ worker token. Public uncached/custom-window briefings no longer generate on dema
 the source feed remains available. The lock is per process; do not enable multiple
 generation server processes without shared coordination. No provider/model change.
 
+## 2026-10-12 — Require exclusive release ownership (candidate; not deployed)
+
+**What** — Atomic lock creation, exact owner/token checks, explicit hash-bound recovery,
+and a restart lease that prevents deletion while services are being restarted.
+**Why** — Shared-tree releases must not silently overwrite ownership or restart under
+another release's lock. Age alone is not evidence that a release was abandoned.
+**How it was verified** — Isolated Windows contract tests cover mismatched tokens,
+malformed locks, recovery, blocked service access, restart lease lifetime and eight
+concurrent claimants with exactly one winner. Removing token comparison makes the
+tests fail. No production services are used by the test.
+**Files** — scripts/deploy_guard.ps1, scripts/restart_dash.ps1,
+scripts/test_deploy_guard.ps1, CLAUDE.md.
+**Notes** — Restart callers now require Owner and Token. No automatic takeover. SCP
+still requires an authorized operator; the lock is not an OS access-control boundary.
+
+
 ## 2026-09-20 — Review-first Bluesky event signals
 
 **What** — Added a dedicated social publishing subsystem for GDELT Monitor: read-only

@@ -27,28 +27,33 @@ deploy/       register_dashboard.ps1, register_task.ps1 (Windows — production)
 ```
 
 ## Deploy / run (production = Windows, rainbow-boi)
-- Edit locally, then `scp <file> siddh@rainbow-boi:C:/Users/siddh/Code_Library/gdelt-events/<path>`.
-- Restart: `ssh siddh@rainbow-boi "powershell -ExecutionPolicy Bypass -File C:/Users/siddh/restart_dash.ps1"`.
-- Served by waitress on :8015 → Cloudflare Tunnel → gdeltmonitor.com. A dev instance can run on :8016 with `GDELT_DATA_DIR` pointing at a smaller data slice.
+Only the owner-approved release operator changes production. Workers commit locally;
+Sidd pushes. Security fixes are deployed and verified before public publication.
+Commit the candidate and verification entry first, test with isolated data and workers
+disabled, then obtain approval for the exact release. Back up changed files before
+transfer and compare SHA-256 afterwards. No unreviewed shared-tree edits.
 
 ## Deploying: take the lock first (REQUIRED)
-Multiple agents deploy into this ONE working tree by `scp`. On 2026-08-02 two of them
-overwrote each other ten minutes apart — the second reverted a finished fix and left
-`routes/pages.py` importing a function that no longer existed, so the site returned
-**500** until it was restored. Nothing was lost only because it had been committed first.
+Run from the repository root in PowerShell. Keep the unique token for the release;
+never publish it. Every guard invocation must succeed before continuing.
 
 ```powershell
-powershell -File scripts\deploy_guard.ps1 status                      # who else is in here?
-powershell -File scripts\deploy_guard.ps1 claim <agent> "<reason>"    # exits 1 if refused
-#   ... scp, restart, verify ...
-powershell -File scripts\deploy_guard.ps1 release <agent>
+$releaseToken = [guid]::NewGuid().ToString()
+powershell -File scripts\deploy_guard.ps1 status
+powershell -File scripts\deploy_guard.ps1 claim release-operator "approved release" -Token $releaseToken
+# Check production HEAD and dirty status against the approved bundle before writing.
+# Back up, transfer the complete bundle, and verify hashes.
+powershell -File scripts\restart_dash.ps1 -Owner release-operator -Token $releaseToken
+# Verify actual reader content and independently check the dev instance.
+powershell -File scripts\deploy_guard.ps1 release release-operator -Token $releaseToken
 ```
 
-`restart_dash.ps1` runs `status` on entry and shouts if someone else holds the lock —
-it warns but never blocks, since refusing to restart mid-incident would be worse.
-The lock is advisory: `scp` cannot be intercepted. It makes collisions loud, not
-impossible. **Committing before you deploy is still the only thing that makes them
-recoverable.**
+Restart refuses missing or mismatched ownership before touching services. An active
+restart holds a read lease preventing lock deletion. Locks never expire automatically;
+legacy, malformed or abandoned locks require explicit owner-approved recovery using
+`recover -Force -ExpectedHash <inspected-sha256>`. SCP does not enforce this protocol:
+only the approved operator may transfer files. Production restart is scoped to its
+task and listener; it does not intentionally stop the dev instance.
 
 ## Recording changes (REQUIRED — do not skip)
 Deploying by `scp` makes it very easy to change production and leave no record. Twice now

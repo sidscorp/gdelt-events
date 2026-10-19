@@ -21,6 +21,36 @@ Newest first.
 
 ---
 
+## 2026-10-19 — Temporal grounding for AI briefings (current time + story ages)
+
+**What** — The briefing editor and writer prompts now state the current UTC time, and
+every candidate renders with first-seen/last-seen ages ("first seen 3d ago, last seen
+18m ago"). The writer is instructed to convert relative datelines against that clock
+and to frame out-of-window stories as continuing, never as breaking. Editor verdict
+processing now ignores duplicate story numbers (the model emitting the same n twice
+produced literal "(Duplicate)" bullets). Briefing event dicts carry cluster
+first_seen/latest_seen through from articles.py.
+**Why** — Reader report 2026-10-19: the 3h briefing presented Katie Zacharia's Friday
+resignation as just-happened ("resigned… with her first briefing slated for Tuesday")
+under a hallucinated "Biden administration". Root cause: the feed window filters on
+GDELT *last-seen*, so a 3-day-old story re-crawled lands in "Last 3 Hours" at full
+rank; the prompts never stated the current time; sources carried no dates. The model
+could not tell a fresh story from a recirculating one and confabulated context to
+fill the gap.
+**How it was verified** — Dev (:8016, fresh 7-day slice, forced regenerations):
+Zacharia entry rendered "first seen 6d ago, last seen 5h ago"; the 24h briefing
+framed the resignation retrospectively ("destabilised on Tuesday when the press
+secretary resigned") vs prod's breaking-news "slated for Tuesday" + "Biden
+administration"; both dev briefings had 12/12 unique numbered entries (was: stories
+39/40 doubled). _seen_age_label unit-checked for fresh / recirculating / malformed /
+future timestamps. Residual: day-level attribution can still be wrong when a
+cluster's representative snippet is its pre-event seed article — pointing the
+cluster rep at the newest member is the Layer 2 follow-up.
+**Files** — dashboard/briefing.py, dashboard/templates/methodology.html (briefing
+prompt description + the stale-cluster-snippet limitation).
+**Notes** — No schema or API changes; ~+200 prompt tokens/call. The "local"-model
+fallback format branch is deliberately unchanged (not in the request path).
+
 ## 2026-10-12 — Separate cached reads from scheduled briefing generation
 
 **What** — Public JSON/SSE reads only serve cache. Scheduled POSTs require a

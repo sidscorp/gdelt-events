@@ -309,13 +309,43 @@ def _chat(prompt: str, max_tokens: int, temperature: float,
     return content, (body.get("usage") or {})
 
 
-def _fmt_source(s, prev_links=None):
-    """One candidate rendered for a prompt: [outlet × N sources] Title — desc."""
+def _seen_age_label(value, now):
+    """Relative age ('3d ago', '5h ago', '12m ago') for a YYYYMMDDHHMMSS
+    cluster/GAL timestamp; None when absent or unparseable. This is the
+    signal that lets the model tell a story that broke inside the window
+    from an older one recirculating on a fresh crawl."""
+    try:
+        dt = datetime.strptime(str(int(value)), "%Y%m%d%H%M%S")
+    except (TypeError, ValueError):
+        return None
+    secs = (now - dt).total_seconds()
+    if secs < 0:
+        return "just now"
+    if secs < 3600:
+        return f"{max(1, int(secs // 60))}m ago"
+    if secs < 48 * 3600:
+        return f"{int(secs // 3600)}h ago"
+    return f"{int(secs // 86400)}d ago"
+
+
+def _fmt_source(s, prev_links=None, now=None):
+    """One candidate rendered for a prompt: [outlet × N sources] Title — desc.
+
+    The tag carries first/last-seen ages so both the editor and the writer
+    can see recirculation (an old event on a fresh crawl) instead of
+    treating every window hit as breaking news."""
+    now = now or datetime.utcnow()
     outlet = s.get("outlet") or "source"
     n = s.get("n_sources") or 1
     tag = f"{outlet} × {n} sources" if n > 1 else outlet
     if prev_links and s.get("link") not in prev_links:
         tag = f"NEW × {tag}"
+    first = _seen_age_label(s.get("first_seen"), now)
+    last = _seen_age_label(s.get("latest_seen"), now)
+    if first and last and first != last:
+        tag += f" × first seen {first}, last seen {last}"
+    elif last:
+        tag += f" × seen {last}"
     line = f"[{tag}] {s.get('title') or ''}"
     desc = (s.get("description") or "").strip()
     if desc:
@@ -361,7 +391,8 @@ def _select_events(candidates: list[dict], view_name: str, view_desc: str,
 
     for i, s in enumerate(candidates):
         s["n"] = i + 1
-    listing = "\n".join(f"{s['n']}. {_fmt_source(s)}" for s in candidates)
+    now = datetime.utcnow()
+    listing = "\n".join(f"{s['n']}. {_fmt_source(s, now=now)}" for s in candidates)
 
     thread_block = ""
     active = [t for t in (threads or []) if (t.get("status") or "active") == "active"]
@@ -378,7 +409,10 @@ def _select_events(candidates: list[dict], view_name: str, view_desc: str,
 
     prompt = (
         f"You are the editor of a news briefing, deciding what it should cover. "
-        f"{topic}The window is {_time_label(hours)}.\n\n"
+        f"{topic}The window is {_time_label(hours)}.\n"
+        f"CURRENT TIME: {now:%A, %B %d, %Y, %H:%M} UTC — the window ends at this moment. "
+        f"Each candidate shows when it was first and last seen; a candidate first seen "
+        f"before this window is an OLDER event recirculating on fresh coverage, not a new one.\n\n"
         f"{thread_block}"
         f"Below are {len(candidates)} candidate stories, de-duplicated into distinct events. "
         f"'× N sources' means N outlets carried it, which is a signal of reach but NOT of "
@@ -386,7 +420,8 @@ def _select_events(candidates: list[dict], view_name: str, view_desc: str,
         f"report can be the most consequential item here.\n\n"
         f"Choose about {BRIEFING_SELECT_TARGET} (between 8 and 12) for the briefing. Judge on:\n"
         f"- consequence: who is affected, what changes, what is at stake\n"
-        f"- newness: something happened, rather than a standing situation being described\n"
+        f"- newness: something happened IN THIS WINDOW, rather than a standing situation or an "
+        f"older event being recapped (check the first-seen age before crediting newness)\n"
         f"- advancing a tracked storyline listed above\n\n"
         f"Deliberately include AT LEAST ONE consequential but under-covered story — a "
         f"single-source or low-coverage item a reader would not have seen elsewhere. Do not "
@@ -417,6 +452,7 @@ def _select_events(candidates: list[dict], view_name: str, view_desc: str,
 
     by_n = {s["n"]: s for s in candidates}
     clean, chosen = [], []
+    seen_verdicts = set()  # models sometimes emit the same n twice — take the first
     for v in verdicts:
         if not isinstance(v, dict):
             continue
@@ -424,11 +460,12 @@ def _select_events(candidates: list[dict], view_name: str, view_desc: str,
             n = int(v.get("n"))
         except (TypeError, ValueError):
             continue
-        if n not in by_n:
+        if n not in by_n or n in seen_verdicts:
             continue
         verdict = v.get("verdict")
         if verdict not in ("chosen", "not_news", "passed"):
             continue
+        seen_verdicts.add(n)
         reason = (v.get("reason") or "").strip()[:120]
         clean.append({"n": n, "verdict": verdict, "reason": reason,
                       "title": (by_n[n].get("title") or "")[:110]})
@@ -520,8 +557,9 @@ def _build_briefing_prompt(sources: list[dict], view_name: str, view_desc: str,
     # a fresh 1..len(selected). sources_json persists all candidates in that
     # order and the client maps [N] -> sources[N-1], so renumbering here would
     # silently point every citation at the wrong story.
+    now = datetime.utcnow()
     numbered = "\n".join(
-        f"{s.get('n', i + 1)}. {_fmt_source(s, prev_links)}"
+        f"{s.get('n', i + 1)}. {_fmt_source(s, prev_links, now=now)}"
         + (f"\n   (selected: {s['editor_reason']})" if s.get("editor_reason") else "")
         for i, s in enumerate(sources)
     )
@@ -586,6 +624,12 @@ def _build_briefing_prompt(sources: list[dict], view_name: str, view_desc: str,
         f"COVERAGE DUTY: every story in the list below was chosen deliberately for this briefing, "
         f"and most carry a note explaining why. Cover all of them, even where one does not fit "
         f"the prior narrative.\n\n"
+        f"TIME ANCHORING: the current time is stated above; the window ends at that moment, and "
+        f"every 'seen' age below is relative to it. Convert relative datelines in story text "
+        f"('on Tuesday', 'yesterday') into concrete dates before writing. If a story's 'first "
+        f"seen' is older than the window, the underlying event is NOT new: say when it actually "
+        f"happened ('on Friday', 'three days ago') and describe only what has moved since. Never "
+        f"present an older event as just-happened.\n\n"
         # "No hedging" is what turned a wn.com headline's "Signals" into "has moved
         # to shut down the H-1B program" (09-27). Certainty now follows the source.
         f"Be specific and concrete. No filler. KEEP EACH STORY'S CERTAINTY: if a story describes a plan, "
@@ -610,6 +654,7 @@ def _build_briefing_prompt(sources: list[dict], view_name: str, view_desc: str,
         f"Below are {len(sources)} numbered news stories from {time_label}, drawn from "
         f"44,000+ global sources monitored in real-time and de-duplicated into distinct events "
         f"(a story covered by many outlets shows a 'N sources' count and is a single numbered item).\n"
+        f"CURRENT TIME: {now:%A, %B %d, %Y, %H:%M} UTC.\n"
         f"{provenance}"
         f"{topic_context}"
         f"{prev_block}"
@@ -875,6 +920,8 @@ def _fetch_briefing_events(view_id, hours):
                 "outlet": c.get("outlet_name") or c.get("source"),
                 "n_sources": c.get("n_sources", 1),
                 "link": c.get("event_url") or c.get("url"),
+                "first_seen": c.get("first_seen"),
+                "latest_seen": c.get("latest_seen"),
             })
     except Exception:
         events = []

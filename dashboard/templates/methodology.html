@@ -40,7 +40,7 @@
 <ol style="font-size:0.88rem; margin: 0 0 1rem 1.2rem;">
   <li>takes the window's top {{ candidate_limit or 40 }} distinct events by the Importance score (near-identical headlines collapsed first);</li>
   <li>has an editor model read all {{ candidate_limit or 40 }} and select about {{ event_limit or 10 }}, writing one line per choice and rejecting items that are not news (section indexes, job ads, listicles), with an explicit instruction to keep at least one consequential under-covered story;</li>
-  <li>builds the writer's prompt from the selected events, the editor's reasons, the titles the previous briefing covered, and any ongoing threads;</li>
+  <li>builds the writer's prompt from the selected events, the editor's reasons, the titles the previous briefing covered, and any ongoing threads — anchored by the current UTC time and each event's first- and last-seen ages, so the model can frame an older, recirculating story as continuing rather than breaking;</li>
   <li>sends it to <code>{{ model or 'gpt-oss-120b' }}</code> (Fireworks-hosted, via our self-hosted gateway) and caches the result per view/window — roughly {{ fresh_short_h or 3 }}h fresh at a 3-hour window, {{ fresh_long_h or 24 }}h at 30-day, with the timestamp shown under each briefing.</li>
 </ol>
 <p>Citations such as [3] are stitched to the numbered events by index; the model has no list beyond those, so a citation cannot point to an event it was not given. The ⓘ control on any briefing shows the model used, all {{ candidate_limit or 40 }} candidates, the editor's chosen and rejected lists with reasons, the continuity context, and the verbatim prompt. If the editor call fails, the briefing falls back to the top {{ event_limit or 10 }} by Importance and the panel marks the fallback.</p>
@@ -51,6 +51,7 @@
   <li>Input bias transfers: if Importance nominates the wrong {{ candidate_limit or 40 }} events, the briefing describes a selected subset of a wrong window.</li>
   <li>The editor judges from a headline and a one-line summary, not the full article; its own choices are published in the ⓘ panel for disagreement.</li>
   <li>Summaries are of headlines and descriptions only. Anything living below that level is invisible to the model.</li>
+  <li>A clustered story's description can come from an early article predating the event's latest turn, so day-level phrasing ("on Tuesday") can lag or misdate the development the headline describes; the first/last-seen ages and the event page are the check.</li>
   <li>Paraphrase shifts meaning at the edges (attribution, hedging, numbers); the [n] next to a claim is the check.</li>
   <li>Format varies between runs; text is normalized, wording isn't.</li>
 </ul>

@@ -655,6 +655,12 @@ def _build_briefing_prompt(sources: list[dict], view_name: str, view_desc: str,
         f"44,000+ global sources monitored in real-time and de-duplicated into distinct events "
         f"(a story covered by many outlets shows a 'N sources' count and is a single numbered item).\n"
         f"CURRENT TIME: {now:%A, %B %d, %Y, %H:%M} UTC.\n"
+        # 2026-10-19: without a named anchor, gpt-oss-120b twice attributed a
+        # Trump-administration story to the "Biden administration" when the
+        # source text named no president. Update on administration change.
+        f"WORLD ANCHOR: as of the date above, the sitting U.S. president is Donald Trump. "
+        f"Never attribute a story to an administration, president, or officeholder the "
+        f"source text does not name.\n"
         f"{provenance}"
         f"{topic_context}"
         f"{prev_block}"
@@ -862,15 +868,41 @@ def _cluster_meta(con, cids):
 
 
 def _rep_from_members(mjson):
-    """(outlet, description) from a cluster's denormalized members snapshot."""
+    """(outlet, description) from the cluster's NEWEST usable member.
+
+    Was members[0] — the append-ordered seed — so a cluster founded before an
+    event's latest turn kept describing it with pre-event text (2026-10-19:
+    52.7% of active clusters in the dev slice had a seed description >24h
+    stale; a Friday resignation was framed by its 4-day-old seed as 'briefing
+    on Tuesday'). The card/briefing title still comes from the quality-scored
+    rep; the description must reflect the latest coverage. Ranked by
+    crawled_at: GDELT's own seen time, always present and not outlet-fakeable
+    (scraper sites routinely forge published_at into the future). Clusters
+    past MEMBERS_CAP only snapshot their first 400 members, so 'newest' is
+    newest-within-snapshot there."""
     try:
         members = json.loads(mjson) if mjson else []
-        if members:
-            m = members[0]
-            return m.get("outlet"), (m.get("desc") or "")[:BRIEFING_DESC_CHARS]
     except Exception:
-        pass
-    return None, ""
+        members = []
+    best, best_when = None, -1
+    for m in members:
+        desc = (m.get("desc") or "").strip()
+        if len(desc) < 40 or not usable_title(m.get("title")):
+            continue
+        try:
+            when = int(m.get("crawled_at") or m.get("published_at") or 0)
+        except (TypeError, ValueError):
+            continue
+        if when > best_when:
+            best, best_when = m, when
+    if best is None:  # nothing passed the floor: first non-empty desc, as before
+        for m in members:
+            if (m.get("desc") or "").strip():
+                best = m
+                break
+    if best is None:
+        return None, ""
+    return best.get("outlet"), (best.get("desc") or "").strip()[:BRIEFING_DESC_CHARS]
 
 
 def _fetch_briefing_events(view_id, hours):

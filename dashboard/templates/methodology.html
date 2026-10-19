@@ -51,7 +51,7 @@
   <li>Input bias transfers: if Importance nominates the wrong {{ candidate_limit or 40 }} events, the briefing describes a selected subset of a wrong window.</li>
   <li>The editor judges from a headline and a one-line summary, not the full article; its own choices are published in the ⓘ panel for disagreement.</li>
   <li>Summaries are of headlines and descriptions only. Anything living below that level is invisible to the model.</li>
-  <li>A clustered story's description can come from an early article predating the event's latest turn, so day-level phrasing ("on Tuesday") can lag or misdate the development the headline describes; the first/last-seen ages and the event page are the check.</li>
+  <li>A clustered story's description comes from its newest usable member article, so it tracks the event's latest turn; for very large events (400+ articles) the snapshot caps at the first 400 members and the description can lag behind the very latest coverage.</li>
   <li>Paraphrase shifts meaning at the edges (attribution, hedging, numbers); the [n] next to a claim is the check.</li>
   <li>Format varies between runs; text is normalized, wording isn't.</li>
 </ul>

@@ -21,6 +21,56 @@ Newest first.
 
 ---
 
+## 2026-10-19 — World anchor for the briefing writer
+
+**What** — The writer prompt now states, directly under CURRENT TIME: "as of the
+date above, the sitting U.S. president is Donald Trump. Never attribute a story to
+an administration, president, or officeholder the source text does not name."
+**Why** — The first post-Layer-2 prod 24h briefing correctly framed the Zacharia
+resignation in time but STILL wrote "Biden administration's communications
+instability" (and an invented "citing personal reasons"): when source text names no
+president, gpt-oss-120b fills the gap from stale priors. This was the second such
+attribution in one day; the generic "add no names the text does not contain" rule
+did not stop it.
+**How it was verified** — Dev (:8016) regenerated clean; prod force-regenerated
+(authorized POST) 3h/24h after deploy: the 24h Zacharia bullet now reads "adds
+further instability to the Trump administration's communications operation"; both
+briefings free of "Biden administration", "(Duplicate)", "slated for Tuesday",
+"personal reasons". Smoke 20/20.
+**Files** — dashboard/briefing.py.
+**Notes** — Hard-coded officeholder, deliberately: an explicit dated anchor beats a
+prohibition for this model class. UPDATE ON ADMINISTRATION CHANGE (comment in code
+says the same).
+
+## 2026-10-19 — Cluster descriptions from the newest member, not the seed
+
+**What** — `_rep_from_members` now takes (outlet, description) from the cluster's
+newest usable member (≥40-char description, usable title), ranked by crawled_at,
+instead of members[0] — the append-ordered seed. Cluster titles still come from the
+quality-scored representative. Feed cards and briefing sources share this path, so
+both now reflect an event's latest coverage.
+**Why** — Layer 1 (same date) gave briefings a clock; the text they read was still
+stale. The Zacharia cluster (seeded Oct 12, pre-briefing) kept describing the Friday
+resignation as "set to take the podium Tuesday", and the writer dutifully misdated
+it. Measured on the dev slice: 52.7% of active clusters (975/1849) had a seed
+description >24h older than the cluster's latest_seen. Ranked by crawled_at, not
+published_at: scraper sites forge published_at into the future, crawled_at is
+GDELT's own seen time.
+**How it was verified** — Dev (:8016): the Zacharia card now reads "resigned on
+Friday after just five days on the job… debut last Tuesday" (was: pre-briefing seed
+text); the regenerated 24h briefing frames the resignation retrospectively with no
+day-level misdating; top-50 168h feed eyeball shows no junk newest-picks (all-junk
+clusters fall back to the old members[0] shape, unchanged). Unit checks covered
+stale-seed, forged-future published_at, all-junk fallback, empty/garbage JSON, and
+220-char truncation.
+**Files** — dashboard/briefing.py, dashboard/templates/methodology.html.
+**Notes** — MEMBERS_CAP residual: clusters with >400 members snapshot only their
+first 400, so "newest" is newest-within-snapshot for mega-clusters. rep_url/title
+deliberately unchanged (quality/authority-scored, stable canonical link) — making
+the click-through track the latest article is a separate product decision.
+
+## 2026-10-19 — Temporal grounding for AI briefings (current time + story ages)
+
 ## 2026-10-19 — Temporal grounding for AI briefings (current time + story ages)
 
 **What** — The briefing editor and writer prompts now state the current UTC time, and

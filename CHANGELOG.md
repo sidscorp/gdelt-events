@@ -21,6 +21,27 @@ Newest first.
 
 ---
 
+## 2026-10-30 — Surface Bluesky API error bodies in social publisher
+
+**What** — `_json_request` in pipeline/social_publisher.py now re-raises HTTPError
+with the response body (first 500 chars) appended to the message, so failures
+landing in social_runs.error_message, social_publications.error_message and
+social_publisher.log carry the API's actual reason instead of bare "HTTP Error 400".
+**Why** — The first two human-approved review candidates (2026-10-29 ~20:11 UTC)
+failed to publish: createRecord returned HTTP 400 twenty times over five hours
+until the candidate expired, and only the bare status string was recorded. Per
+Bluesky docs the 400 message names the offending field; we were discarding it.
+Ruled out beforehand: credentials/session, account status (active, bot label set),
+clock skew, record schema (validated against the official atproto SDK with and
+without the thumb blob), text length, facet byte offsets.
+**How it was verified** — py_compile + `--dry-run` on rainbow-boi; the real error
+body will be captured by the next approved-candidate publish attempt.
+**Files** — pipeline/social_publisher.py.
+**Notes** — Diagnostic-only; success path unchanged. The 409 duplicate branch in
+publish_candidate is unaffected (the re-raised HTTPError keeps `.code`).
+
+---
+
 ## 2026-10-19 — World anchor for the briefing writer
 
 **What** — The writer prompt now states, directly under CURRENT TIME: "as of the

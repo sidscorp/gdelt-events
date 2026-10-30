@@ -224,8 +224,15 @@ def _json_request(url: str, payload: dict, *, token: str | None = None,
     req = urllib.request.Request(
         url, data=json.dumps(payload, ensure_ascii=False).encode("utf-8"), headers=headers
     )
-    with urllib.request.urlopen(req, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8", "replace"))
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8", "replace"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", "replace")[:500]
+        raise urllib.error.HTTPError(
+            exc.url, exc.code, f"{exc.msg}; response body: {body}",
+            exc.headers, None,
+        ) from None
 
 
 def _gateway_call(prompt: str, max_tokens: int = 1200) -> str:

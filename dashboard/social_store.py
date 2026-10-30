@@ -176,6 +176,21 @@ def list_shadow() -> dict:
     return {r["cluster_id"]: dict(r) for r in rows}
 
 
+def list_pending_notify() -> list[dict]:
+    """Pending candidates with shadow verdicts, for the beardy notify poller."""
+    con = get_social_db()
+    rows = con.execute(
+        "SELECT c.cluster_id, c.topic_name, c.title, c.source_count, "
+        "c.coverage_span_hours, c.importance_score, c.explanation, c.event_url, "
+        "c.expires_at, s.decision AS shadow_decision, s.reason AS shadow_reason "
+        "FROM social_candidates c "
+        "LEFT JOIN social_shadow s USING(cluster_id) "
+        "WHERE c.status='pending' ORDER BY c.importance_score DESC"
+    ).fetchall()
+    con.close()
+    return [dict(r) for r in rows]
+
+
 def setting(key: str, default: str | None = None) -> str | None:
     con = get_social_db()
     row = con.execute("SELECT value FROM social_settings WHERE key=?", (key,)).fetchone()

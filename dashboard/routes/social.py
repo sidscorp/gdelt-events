@@ -1,5 +1,6 @@
 """Admin-only review and health surface for social publishing."""
 
+import hmac
 import json
 import os
 
@@ -8,8 +9,8 @@ from flask_login import current_user, login_required
 
 from _paths import DATA_DIR
 from social_store import (
-    init_social_db, list_candidates, list_shadow, review_candidate, set_mode,
-    status_summary,
+    init_social_db, list_candidates, list_pending_notify, list_shadow,
+    review_candidate, set_mode, status_summary,
 )
 
 
@@ -85,6 +86,22 @@ def social_mode():
     ok, message = set_mode((request.form.get("mode") or "").strip())
     flash(f"Social mode: {message}" if ok else message, "success" if ok else "error")
     return redirect(url_for("social.social_admin"))
+
+
+@bp.route("/api/social/pending")
+def social_pending():
+    """Machine-readable pending queue for the beardy notify poller.
+
+    Token-gated (data/.social_notify_token, X-GDELT-Social-Token header) rather
+    than session auth — this is called by a timer on snambiar-linux, not a browser.
+    """
+    token_file = DATA_DIR / ".social_notify_token"
+    expected = token_file.read_text(encoding="utf-8").strip() if token_file.exists() else ""
+    provided = request.headers.get("X-GDELT-Social-Token", "")
+    if not expected or not hmac.compare_digest(expected, provided):
+        return jsonify({"error": "forbidden"}), 403
+    init_social_db()
+    return jsonify({"candidates": list_pending_notify()})
 
 
 @bp.route("/api/social/status")

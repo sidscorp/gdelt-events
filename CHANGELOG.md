@@ -21,6 +21,25 @@ Newest first.
 
 ---
 
+## 2026-10-30 — Token-gated /api/social/pending for beardy notifications
+
+**What** — New read-only endpoint returns pending review candidates with their
+shadow verdicts. Auth is a shared token (data/.social_notify_token,
+X-GDELT-Social-Token header), not a login session — the caller is a systemd
+timer on snambiar-linux that drops new candidates into beardy's inbox so Sidd
+gets a Matrix DM when something needs review.
+**Why** — Review candidates expire 6h after queueing; without a notification
+they died unreviewed (66 of 69 did). Calibration needs decisions, and decisions
+need Sidd to know a candidate exists.
+**How it was verified** — curl without token → 403; with token → JSON candidate
+list; end-to-end DM verified via beardy.
+**Files** — dashboard/routes/social.py, dashboard/social_store.py.
+**Notes** — Token also lives in ~/.config/gdelt-social-notify.env on
+snambiar-linux (chmod 600). Endpoint is exposed via Cloudflare like the rest of
+the dashboard; the token is the only gate, so rotate if it leaks.
+
+---
+
 ## 2026-10-30 — Shadow auto-approver for Bluesky candidates
 
 **What** — Every newly queued candidate now also gets a shadow verdict: one

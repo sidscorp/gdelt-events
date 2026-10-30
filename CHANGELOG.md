@@ -21,6 +21,22 @@ Newest first.
 
 ---
 
+## 2026-10-30 — Hide expired cards on the social review page
+
+**What** — `/admin/social` no longer renders expired candidates by default; a
+"N expired hidden · show" line toggles them via `?expired=1`. list_candidates
+gains an `include_expired` flag (default False; its only caller is the admin
+route).
+**Why** — With 6-hour expiry the queue was 69 expired cards deep and the one
+actionable pending card was buried; the noise also made approved-but-expired
+items look published.
+**How it was verified** — Jinja parse + py_compile locally (page needs admin
+auth, so no HTTP render test); prod restart healthy after deploy.
+**Files** — dashboard/social_store.py, dashboard/routes/social.py,
+dashboard/templates/social_admin.html.
+
+---
+
 ## 2026-10-30 — Tip jar link above the fold + on event pages
 
 **What** — "Tip jar" added to the dashboard header nav (next to Methodology, so

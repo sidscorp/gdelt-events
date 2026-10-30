@@ -61,6 +61,11 @@
 
   <section class="queue">
     <h2>Candidate queue</h2>
+    {% if show_expired %}
+      <p class="empty">Showing expired candidates · <a href="/admin/social">hide expired</a></p>
+    {% elif expired_count %}
+      <p class="empty">{{ expired_count }} expired hidden · <a href="/admin/social?expired=1">show</a></p>
+    {% endif %}
     {% if not candidates %}<p class="empty">No candidates yet. The worker will add fresh multi-source events.</p>{% endif %}
     {% for c in candidates %}
     <article class="candidate candidate-{{ c.status }}">

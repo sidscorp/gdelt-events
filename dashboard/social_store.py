@@ -187,10 +187,11 @@ def upsert_candidate(candidate: dict) -> bool:
     return inserted
 
 
-def list_candidates(limit: int = 100) -> list[dict]:
+def list_candidates(limit: int = 100, include_expired: bool = False) -> list[dict]:
     con = get_social_db()
+    where = "" if include_expired else "WHERE status != 'expired' "
     rows = con.execute(
-        "SELECT * FROM social_candidates ORDER BY "
+        f"SELECT * FROM social_candidates {where}ORDER BY "
         "CASE status WHEN 'pending' THEN 0 WHEN 'approved' THEN 1 "
         "WHEN 'publishing' THEN 2 ELSE 3 END, created_at DESC LIMIT ?",
         (int(limit),),

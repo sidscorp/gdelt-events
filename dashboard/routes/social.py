@@ -38,8 +38,9 @@ def social_admin():
     if not _admin_only():
         return redirect(url_for("pages.index"))
     init_social_db()
-    candidates = [_decorate(c) for c in list_candidates(120)]
     summary = status_summary()
+    show_expired = request.args.get("expired") == "1"
+    candidates = [_decorate(c) for c in list_candidates(120, include_expired=show_expired)]
     credentials_ready = bool(
         (os.environ.get("BLUESKY_HANDLE") and os.environ.get("BLUESKY_APP_PASSWORD"))
         or (DATA_DIR / ".bluesky_bot").exists()
@@ -51,6 +52,8 @@ def social_admin():
     return render_template(
         "social_admin.html", candidates=candidates, summary=summary,
         credentials_ready=credentials_ready, gateway_ready=gateway_ready,
+        show_expired=show_expired,
+        expired_count=summary["counts"].get("expired", 0),
     )
 
 

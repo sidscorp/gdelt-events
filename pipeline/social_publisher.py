@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import logging.handlers
@@ -514,9 +515,28 @@ def _link_facet(text: str, url: str) -> dict:
     }
 
 
-def _record_key(cluster_id: str) -> str:
-    safe = re.sub(r"[^a-zA-Z0-9._~-]", "-", cluster_id)
-    return f"evt-{safe}"[:120]
+_TID_ALPHABET = "234567abcdefghijklmnopqrstuvwxyz"
+
+
+def _tid_for(cluster_id: str, created_at: str) -> str:
+    """Deterministic atproto TID rkey for a candidate.
+
+    bsky.social rejects non-TID record keys on app.bsky.feed.post
+    ("Invalid TID string format"). Deriving the TID from the candidate's
+    created_at plus a hash of the cluster id keeps it stable across
+    retries, so a retry after a lost response hits the 409 branch
+    instead of posting a duplicate.
+    """
+    try:
+        dt = datetime.strptime(created_at, "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+        micros = int(dt.timestamp() * 1_000_000)
+    except (TypeError, ValueError):
+        micros = int(time.time() * 1_000_000)
+    clock_id = int.from_bytes(
+        hashlib.sha256(cluster_id.encode("utf-8")).digest()[:2], "big"
+    ) & 0x3FF
+    value = (micros << 10) | clock_id
+    return "".join(_TID_ALPHABET[(value >> shift) & 0x1F] for shift in range(60, -1, -5))
 
 
 def publish_candidate(candidate: dict) -> tuple[str, str | None]:
@@ -528,7 +548,7 @@ def publish_candidate(candidate: dict) -> tuple[str, str | None]:
     session = _bsky_session(creds)
     access = session["accessJwt"]
     did = session["did"]
-    rkey = _record_key(candidate["cluster_id"])
+    rkey = _tid_for(candidate["cluster_id"], candidate.get("created_at") or "")
     mark_publishing(candidate, rkey, post_text)
 
     external = {

@@ -21,6 +21,27 @@ Newest first.
 
 ---
 
+## 2026-10-30 — TID record keys for Bluesky posts (fixes publish 400s)
+
+**What** — publish_candidate now derives a deterministic atproto TID rkey
+(`_tid_for`: microsecond timestamp from the candidate's created_at, low 10 bits
+from sha256 of the cluster id) instead of the custom `evt-<clusterid>` key.
+**Why** — Every publish attempt since credentials were configured failed at
+createRecord with HTTP 400; with response bodies now logged (previous entry) the
+real reason surfaced: `Invalid record key for app.bsky.feed.post: Invalid TID
+string format` — bsky.social enforces TID-format record keys on feed posts. The
+TID is deterministic per candidate so a retry after a lost response still hits
+the 409 getRecord branch rather than posting a duplicate.
+**How it was verified** — TID output validated against the official atproto SDK
+TID regex (13 chars, base32-sortable alphabet, leading-char range), determinism
+and per-cluster uniqueness checked locally; py_compile + live task run on
+rainbow-boi, which published the approved Binance candidate.
+**Files** — pipeline/social_publisher.py.
+**Notes** — social_publications rows created before this fix keep the old
+`evt-*` record_key; it is local bookkeeping only and never sent to Bluesky.
+
+---
+
 ## 2026-10-30 — Surface Bluesky API error bodies in social publisher
 
 **What** — `_json_request` in pipeline/social_publisher.py now re-raises HTTPError

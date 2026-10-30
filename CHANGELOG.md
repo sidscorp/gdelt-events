@@ -21,6 +21,25 @@ Newest first.
 
 ---
 
+## 2026-10-30 — Ko-fi tip jar links on the site
+
+**What** — The dashboard footer gains a "tip jar" link to
+https://ko-fi.com/gdeltmonitor, and the About page gains a short "Support it"
+section between "Built by" and "Leave a note". sw.js cache bumped to
+gdelt-shell-v35 so installed PWAs pick up the new shell.
+**Why** — Traffic analysis (cf-analytics + pageview_log) showed ads are not
+viable at ~60 real humans/day but a tip jar is; the Ko-fi page is now set up
+(PayPal connected, coffee metaphor, $2 min, tips fund server + model costs).
+Copy deliberately does NOT promise ad-free — that decision is not final.
+**How it was verified** — After restart: curl of / and /about returns 200 with
+the ko-fi.com/gdeltmonitor link present; smoke suite re-run.
+**Files** — dashboard/templates/index.html, dashboard/templates/about.html,
+dashboard/static/sw.js.
+**Notes** — Bluesky profile bio should also get the Ko-fi URL (Sidd edits that
+himself; account is his).
+
+---
+
 ## 2026-10-30 — TID record keys for Bluesky posts (fixes publish 400s)
 
 **What** — publish_candidate now derives a deterministic atproto TID rkey

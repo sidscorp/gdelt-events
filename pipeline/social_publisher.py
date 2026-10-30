@@ -35,10 +35,11 @@ sys.path.insert(0, str(REPO / "dashboard"))
 
 from importance import compute_importance  # noqa: E402
 from social_store import (  # noqa: E402
-    begin_run, count_created_today, expire_stale, finish_run, get_social_db,
-    init_social_db, mark_publish_error, mark_published, mark_publishing,
-    next_approved, publication_counts, recent_titles, set_setting, setting,
-    upsert_candidate, update_post_text,
+    begin_run, count_created_today, count_shadow_today, expire_stale, finish_run,
+    get_social_db, init_social_db, mark_publish_error, mark_published,
+    mark_publishing, next_approved, publication_counts, recent_titles,
+    record_shadow, set_setting, setting, shadow_done, upsert_candidate,
+    update_post_text,
 )
 from webutil import usable_title  # noqa: E402
 
@@ -86,6 +87,10 @@ MAX_TOPIC_POSTS_24H = 2
 MIN_POST_GAP_MIN = 90
 POST_LIMIT = 300
 EXPLANATION_LIMIT = 150
+SHADOW_DAILY_CAP = 30  # hard cost guard; real volume is <= MAX_QUEUE_PER_DAY
+SEARCH_URL = os.environ.get(
+    "GDELT_SOCIAL_SEARCH_URL", "http://100.121.22.84:8889/search"
+)
 LOCK_FILE = DATA_DIR / ".social_publisher.lock"
 SECRETS_FILE = DATA_DIR / ".bluesky_bot"
 GATEWAY_KEY_FILE = DATA_DIR / ".social_gateway_key"
@@ -348,6 +353,56 @@ def grounded_explanation(candidate: dict) -> tuple[str, str, dict]:
         return fallback, "facts", {"supported": False, "reason": str(exc)[:200]}
 
 
+def _web_search(query: str, n: int = 5) -> list[dict]:
+    """Self-hosted SearXNG (snambiar-linux); free, no key. Empty list on failure."""
+    try:
+        url = SEARCH_URL + "?" + urllib.parse.urlencode({"q": query, "format": "json"})
+        with urllib.request.urlopen(url, timeout=15) as response:
+            results = json.loads(response.read().decode("utf-8", "replace")).get("results") or []
+        return [
+            {"title": (r.get("title") or "")[:120], "content": (r.get("content") or "")[:250]}
+            for r in results[:n]
+        ]
+    except Exception as exc:
+        LOG.warning("shadow web search failed: %s", exc)
+        return []
+
+
+def shadow_verdict(candidate: dict) -> dict:
+    """Shadow auto-approver: one search + one LLM call, ~$0.0003. Logs what an
+    auto mode WOULD do with this candidate so it can be compared against human
+    review before auto is ever enabled. Never touches candidate status."""
+    source_text, _ = _source_lines(candidate["members"][:6])
+    hits = _web_search(re.sub(r"\s+", " ", candidate["title"]).strip())
+    web_text = "\n".join(
+        f"{i}. {h['title']} — {h['content']}" for i, h in enumerate(hits, 1)
+    ) or "none available"
+    prompt = (
+        "You are the pre-publication checker for an automated breaking-news account.\n\n"
+        f"CANDIDATE HEADLINE: {candidate['title']}\n"
+        f"PROPOSED POST SENTENCE: {candidate.get('explanation') or candidate['title']}\n\n"
+        f"GDELT SOURCE SNIPPETS:\n{source_text}\n\n"
+        f"INDEPENDENT WEB RESULTS:\n{web_text}\n\n"
+        "Checks:\n"
+        "1. CORROBORATED: sources and web results describe the same event the post "
+        "sentence states. Fail if the event looks fabricated, badly dated, or about a "
+        "different subject. If web results are absent, judge from the GDELT snippets "
+        "alone and say so in the reason.\n"
+        "2. NOT OVERSTATED: the post sentence must not assert as settled fact anything "
+        "the evidence only alleges, links, estimates, or expects. Attribution "
+        "('blamed on', 'linked to') must stay attributed.\n"
+        "3. RELEVANT: a genuine, current, multi-source event worth a public signal.\n\n"
+        'Output ONLY JSON: {"post": true|false, "reason": "<15 words>"}\n'
+        "post=true only if all three checks pass."
+    )
+    verdict = _json_object(_gateway_call(prompt, max_tokens=400))
+    return {
+        "post": verdict.get("post") is True,
+        "reason": str(verdict.get("reason") or "")[:200],
+        "search_hits": len(hits),
+    }
+
+
 def _connect_news_db():
     con = duckdb.connect(str(DB_PATH), read_only=True)
     try:
@@ -466,6 +521,20 @@ def queue_candidates(dry_run: bool = False) -> tuple[int, int]:
             LOG.info("dry-run candidate %s: %s", candidate["cluster_id"], candidate["post_text"])
             queued += 1
             continue
+        if not shadow_done(candidate["cluster_id"]) and count_shadow_today() < SHADOW_DAILY_CAP:
+            try:
+                verdict = shadow_verdict(candidate)
+                record_shadow(
+                    candidate["cluster_id"],
+                    "would_post" if verdict["post"] else "would_block",
+                    verdict["reason"], verdict["search_hits"], SOCIAL_MODEL,
+                )
+                LOG.info("shadow %s: %s (%s)",
+                         candidate["cluster_id"],
+                         "would_post" if verdict["post"] else "would_block",
+                         verdict["reason"])
+            except Exception as exc:
+                LOG.warning("shadow verdict failed for %s: %s", candidate["cluster_id"], exc)
         if upsert_candidate(candidate):
             queued += 1
             old_titles.append((candidate["cluster_id"], candidate["title_key"]))

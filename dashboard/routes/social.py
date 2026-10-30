@@ -8,7 +8,8 @@ from flask_login import current_user, login_required
 
 from _paths import DATA_DIR
 from social_store import (
-    init_social_db, list_candidates, review_candidate, set_mode, status_summary,
+    init_social_db, list_candidates, list_shadow, review_candidate, set_mode,
+    status_summary,
 )
 
 
@@ -40,7 +41,11 @@ def social_admin():
     init_social_db()
     summary = status_summary()
     show_expired = request.args.get("expired") == "1"
-    candidates = [_decorate(c) for c in list_candidates(120, include_expired=show_expired)]
+    shadow = list_shadow()
+    candidates = [
+        _decorate(c) | {"shadow": shadow.get(c["cluster_id"])}
+        for c in list_candidates(120, include_expired=show_expired)
+    ]
     credentials_ready = bool(
         (os.environ.get("BLUESKY_HANDLE") and os.environ.get("BLUESKY_APP_PASSWORD"))
         or (DATA_DIR / ".bluesky_bot").exists()

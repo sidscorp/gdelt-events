@@ -109,6 +109,15 @@ def init_social_db() -> None:
             visits     INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY(day, cluster_id, source)
         );
+
+        CREATE TABLE IF NOT EXISTS social_shadow (
+            cluster_id  TEXT PRIMARY KEY REFERENCES social_candidates(cluster_id),
+            decision    TEXT NOT NULL,
+            reason      TEXT NOT NULL DEFAULT '',
+            search_hits INTEGER NOT NULL DEFAULT 0,
+            model       TEXT NOT NULL DEFAULT '',
+            created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+        );
         """
     )
     cols = {r[1] for r in con.execute("PRAGMA table_info(social_candidates)").fetchall()}
@@ -126,6 +135,45 @@ def init_social_db() -> None:
 
 def _row_dict(row):
     return dict(row) if row is not None else None
+
+
+def record_shadow(cluster_id: str, decision: str, reason: str,
+                  search_hits: int, model: str) -> None:
+    con = get_social_db()
+    con.execute(
+        "INSERT OR IGNORE INTO social_shadow(cluster_id, decision, reason, search_hits, model) "
+        "VALUES (?, ?, ?, ?, ?)",
+        (cluster_id, decision, (reason or "")[:500], int(search_hits), model),
+    )
+    con.commit()
+    con.close()
+
+
+def shadow_done(cluster_id: str) -> bool:
+    con = get_social_db()
+    row = con.execute(
+        "SELECT 1 FROM social_shadow WHERE cluster_id=?", (cluster_id,)
+    ).fetchone()
+    con.close()
+    return row is not None
+
+
+def count_shadow_today() -> int:
+    con = get_social_db()
+    n = con.execute(
+        "SELECT count(*) FROM social_shadow WHERE created_at >= date('now')"
+    ).fetchone()[0]
+    con.close()
+    return int(n or 0)
+
+
+def list_shadow() -> dict:
+    con = get_social_db()
+    rows = con.execute(
+        "SELECT cluster_id, decision, reason, search_hits, created_at FROM social_shadow"
+    ).fetchall()
+    con.close()
+    return {r["cluster_id"]: dict(r) for r in rows}
 
 
 def setting(key: str, default: str | None = None) -> str | None:

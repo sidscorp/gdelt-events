@@ -82,6 +82,12 @@
         {{ 'Grounded explainer' if c.explanation_kind == 'generated' else 'Factual fallback' }}:
         {{ c.grounding.get('reason', 'no reason recorded') }}
       </p>
+      {% if c.shadow %}
+      <p class="grounding {{ 'pass' if c.shadow.decision == 'would_post' else 'fallback' }}">
+        Shadow auto-check: {{ c.shadow.decision }} — {{ c.shadow.reason }}
+        {% if not c.shadow.search_hits %}(no web results){% endif %}
+      </p>
+      {% endif %}
       <details>
         <summary>Inspect {{ c.members|length }} stored source variants</summary>
         <ol class="sources">

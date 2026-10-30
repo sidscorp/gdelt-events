@@ -21,6 +21,31 @@ Newest first.
 
 ---
 
+## 2026-10-30 — Shadow auto-approver for Bluesky candidates
+
+**What** — Every newly queued candidate now also gets a shadow verdict: one
+self-hosted SearXNG query (snambiar-linux:8889, free) + one LLM call judging
+corroboration, overstatement (attribution must stay attributed — the Binance
+lesson), and relevance. The verdict (would_post/would_block + reason) is stored
+in the new social_shadow table and shown on the review card. It NEVER changes
+candidate status; human review continues unchanged.
+**Why** — Sidd wants auto-posting without the daily review chore. Rather than
+bypassing the 50-decision calibration gate, the shadow approver accumulates
+paired decisions against human review; auto gets flipped only once agreement is
+~90%+ with zero shadow-approves that a human rejected.
+**How it was verified** — Jinja parse + py_compile; live shadow_verdict() test
+on rainbow-boi against a real candidate (search hits + verdict recorded);
+shadow rows populate on the next queued candidate.
+**Files** — pipeline/social_publisher.py, dashboard/social_store.py,
+dashboard/routes/social.py, dashboard/templates/social_admin.html.
+**Notes** — Cost: ~1.8k in / <100 out tokens per verdict on gpt-oss-120b ≈
+$0.0003, one verdict per candidate ever (INSERT OR IGNORE), hard cap 30/day
+(real max 10). ≈ $0.003/day ≈ $0.10/mo — inside the "few pennies" budget and
+the gdelt-social key's $5/30d cap. The publisher keeps running (shadow failure
+is logged, non-fatal) if SearXNG or the gateway is down.
+
+---
+
 ## 2026-10-30 — Hide expired cards on the social review page
 
 **What** — `/admin/social` no longer renders expired candidates by default; a

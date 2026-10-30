@@ -21,6 +21,20 @@ Newest first.
 
 ---
 
+## 2026-10-30 — Tip jar link above the fold + on event pages
+
+**What** — "Tip jar" added to the dashboard header nav (next to Methodology, so
+it is above the fold on every feed view) and a muted tip line at the bottom of
+/event/<id> pages, which are the landing pages for Bluesky bot traffic.
+**Why** — The first placement was footer-only, and the footer is effectively
+invisible on a long feed page; the permalink pages had no link at all despite
+being the social-traffic entry point.
+**How it was verified** — After restart: / returns 200 with the nav link,
+/event/c90040a4e02de8e2 returns 200 with the tip line.
+**Files** — dashboard/templates/index.html, dashboard/templates/event_detail.html.
+
+---
+
 ## 2026-10-30 — Ko-fi tip jar links on the site
 
 **What** — The dashboard footer gains a "tip jar" link to

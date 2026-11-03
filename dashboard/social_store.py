@@ -27,7 +27,7 @@ def get_social_db() -> sqlite3.Connection:
     con.row_factory = sqlite3.Row
     con.execute("PRAGMA journal_mode=WAL")
     con.execute("PRAGMA foreign_keys=ON")
-    con.execute("PRAGMA busy_timeout=15000")
+    con.execute("PRAGMA busy_timeout=60000")
     return con
 
 

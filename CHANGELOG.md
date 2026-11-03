@@ -21,6 +21,28 @@ Newest first.
 
 ---
 
+## 2026-11-03 — Harden social.db writes against lock contention
+
+**What** — Three small fixes: busy_timeout 15s → 60s in get_social_db;
+/api/social/pending no longer runs init_social_db() on every 5-min poller hit
+(per-request schema DDL write txns); the shadow verdict is recorded AFTER
+upsert_candidate instead of before.
+**Why** — Since ~Oct 31 every publisher queue attempt died at upsert with
+"database is locked" (>15s), and record_shadow then failed on its FK because
+the candidate row never landed — so zero new review candidates for 2.5 days.
+The lock holder is unidentified but NOT the dashboard (isolation test); the
+fixes remove our own contribution (poller DDL), ride out longer holds, and
+make the shadow ordering correct under failure. Also found: a stale dashboard
+instance from Oct 31 01:30 had been serving for 3 days (restarted clean), and
+GDELT-SocialPublisher reports LastTaskResult 0 even when the script exits 1 —
+the failure channel is silent by construction.
+**How it was verified** — Manual publisher run after deploy queues a real
+candidate without lock errors.
+**Files** — dashboard/social_store.py, dashboard/routes/social.py,
+pipeline/social_publisher.py.
+
+---
+
 ## 2026-10-30 — Token-gated /api/social/pending for beardy notifications
 
 **What** — New read-only endpoint returns pending review candidates with their

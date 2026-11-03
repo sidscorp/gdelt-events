@@ -100,7 +100,9 @@ def social_pending():
     provided = request.headers.get("X-GDELT-Social-Token", "")
     if not expected or not hmac.compare_digest(expected, provided):
         return jsonify({"error": "forbidden"}), 403
-    init_social_db()
+    # NOTE: deliberately no init_social_db() here — the poller hits this every
+    # 5 min, and per-request schema DDL write txns collided with the
+    # publisher's write bursts ("database is locked" at upsert, 2026-11-03).
     return jsonify({"candidates": list_pending_notify()})
 
 

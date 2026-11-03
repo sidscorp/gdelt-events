@@ -521,6 +521,12 @@ def queue_candidates(dry_run: bool = False) -> tuple[int, int]:
             LOG.info("dry-run candidate %s: %s", candidate["cluster_id"], candidate["post_text"])
             queued += 1
             continue
+        if upsert_candidate(candidate):
+            queued += 1
+            old_titles.append((candidate["cluster_id"], candidate["title_key"]))
+        # Shadow AFTER upsert: record_shadow has an FK to social_candidates, so
+        # recording it before the row exists fails (seen 2026-11-03 when upsert
+        # was losing to lock contention). If upsert raises, we never get here.
         if not shadow_done(candidate["cluster_id"]) and count_shadow_today() < SHADOW_DAILY_CAP:
             try:
                 verdict = shadow_verdict(candidate)
@@ -535,9 +541,6 @@ def queue_candidates(dry_run: bool = False) -> tuple[int, int]:
                          verdict["reason"])
             except Exception as exc:
                 LOG.warning("shadow verdict failed for %s: %s", candidate["cluster_id"], exc)
-        if upsert_candidate(candidate):
-            queued += 1
-            old_titles.append((candidate["cluster_id"], candidate["title_key"]))
     return len(candidates), queued
 
 

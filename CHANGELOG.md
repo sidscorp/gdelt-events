@@ -17,7 +17,21 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
-Newest first.
+## 2026-11-04 — Expand Bluesky pilot from 4 to 9 topics
+
+**What** — PILOT_TOPICS gains geopolitics_conflict, energy_climate,
+ai_regulation, semiconductors, ai_general (Sidd picked all five offered).
+**Why** — Posting volume was ~1/day because the 4-topic filter was the binding
+constraint: the excluded topics are the site's highest-volume categories
+(3-day article_tags: geopolitics 1,084, energy_climate 1,107, ai_general 1,184
+vs cyber_attacks 917, public_health 494). MIN_SOURCES=3 and the 6h/24h
+freshness windows stay — freshness and multi-source are the product. Publish
+caps (5/day, 2/topic/day, 90-min gap) unchanged, so output stays bounded;
+review burden is the real cost and the shadow verdict is the skim aid.
+**How it was verified** — dry-run scan after deploy shows the wider yield.
+**Files** — pipeline/social_publisher.py.
+**Notes** — Calibration (--calibrate) now needs a 90%-precision rule for EACH
+of 9 topics, so auto mode is further off; fine, that's the point of the gate.
 
 ---
 

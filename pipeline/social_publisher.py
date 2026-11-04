@@ -69,6 +69,11 @@ PILOT_TOPICS = {
     "supply_chain": ("supply-chain-alerts", "Supply Chain"),
     "fda_agency": ("fda-agency", "FDA"),
     "public_health": ("public-health", "Public Health"),
+    "geopolitics_conflict": ("geopolitics", "Geopolitics"),
+    "energy_climate": ("energy-climate", "Energy & Climate"),
+    "ai_regulation": ("ai-regulation", "AI Policy"),
+    "semiconductors": ("semiconductors", "Semiconductors"),
+    "ai_general": ("ai-general", "AI"),
 }
 TOPIC_ORDER = {cat: i for i, cat in enumerate(PILOT_TOPICS)}
 

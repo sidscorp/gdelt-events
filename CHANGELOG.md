@@ -17,6 +17,23 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-05 — Approved candidates publish past review expiry (24h horizon)
+
+**What** — `next_approved()` and `expire_stale()` now treat expires_at as a
+REVIEW deadline only: approved candidates stay publishable for 24h after the
+review decision (auto-approved rows: 24h from creation). Expired-approved
+rows still age out, just on the longer horizon.
+**Why** — The 2-per-topic-per-day cap delayed a same-topic approved batch past
+the 6h review expiry and `next_approved()` filtered `expires_at > now`, so
+approvals silently died unpublished — 2 of the first 7 approvals lost,
+including the 2026-11-05 oil-prices item that prompted this fix.
+**How it was verified** — Simulated-now query against the live DB: the
+oil-prices row is selected by the new clause and dropped by the old one after
+its expiry; pending expiry semantics unchanged.
+**Files** — dashboard/social_store.py.
+
+---
+
 ## 2026-11-05 — Grounded card titles for social posts
 
 **What** — The Bluesky link-card title is now drafted in the SAME gateway call

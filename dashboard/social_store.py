@@ -346,9 +346,15 @@ def update_post_text(cluster_id: str, post_text: str) -> None:
 
 def expire_stale() -> int:
     con = get_social_db()
+    # Review expiry (expires_at) governs REVIEW only: once approved, a
+    # candidate stays publishable for 24h after the review decision, so a
+    # same-topic batch delayed by the daily topic cap is not silently dropped
+    # (lost 2 of 7 approvals, 2026-11-05). Approved rows without reviewed_at
+    # (auto-mode) age from created_at instead.
     cur = con.execute(
         "UPDATE social_candidates SET status='expired', updated_at=datetime('now') "
-        "WHERE status IN ('pending','approved') AND expires_at <= datetime('now')"
+        "WHERE (status='pending' AND expires_at <= datetime('now')) "
+        "OR (status='approved' AND COALESCE(reviewed_at, created_at) <= datetime('now','-24 hours'))"
     )
     con.commit()
     n = cur.rowcount
@@ -360,7 +366,8 @@ def next_approved() -> dict | None:
     con = get_social_db()
     row = con.execute(
         "SELECT * FROM social_candidates WHERE status='approved' "
-        "AND expires_at > datetime('now') ORDER BY importance_score DESC, created_at ASC LIMIT 1"
+        "AND COALESCE(reviewed_at, created_at) > datetime('now','-24 hours') "
+        "ORDER BY importance_score DESC, created_at ASC LIMIT 1"
     ).fetchone()
     con.close()
     return _row_dict(row)

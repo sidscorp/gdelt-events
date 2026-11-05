@@ -179,6 +179,73 @@ def _trim_words(text: str, limit: int) -> str:
     return (cut or text[: limit - 1]).rstrip() + "…"
 
 
+TITLE_LIMIT = 80
+_CHROME_PIPE = re.compile(r"\s*\|[^|]{1,60}$")
+
+
+def _norm_outlet(value: str | None) -> str:
+    return re.sub(r"[^a-z0-9]+", "", (value or "").lower())
+
+
+def clean_member_title(title: str, outlet: str | None = None,
+                       domain: str | None = None) -> str:
+    """Strip outlet chrome from a picked member headline.
+
+    Two rules only, corpus-driven (2026-11 dry sample):
+    1. A trailing " | tail" is always chrome (iHeart " | News Radio 610",
+       " | Talk Radio 98.3 WLAC", " | Teletica"). Up to two passes for
+       "Title | Section | Outlet".
+    2. A trailing " - tail" is stripped ONLY when tail matches the member's
+       own outlet/domain — bare-dash stripping eats real content
+       ("el Betis - Chelsea de ejemplo" must survive).
+    """
+    t = re.sub(r"\s+", " ", (title or "")).strip()
+    for _ in range(2):
+        stripped = _CHROME_PIPE.sub("", t).strip()
+        if stripped == t:
+            break
+        t = stripped
+    m = re.match(r"^(?P<body>.+?)\s+[-–—]\s+(?P<tail>[^-–—]{1,60})$", t)
+    if m:
+        tail_n = _norm_outlet(m.group("tail"))
+        keys = {_norm_outlet(outlet), _norm_outlet(domain)} - {""}
+        if any(k in tail_n or tail_n in k for k in keys):
+            t = m.group("body").strip()
+    return t
+
+
+def _title_outlet(candidate: dict) -> tuple[str | None, str | None]:
+    """Outlet/domain of the member that produced the cluster title."""
+    raw = candidate.get("title") or ""
+    for m in candidate.get("members") or []:
+        if (m.get("title") or "") == raw:
+            return m.get("outlet"), m.get("domain")
+    first = (candidate.get("members") or [{}])[0]
+    return first.get("outlet"), first.get("domain")
+
+
+def _shouty(title: str) -> bool:
+    letters = [c for c in title if c.isalpha()]
+    return len(letters) >= 10 and sum(c.isupper() for c in letters) / len(letters) > 0.7
+
+
+def _title_grounding(title: str, explanation: str, source_text: str) -> tuple[bool, str]:
+    """Deterministic title checks, same bar as _deterministic_grounding."""
+    if not title:
+        return False, "empty"
+    if len(title) > TITLE_LIMIT:
+        return False, f"over {TITLE_LIMIT} chars"
+    if _shouty(title):
+        return False, "all-caps wire style"
+    if _BANNED.search(title):
+        return False, "predictive or advisory language"
+    haystack = (explanation + " " + source_text).lower()
+    for number in _NUMBER.findall(title):
+        if number.lower() not in haystack:
+            return False, f"number absent from evidence: {number}"
+    return True, "ok"
+
+
 def factual_explanation(title: str) -> str:
     clean = re.sub(r"\s+", " ", title or "").strip().rstrip(". ")
     if not clean:
@@ -314,35 +381,59 @@ def _deterministic_grounding(explanation: str, source_text: str) -> tuple[bool, 
     return True, "deterministic checks passed"
 
 
-def grounded_explanation(candidate: dict) -> tuple[str, str, dict]:
-    """Return explanation, kind and an inspectable grounding record."""
-    fallback = factual_explanation(candidate["title"])
+def grounded_explanation(candidate: dict) -> tuple[str, str, dict, str]:
+    """Return explanation, kind, grounding record and the social card title.
+
+    The title is drafted in the SAME call as the explanation (so the two cannot
+    disagree), verified jointly against the source snippets, and falls back to
+    the chrome-stripped member headline — a raw picked headline never reaches
+    a card. The cluster title is untouched; only social_candidates.title
+    carries the social title.
+    """
+    outlet, domain = _title_outlet(candidate)
+    fallback_title = clean_member_title(candidate["title"], outlet, domain)
+    fallback = factual_explanation(fallback_title)
     source_text, by_n = _source_lines(candidate["members"])
     if not _gateway_key() or not source_text:
-        return fallback, "facts", {"supported": False, "reason": "generator unavailable"}
+        return fallback, "facts", {"supported": False, "reason": "generator unavailable"}, fallback_title
     prompt = (
         "Write the text for an automated public-interest news signal. Use ONLY the "
-        "numbered source snippets below. Write one or two plain-language sentences, "
-        f"at most {EXPLANATION_LIMIT} characters total. State what happened, then why "
-        "it matters only when that consequence is explicitly stated by a source. "
-        "Do not predict, recommend, infer market effects, add causality, or add any fact "
-        "or number absent from the snippets. Neutral language only.\n\n"
-        "Output ONLY JSON: "
-        '{"explanation":"...","support":[1,2]}\n\nSources:\n' + source_text
+        "numbered source snippets below. Two outputs in one JSON object:\n"
+        f'- "title": at most {TITLE_LIMIT} characters, sentence case, no outlet or '
+        "publication names, no trailing punctuation. Name the event directly — what "
+        "happened, where, who is affected — so a reader who sees only the title knows "
+        "what the story is. No angle, no reaction framing, and only claims the "
+        "explanation also makes.\n"
+        f'- "explanation": one or two plain-language sentences, at most '
+        f"{EXPLANATION_LIMIT} characters total. State what happened, then why it "
+        "matters only when that consequence is explicitly stated by a source.\n"
+        "Do not predict, recommend, infer market effects, add causality, or add any "
+        "fact or number absent from the snippets. Neutral language only.\n\n"
+        'Output ONLY JSON: {"title":"...","explanation":"...","support":[1,2]}\n\n'
+        "Sources:\n" + source_text
     )
     try:
         generated = _json_object(_gateway_call(prompt))
+        title = re.sub(r"\s+", " ", str(generated.get("title") or "")).strip().rstrip(".!?")
         explanation = re.sub(r"\s+", " ", str(generated.get("explanation") or "")).strip()
         support = sorted({int(n) for n in generated.get("support", []) if str(n).isdigit()})
         ok, reason = _deterministic_grounding(explanation, source_text)
+        tok, treason = _title_grounding(title, explanation, source_text)
         if not ok or not support or any(n not in by_n for n in support):
-            return fallback, "facts", {"supported": False, "reason": reason, "support": support}
+            return fallback, "facts", {"supported": False,
+                                       "reason": f"{reason}; title: {treason}",
+                                       "support": support}, fallback_title
+        # Independent ladders: a rejected title alone must not sink a verified
+        # explanation — the cleaned member headline fills in instead.
+        ship_title = title if tok else fallback_title
         verify_prompt = (
-            "Determine whether every factual and causal claim in EXPLANATION is directly "
-            "supported by at least one SOURCE. Reject implications, predictions, advice, "
-            "and plausible-but-unstated background knowledge. Output ONLY JSON: "
+            "Determine whether every factual and causal claim in TITLE and EXPLANATION "
+            "is directly supported by at least one SOURCE. The title must not state or "
+            "imply anything absent from the explanation. Reject implications, "
+            "predictions, advice, and plausible-but-unstated background knowledge. "
+            "Output ONLY JSON: "
             '{"supported":true|false,"reason":"<12 words>"}\n\n'
-            f"EXPLANATION: {explanation}\n\nSOURCES:\n{source_text}"
+            f"TITLE: {ship_title}\nEXPLANATION: {explanation}\n\nSOURCES:\n{source_text}"
         )
         verdict = _json_object(_gateway_call(verify_prompt, max_tokens=800))
         supported = verdict.get("supported") is True
@@ -351,11 +442,14 @@ def grounded_explanation(candidate: dict) -> tuple[str, str, dict]:
             "reason": str(verdict.get("reason") or "")[:200],
             "support": support,
             "model": SOCIAL_MODEL,
+            "title_kind": "generated" if tok else "fallback",
         }
-        return (explanation, "generated", grounding) if supported else (fallback, "facts", grounding)
+        if supported:
+            return explanation, "generated", grounding, ship_title
+        return fallback, "facts", grounding, fallback_title
     except Exception as exc:
         LOG.warning("social explanation fell back to facts: %s", exc)
-        return fallback, "facts", {"supported": False, "reason": str(exc)[:200]}
+        return fallback, "facts", {"supported": False, "reason": str(exc)[:200]}, fallback_title
 
 
 def _web_search(query: str, n: int = 5) -> list[dict]:
@@ -513,11 +607,12 @@ def queue_candidates(dry_run: bool = False) -> tuple[int, int]:
             break
         if any(_near_duplicate(candidate["title_key"], old) for _, old in old_titles):
             continue
-        explanation, kind, grounding = grounded_explanation(candidate)
+        explanation, kind, grounding, social_title = grounded_explanation(candidate)
         candidate.update({
             "explanation": explanation,
             "explanation_kind": kind,
             "grounding": grounding,
+            "title": social_title,
             "status": "approved" if mode == "auto" and _passes_auto_threshold(candidate) else "pending",
             "expires_at": (_utcnow() + timedelta(hours=6)).strftime("%Y-%m-%d %H:%M:%S"),
         })

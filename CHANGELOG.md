@@ -17,6 +17,31 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-05 — Grounded card titles for social posts
+
+**What** — The Bluesky link-card title is now drafted in the SAME gateway call
+as the explanation (`{"title","explanation","support"}`), verified jointly
+against the source snippets, and capped at 80 chars (sentence case, no outlet
+names, no trailing punctuation, claims ⊆ body). Fallback ladder: generated →
+chrome-stripped member headline (new `clean_member_title`: pipe suffix always,
+dash suffix only when it matches the member's own outlet/domain) → existing
+facts path over the cleaned title. `title_key` dedup still uses the cluster
+title; `clusters.title` untouched. 18 deterministic tests in
+tests/test_social_title.py.
+**Why** — Cards shipped raw picked headlines: outlet chrome ("World Leaders
+React To GOP Midterm Losses | News Radio 610"), title/body disagreement, and
+the degraded path posted the junk title verbatim. Design note signed off
+2026-11-04 (A–H).
+**How it was verified** — 18/18 unit tests; 30-day dry-run over ~30 clusters
+diffing old/fallback/generated to data/title_dry_run.md with measured token
+delta; dev queue run on preprod.
+**Files** — pipeline/social_publisher.py, tests/test_social_title.py.
+**Notes** — Cost delta ≈ +15 output tokens/candidate (~$0.00001). The dev tree
+needed .social_gateway_key copied over for the dry-run (secrets aren't
+synced). Approved-then-expired drop in next_approved() noted, not fixed.
+
+---
+
 ## 2026-11-04 — Expand Bluesky pilot from 4 to 9 topics
 
 **What** — PILOT_TOPICS gains geopolitics_conflict, energy_climate,

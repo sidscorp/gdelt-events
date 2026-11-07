@@ -17,6 +17,30 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-06 — Auto mode ON, gated by grounding + shadow approver
+
+**What** — mode flipped to 'auto' with floor thresholds (min_sources=3,
+min_score=0 for all 9 topics). A candidate now posts without human review
+only when ALL of: per-topic threshold, generated (non-fallback) explanation
+with joint title+body grounding verification, and a shadow would_post
+verdict (`_auto_ok`). Everything else stays pending for human review.
+Shadow verdict computation moved before the status decision so it can gate.
+**Why** — Sidd relaxed the review gate after 11 decisions. The evidence:
+shadow agreed 6/7 with his approvals (1 would_block he overrode); all posts
+so far grounded clean. Accepted risk: ~half his decisions included a wording
+edit, so auto ships the unedited draft; and the one documented automated miss
+(Binance attribution overstatement) would have posted — both gates passed it.
+**How it was verified** — agreement audit of 11 decisions; dry-run shows
+[approved]/[pending] status per candidate; live run watched.
+**Files** — pipeline/social_publisher.py, social_settings rows
+(mode, auto_thresholds, auto_ready).
+**Notes** — Publish caps unchanged (5/day, 2/topic/day, 90-min gap), so worst
+case is bounded. Flip back anytime: UPDATE social_settings SET value='review'
+WHERE key='mode'. Calibration (--calibrate) is now moot for the gate itself;
+decisions still accumulate as quality signal.
+
+---
+
 ## 2026-11-05 — Approved candidates publish past review expiry (24h horizon)
 
 **What** — `next_approved()` and `expire_stale()` now treat expires_at as a

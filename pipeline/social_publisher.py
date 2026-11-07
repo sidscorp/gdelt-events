@@ -596,6 +596,26 @@ def _passes_auto_threshold(candidate: dict) -> bool:
     )
 
 
+def _auto_ok(candidate: dict, kind: str, grounding: dict, verdict: dict | None) -> bool:
+    """Auto-mode approval bar (2026-11-06, Sidd relaxed the review gate).
+
+    A candidate posts without human review only when ALL of these hold:
+    the numeric per-topic threshold, a generated (not facts-fallback)
+    explanation that passed joint title+body grounding verification, and a
+    shadow approver verdict of would_post. Anything less stays pending for
+    human review. The one documented miss this would have shipped is the
+    Binance attribution overstatement (both gates passed it); wording matches
+    the draft, not a human's edit.
+    """
+    return (
+        _passes_auto_threshold(candidate)
+        and kind == "generated"
+        and grounding.get("supported") is True
+        and verdict is not None
+        and verdict["post"]
+    )
+
+
 def queue_candidates(dry_run: bool = False) -> tuple[int, int]:
     candidates = scan_candidates()
     old_titles = recent_titles(48)
@@ -608,39 +628,44 @@ def queue_candidates(dry_run: bool = False) -> tuple[int, int]:
         if any(_near_duplicate(candidate["title_key"], old) for _, old in old_titles):
             continue
         explanation, kind, grounding, social_title = grounded_explanation(candidate)
+        # Shadow verdict is computed BEFORE the status decision so auto mode can
+        # gate on it; it is recorded after upsert (FK to social_candidates).
+        verdict = None
+        if not shadow_done(candidate["cluster_id"]) and count_shadow_today() < SHADOW_DAILY_CAP:
+            try:
+                verdict = shadow_verdict(candidate)
+            except Exception as exc:
+                LOG.warning("shadow verdict failed for %s: %s", candidate["cluster_id"], exc)
+        auto = mode == "auto" and _auto_ok(candidate, kind, grounding, verdict)
         candidate.update({
             "explanation": explanation,
             "explanation_kind": kind,
             "grounding": grounding,
             "title": social_title,
-            "status": "approved" if mode == "auto" and _passes_auto_threshold(candidate) else "pending",
+            "status": "approved" if auto else "pending",
             "expires_at": (_utcnow() + timedelta(hours=6)).strftime("%Y-%m-%d %H:%M:%S"),
         })
         candidate["post_text"] = build_post_text(candidate, explanation)
         if dry_run:
-            LOG.info("dry-run candidate %s: %s", candidate["cluster_id"], candidate["post_text"])
+            LOG.info("dry-run candidate %s [%s]: %s",
+                     candidate["cluster_id"], candidate["status"], candidate["post_text"])
             queued += 1
             continue
         if upsert_candidate(candidate):
             queued += 1
             old_titles.append((candidate["cluster_id"], candidate["title_key"]))
-        # Shadow AFTER upsert: record_shadow has an FK to social_candidates, so
-        # recording it before the row exists fails (seen 2026-11-03 when upsert
-        # was losing to lock contention). If upsert raises, we never get here.
-        if not shadow_done(candidate["cluster_id"]) and count_shadow_today() < SHADOW_DAILY_CAP:
-            try:
-                verdict = shadow_verdict(candidate)
-                record_shadow(
-                    candidate["cluster_id"],
-                    "would_post" if verdict["post"] else "would_block",
-                    verdict["reason"], verdict["search_hits"], SOCIAL_MODEL,
-                )
-                LOG.info("shadow %s: %s (%s)",
-                         candidate["cluster_id"],
-                         "would_post" if verdict["post"] else "would_block",
-                         verdict["reason"])
-            except Exception as exc:
-                LOG.warning("shadow verdict failed for %s: %s", candidate["cluster_id"], exc)
+        # Record the shadow verdict after upsert (FK). If upsert raises, the
+        # verdict is recomputed next run — see 2026-11-03 lock incident.
+        if verdict is not None:
+            record_shadow(
+                candidate["cluster_id"],
+                "would_post" if verdict["post"] else "would_block",
+                verdict["reason"], verdict["search_hits"], SOCIAL_MODEL,
+            )
+            LOG.info("shadow %s: %s (%s)",
+                     candidate["cluster_id"],
+                     "would_post" if verdict["post"] else "would_block",
+                     verdict["reason"])
     return len(candidates), queued
 
 

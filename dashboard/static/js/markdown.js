@@ -176,8 +176,21 @@ function updateFreshnessBar() {
   const elapsed = Math.max(0, Math.floor((now - gen.getTime()) / 1000));
   const remaining = Math.max(0, ttlS - elapsed);
 
-  const elapsedLabel = elapsed < 60 ? `${elapsed}s` : elapsed < 3600 ? `${Math.floor(elapsed / 60)}m ago` : `${Math.floor(elapsed / 3600)}h ago`;
+  const elapsedLabel = elapsed < 60 ? `${elapsed}s` : elapsed < 3600 ? `${Math.floor(elapsed / 60)}m ago` : elapsed < 86400 ? `${Math.floor(elapsed / 3600)}h ago` : `${Math.floor(elapsed / 86400)}d ago`;
   const remainLabel = remaining <= 0 ? 'any moment' : remaining < 60 ? `~${remaining}s` : remaining < 3600 ? `~${Math.floor(remaining / 60)}m` : `~${Math.floor(remaining / 3600)}h`;
+
+  // 2026-11-09: a combo past its TTL used to promise "Next update in any moment"
+  // even when the cache was weeks old (non-prewarmed windows never refreshed).
+  // When it is THIS overdue, say so instead of promising.
+  const overdueS = elapsed - ttlS;
+  const isStale = ttlS > 0 && overdueS > Math.max(3600, ttlS);
+  if (isStale) {
+    el.className = 'briefing-freshness bf-stale';
+    el.innerHTML = '<span class="bf-elapsed">Generated ' + elapsedLabel + '</span>'
+      + ' <span class="bf-sep">·</span> <span class="bf-next">Stale — refresh overdue</span>'
+      + (articleCount ? ' <span class="bf-sep">·</span> <span class="bf-count">From ' + articleCount + ' articles</span>' : '');
+    return;
+  }
 
   const ratio = ttlS > 0 ? Math.min(1, elapsed / ttlS) : 0;
   let cls = '';

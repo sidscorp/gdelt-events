@@ -14,6 +14,8 @@ import os
 from pathlib import Path
 
 CURATED_HOURS = (3, 24)
+SLOW_HOURS = (6, 72)      # widened 2026-11-09: refreshed on the 00 and 12 UTC runs
+DAILY_HOURS = (168, 720)  # refreshed on the 00 UTC run
 CURATED_VIEWS = (
     "",                        # global / all topics
     "ai-general",               # AI Sector
@@ -93,9 +95,27 @@ def warm(view, hours, base_url, timeout=120):
 
 
 
-def curated_combos():
-    """Exactly 34 stable cache keys; never infer custom pills from traffic."""
-    return [(view, hours) for view in CURATED_VIEWS for hours in CURATED_HOURS]
+def scheduled_hours(now=None):
+    """Windows this run should warm. 3h/24h every run (5x/day); the other four
+    windows used to never refresh at all — 69/103 cached briefings were >4
+    weeks stale on 2026-11-09. 6h/3d join the 00 and 12 UTC runs, 7d/30d the
+    00 UTC run. The server's own fresh_s() gate still decides whether a combo
+    actually regenerates, so these only cost LLM calls when due.
+    """
+    from datetime import datetime, timezone
+    h = (now or datetime.now(timezone.utc)).hour
+    hours = list(CURATED_HOURS)
+    if h % 12 == 0:
+        hours += SLOW_HOURS
+    if h == 0:
+        hours += DAILY_HOURS
+    return hours
+
+
+def curated_combos(now=None):
+    """Stable cache keys for this run's window schedule; never infer custom
+    pills from traffic."""
+    return [(view, hours) for view in CURATED_VIEWS for hours in scheduled_hours(now)]
 
 
 def cache_plan(combos=None, now=None):

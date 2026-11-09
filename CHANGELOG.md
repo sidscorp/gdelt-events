@@ -17,6 +17,30 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-09 — Briefing staleness: honest UI, wider prewarm, purge the museum
+
+**What** — Three parts. (1) The freshness bar (markdown.js) now says
+"Stale — refresh overdue" when a briefing is >max(1h, TTL) past due, instead
+of promising "Next update in any moment" on a month-old briefing; age shows
+days past 24h. (2) prewarm_briefings.py warms the 6h/3d windows on the 00 and
+12 UTC runs and 7d/30d on the 00 UTC run (was: only 3h/24h, 5x/day), so all
+six UI windows refresh on a schedule; fresh_s() still gates actual LLM calls.
+(3) One-time purge of briefing_cache rows older than 4 weeks (69 rows).
+**Why** — Sidd opened the site on the 6h window and saw "Generated 732h ago ·
+Next update in any moment": 4 of 6 windows never refreshed after the Oct-12
+auth change made generation POST-only, and 69/103 cached briefings were >4
+weeks old.
+**How it was verified** — schedule simulated for all five task hours
+(34/34/68/34/34 combos); purge counted; next 00 UTC prewarm watched.
+**Files** — pipeline/prewarm_briefings.py, dashboard/static/js/markdown.js,
+dashboard/static/sw.js (v36 for the js change), users.db one-time purge
+(scripts not kept; inline).
+**Notes** — Extra cost is bounded by fresh_s(): slow windows only regenerate
+when due (~$1-2/mo at Venice prices). User-triggered refresh remains off
+(POST+token since Oct-12) deliberately.
+
+---
+
 ## 2026-11-06 — Auto mode ON, gated by grounding + shadow approver
 
 **What** — mode flipped to 'auto' with floor thresholds (min_sources=3,

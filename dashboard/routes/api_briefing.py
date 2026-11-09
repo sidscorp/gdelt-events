@@ -92,8 +92,12 @@ def api_briefing():
     if (refresh or prewarm or is_worker) and (not is_worker or not worker_authorized(request.headers)):
         return jsonify({"error": "Scheduled generation authorization required"}), 403
     if is_worker:
-        from pipeline.prewarm_briefings import CURATED_VIEWS, CURATED_HOURS
-        if stream or not (refresh or prewarm) or view_id not in CURATED_VIEWS or hours not in CURATED_HOURS:
+        from pipeline.prewarm_briefings import CURATED_VIEWS
+        # All six UI time windows are valid generation targets (2026-11-09 —
+        # was CURATED_HOURS only, which rejected the 6h/3d/7d/30d windows the
+        # widened prewarm schedule now warms).
+        ALLOWED_HOURS = (3, 6, 24, 72, 168, 720)
+        if stream or not (refresh or prewarm) or view_id not in CURATED_VIEWS or hours not in ALLOWED_HOURS:
             return jsonify({"error": "Unsupported scheduled generation request"}), 400
 
     cache_key = f"{view_id or '_all'}:{hours}"

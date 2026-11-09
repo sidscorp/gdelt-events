@@ -33,8 +33,10 @@ weeks old.
 **How it was verified** — schedule simulated for all five task hours
 (34/34/68/34/34 combos); purge counted; next 00 UTC prewarm watched.
 **Files** — pipeline/prewarm_briefings.py, dashboard/static/js/markdown.js,
-dashboard/static/sw.js (v36 for the js change), users.db one-time purge
-(scripts not kept; inline).
+dashboard/static/sw.js (v36 for the js change),
+dashboard/routes/api_briefing.py (worker POST gate widened from (3,24) to all
+six UI windows — found when the first slow-window warm failed 68/68),
+users.db one-time purge (scripts not kept; inline).
 **Notes** — Extra cost is bounded by fresh_s(): slow windows only regenerate
 when due (~$1-2/mo at Venice prices). User-triggered refresh remains off
 (POST+token since Oct-12) deliberately.

@@ -442,6 +442,71 @@ CATEGORIES: dict[str, dict] = {
         "gkg_theme_prefixes": [],
         "scan_description": True,
     },
+    "europe": {
+        "description": (
+            "News events that take place in Europe or are principally about European "
+            "countries or European institutions: EU policy and law, European national "
+            "governments and elections, European economies and central banks, European "
+            "security and defence, and incidents, disasters and courts inside Europe."
+        ),
+        "neg_description": (
+            "Stories about other regions that merely mention Europe or quote a "
+            "European reaction; US or Asian domestic politics; global markets with a "
+            "European footnote; and articles where a European place name collides with "
+            "a place elsewhere (Athens, Georgia; Paris, Texas)."
+        ),
+        "judge_strict": True,
+        "keywords": [
+            "european union", "european commission", "european parliament", "eurozone",
+            "brussels", "strasbourg", "schengen", "european central bank", "nato",
+            "osce", "council of europe",
+            "germany", "berlin", "france", "paris", "italy", "rome", "spain", "madrid",
+            "portugal", "lisbon", "netherlands", "amsterdam", "belgium", "luxembourg",
+            "ireland", "dublin", "denmark", "copenhagen", "sweden", "stockholm",
+            "finland", "helsinki", "norway", "oslo", "switzerland", "zurich",
+            "austria", "vienna", "poland", "warsaw", "prague", "czech", "hungary",
+            "budapest", "romania", "bucharest", "bulgaria", "sofia", "greece", "athens",
+            "croatia", "zagreb", "serbia", "belgrade", "bosnia", "albania", "tirana",
+            "slovenia", "slovakia", "lithuania", "latvia", "estonia", "moldova",
+            "ukraine", "kyiv", "kiev", "belarus", "minsk", "iceland", "malta", "cyprus",
+            "scotland", "wales", "northern ireland", "london", "manchester", "birmingham",
+            "edinburgh", "cardiff", "belfast",
+        ],
+        "gkg_theme_prefixes": [],
+        "scan_description": True,
+    },
+    "asia": {
+        "description": (
+            "News events that take place in Asia or are principally about Asian "
+            "countries: East, South, Southeast and Central Asia and the Middle East — "
+            "governments, economies, security, disasters, courts and industry inside "
+            "those countries."
+        ),
+        "neg_description": (
+            "Diaspora stories outside Asia; foreign reaction stories about Asian "
+            "events; analysis of how a crisis elsewhere affects Asian economies; "
+            "travel and aviation industry trend reports and tourism PR; tag-index "
+            "and listicle pages; opinion columns; US politics with an Asian angle; "
+            "global markets with an Asian footnote; and mere mentions of an Asian "
+            "place name."
+        ),
+        "judge_strict": True,
+        "keywords": [
+            "china", "beijing", "shanghai", "hong kong", "taiwan", "taipei",
+            "japan", "tokyo", "south korea", "seoul", "north korea", "pyongyang",
+            "india", "delhi", "mumbai", "pakistan", "islamabad", "bangladesh", "dhaka",
+            "sri lanka", "colombo", "nepal", "kathmandu", "myanmar", "burma", "thailand",
+            "bangkok", "vietnam", "hanoi", "cambodia", "laos", "malaysia", "kuala lumpur",
+            "singapore", "philippines", "manila", "indonesia", "jakarta",
+            "afghanistan", "kabul", "iran", "tehran", "iraq", "baghdad", "saudi arabia",
+            "riyadh", "uae", "dubai", "qatar", "doha", "kuwait", "bahrain", "oman",
+            "yemen", "jordan", "amman", "israel", "jerusalem", "tel aviv", "gaza",
+            "west bank", "lebanon", "beirut", "syria", "damascus", "kazakhstan",
+            "uzbekistan", "kyrgyzstan", "tajikistan", "turkmenistan", "mongolia",
+        ],
+        "gkg_theme_prefixes": [],
+        "scan_description": True,
+    },
 }
 
 

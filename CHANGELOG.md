@@ -17,6 +17,73 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-11 — Region pills (Europe, Asia) + concurrent judge backfill
+
+**What** — Two geographic pills, gated by the same LLM judge as every other
+curated pill: `tagger.CATEGORIES` gains `europe` (81 keywords) and `asia` (71),
+`pill_eval.PILL_INTENTS` gains both intents, `dashboard/views.py` gains both
+views under a new `Regions` group at the end of `GROUP_ORDER`. Separately,
+`pill_judge.judge()` takes `workers=N` and `rescore_pills` takes `--workers`
+(same batches, same prompts, N in flight; serial stays the default).
+
+**Why** — Readers want "what happened in a region", not only "what happened in
+a topic". Structured geography cannot gate these pills: `events.ActionGeo`
+joins GAL on SOURCEURL for 0.6% of articles and `gkg.V1LOCATIONS` for 10.6%,
+so title+description text plus the judge is the only viable signal.
+The judge concurrency is not cosmetic: a serial backfill measures **1.5 s/item**
+(one 20-article batch = 30 s), so 58,870 candidates = **~24.6 h** of wall clock,
+and `rescore_pills` writes nothing until every batch finishes — an execution
+timeout would have paid for the entire run and written zero rows. That exact
+thing was started and stopped before this change.
+
+**How it was verified**
+- Parallel path: 80 items serial 185.9 s vs 4 workers 23.2 s (**8.0x**),
+  80/80 identical verdicts. Full run at 8 workers: 09:34 → 11:53 (**2 h 19 m**),
+  2,952 batches, 0 batch failures.
+- Backfill (`flip_id=20261111170351`): europe 12,279 approved of 22,296 keyword
+  candidates (55%), asia 19,294 of 36,744 (52.5%); 31,573 rows written in one burst.
+- Flip, replace mode, scoped to those two keys: europe 22,256 in-window rows
+  replaced by 12,279 judged; asia 36,661 by 19,294; 384 / 441 out-of-window rows
+  untouched; 6.9 s. Nothing else in `article_tags` changed.
+- Eval `--n 50 --days 14 --label geo-v2`: **europe 0.94** (47 rel / 0 bord / 3 irr),
+  **asia 0.88** (44 rel / 0 bord / 6 irr). Gate was 0.70.
+- Live: `/api/views` = 18 views with `Regions` = {Europe, Asia}, 24 h default;
+  UI renders "Europe · 350 articles" and "Asia · 375 articles" with no console
+  errors. `tests/smoke.sh` 20/20.
+- Non-geo regression check against 08:56 baselines: all 16 other pills grew
+  (+1 … +431), none dropped.
+- Spend: gdelt app $1.01 over the 12 h covering backfill + eval + probes
+  (budget for the project was $3).
+
+**Files** — `pipeline/tagger.py`, `pipeline/pill_eval.py`,
+`pipeline/pill_judge.py`, `pipeline/rescore_pills.py`, `dashboard/views.py`.
+
+**Notes**
+- Region decisions: Russia and Turkey → Europe; Israel/Palestine → Asia (Middle
+  East); Georgia/Armenia/Azerbaijan → Europe; UK nations are keywords inside
+  Europe rather than separate pills.
+- `nato` is already a keyword on `geopolitics_conflict` and
+  `_build_combined_automaton` is first-category-wins, so Europe does not get it.
+  Deliberate: making the automaton multi-valued would either take `nato` away
+  from geopolitics_conflict or duplicate its tags into it.
+- The first measurement of these pills (semantic-net candidates only, because
+  no keyword tags existed yet) was europe 0.93 / asia 0.55. Asia's 0.55 looked
+  like a syndication artifact — 12 of 17 "irrelevant" verdicts were one
+  Traveloka travel-PR story — so distinct-event precision was computed too:
+  **0.542**, i.e. syndication was NOT the explanation. The noise was real
+  (travel PR, "how a Middle East crisis affects Asia" analysis, tag-index
+  pages), which is what the tightened `neg_description` and the full keyword
+  backfill addressed.
+- `neg_description` is never read by the judge (`pill_judge` passes only the
+  intent); it only shapes the semantic-net anti-query. An A/B over the live
+  rows confirmed tightening the intent sentence alone changes nothing — the
+  candidate pool is what moves precision.
+- The judge is now the pipeline's throughput ceiling. Steady state is fine
+  (~171 new candidates per 15-min cycle ≈ 4.5 min of judging), but any future
+  multi-week backfill should use `--workers` from the start.
+
+---
+
 ## 2026-11-09 — Briefing staleness: honest UI, wider prewarm, purge the museum
 
 **What** — Three parts. (1) The freshness bar (markdown.js) now says

@@ -160,6 +160,23 @@ PILL_INTENTS: dict[str, str] = {
         "American Legion advocacy, foreign veterans, or political campaigns "
         "about veterans issues without VA action."
     ),
+    "europe": (
+        "Is this story principally about an event that takes place in Europe, or about "
+        "a European country or European institution (EU, ECB, NATO, national "
+        "governments)? Count events happening inside European countries. Do NOT count "
+        "stories about other regions that merely mention Europe or quote a European "
+        "reaction, and do NOT count name collisions such as Athens, Georgia (USA) or "
+        "Paris, Texas."
+    ),
+    "asia": (
+        "Is this story principally about an event that takes place in Asia, or about an "
+        "Asian country's government, economy, security or society (East, South, "
+        "Southeast, Central Asia, Middle East)? Count events happening inside those "
+        "countries. Do NOT count diaspora stories outside Asia, foreign reaction "
+        "stories, analysis of how a non-Asian crisis affects Asia's economy, travel "
+        "or aviation business trend reports, tourism PR, tag-index or listicle "
+        "pages, opinion columns, or mere mentions."
+    ),
 }
 
 

@@ -14,6 +14,8 @@ skips them) — pills degrade to keyword quality, never break.
 import argparse
 import json
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 try:
@@ -84,16 +86,66 @@ def intent_for(category: str) -> str | None:
     return PILL_INTENTS.get(base)
 
 
+def _judge_parallel(intent: str, items: list[dict],
+                    breaker: JudgeCircuitBreaker, workers: int) -> dict[str, str] | None:
+    """Same batches, same prompts, N in flight. Used by rescore_pills only.
+
+    A serial backfill measures ~1.5 s/item (one batch of 20 = ~30 s), so a
+    14-day two-pill backfill is ~24 h of wall clock — longer than any sane
+    execution limit, and the backfill writes nothing until every batch is done.
+    The work is entirely network/LLM-bound, so it parallelises cleanly.
+
+    Semantics are unchanged from the serial loop: any batch that cannot be
+    judged fails the whole call (the caller then writes nothing).
+    """
+    out: dict[str, str] = {}
+    batches = [items[i:i + BATCH] for i in range(0, len(items), BATCH)]
+    total = len(batches)
+    state = {"done": 0, "failed": 0}
+    lock = threading.Lock()
+
+    def run(batch: list[dict]) -> tuple[bool, dict[str, str]]:
+        local: dict[str, str] = {}
+        return _judge_batch(intent, batch, breaker, local), local
+
+    with ThreadPoolExecutor(max_workers=max(1, int(workers))) as pool:
+        futures = [pool.submit(run, b) for b in batches]
+        for fut in as_completed(futures):
+            ok, local = fut.result()
+            with lock:
+                if ok:
+                    out.update(local)
+                else:
+                    state["failed"] += 1
+                state["done"] += 1
+                if state["done"] % 25 == 0 or state["done"] == total:
+                    log.info("pill judge: %d/%d batches (%.0f%%), failures=%d",
+                             state["done"], total, 100.0 * state["done"] / total,
+                             state["failed"])
+    if state["failed"]:
+        log.error("pill judge: %d/%d batches failed — returning no verdicts",
+                  state["failed"], total)
+        return None
+    return out
+
+
 def judge(category: str, items: list[dict],
-          breaker: JudgeCircuitBreaker | None = None) -> dict[str, str] | None:
+          breaker: JudgeCircuitBreaker | None = None,
+          workers: int = 1) -> dict[str, str] | None:
     """items: [{url, title, desc}] -> {url: verdict}. None on total failure
-    (caller falls back to keyword behavior and holds the watermark)."""
+    (caller falls back to keyword behavior and holds the watermark).
+
+    workers>1 runs batches concurrently; leave it at 1 for the incremental
+    15-min scorer so its gateway load stays predictable.
+    """
     breaker = breaker or JudgeCircuitBreaker()
     if breaker.opened:
         return None
     intent = intent_for(category)
     if not intent or not items:
         return {}
+    if workers and int(workers) > 1 and len(items) > BATCH:
+        return _judge_parallel(intent, items, breaker, int(workers))
     out: dict[str, str] = {}
     for i in range(0, len(items), BATCH):
         if not _judge_batch(intent, items[i:i + BATCH], breaker, out):

@@ -55,6 +55,9 @@ def main():
     parser.add_argument("--suffix", default="__v2")
     parser.add_argument("--days", type=int, default=14)
     parser.add_argument("--pills", help="comma-separated pill keys")
+    parser.add_argument("--workers", type=int, default=1,
+                        help="concurrent judge batches (default 1 = serial). "
+                             "A serial 14-day backfill is ~24h; 8 workers ~3h.")
     args = parser.parse_args()
 
     pills = [p for p in pill_scorer.load_pill_defs() if p["kind"] != "custom"]
@@ -141,7 +144,7 @@ def main():
                  if u in titles and crawled.get(u) and crawled[u] >= cutoff]
         log.info("%s: judging %d candidates...", k, len(items))
         t1 = time.time()
-        verdicts = pill_judge.judge(k + args.suffix, items) or {}
+        verdicts = pill_judge.judge(k + args.suffix, items, workers=args.workers) or {}
         accept = {"relevant"} if p.get("strict") else pill_judge.ACCEPT
         approved = [u for u, v in verdicts.items() if v in accept]
         rows = [(u, "gal", k + args.suffix, "judge",

@@ -209,6 +209,25 @@ VIEWS = [
         "default_hours": 24,
         "group": "World & Economy",
     },
+    # --- Regions ---
+    {
+        "id": "europe",
+        "name": "Europe",
+        "description": "Events happening in or principally about Europe and its institutions.",
+        "kind": "tag_match",
+        "tag_category": "europe",
+        "default_hours": 24,
+        "group": "Regions",
+    },
+    {
+        "id": "asia",
+        "name": "Asia",
+        "description": "Events happening in or principally about Asia.",
+        "kind": "tag_match",
+        "tag_category": "asia",
+        "default_hours": 24,
+        "group": "Regions",
+    },
 ]
 
 # Display order for pill groups in the UI. Any group not listed here
@@ -218,6 +237,7 @@ GROUP_ORDER = [
     "Security",
     "Health & Science",
     "World & Economy",
+    "Regions",
 ]
 
 

@@ -177,6 +177,15 @@ PILL_INTENTS: dict[str, str] = {
         "or aviation business trend reports, tourism PR, tag-index or listicle "
         "pages, opinion columns, or mere mentions."
     ),
+    "us": (
+        "Is this story principally about an event that takes place in the United "
+        "States, or about U.S. institutions or domestic affairs (Congress, the White "
+        "House, federal and state courts, state governments, the American economy)? "
+        "Count events happening inside the United States. Do NOT count stories about "
+        "other regions that merely mention the U.S. or quote an American official, "
+        "and do NOT count name collisions such as Georgia the country or an American "
+        "outlet named Washington."
+    ),
 }
 
 

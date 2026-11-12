@@ -34,6 +34,9 @@ CURATED_VIEWS = (
     "supply-chain-alerts",      # Supply Chain Alerts
     "geopolitics-conflict",     # Geopolitics & Conflict
     "energy-climate",           # Energy & Climate
+    "europe",                   # Regions: Europe
+    "asia",                     # Regions: Asia
+    "us",                       # Regions: United States
 )
 
 DATA_DIR = Path(os.environ.get("GDELT_DATA_DIR") or (Path(__file__).resolve().parent.parent / "data"))

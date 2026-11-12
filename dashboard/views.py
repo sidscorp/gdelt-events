@@ -228,6 +228,15 @@ VIEWS = [
         "default_hours": 24,
         "group": "Regions",
     },
+    {
+        "id": "us",
+        "name": "United States",
+        "description": "Events happening in or principally about the United States.",
+        "kind": "tag_match",
+        "tag_category": "us",
+        "default_hours": 24,
+        "group": "Regions",
+    },
 ]
 
 # Display order for pill groups in the UI. Any group not listed here

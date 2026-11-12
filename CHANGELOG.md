@@ -17,6 +17,62 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-11 — United States pill, region briefings, and judge concurrency in the scorer
+
+**What** — Three follow-ups to the region pills. (1) A third region pill,
+**United States** (111 keywords, 0 shadowed by existing categories), in the same
+`Regions` group at 24h. (2) `europe`, `asia`, `us` added to `CURATED_VIEWS` —
+the generation allow-list that gates both the prewarm schedule and the worker
+POST in `routes/api_briefing.py`. (3) `pill_scorer` now judges each pill with
+`workers=4` (`JUDGE_WORKERS`) instead of serially.
+
+**Why** — Sidd opened Europe and saw no AI briefing: `CURATED_VIEWS` had never
+been extended, so neither prewarm nor the worker endpoint would generate for the
+new views — the pills were fully live but permanently briefing-less. The US pill
+was an explicit request. The scorer change is a consequence of all three: the
+region pills add ~600-800 candidates per 15-min cycle, which is 30-40 batches ≈
+15-20 min *serial* — longer than the interval itself, at which point the judge
+queue only grows and pills quietly fall back to keyword membership (the 2026-07
+failure mode, and the reason `GDELT-EmbedWatchdog` looked healthy for 11 days).
+
+**How it was verified**
+- Eval `--pills us --n 50 --days 14 --label geo-us`: **us 0.98** (49 rel / 0 bord
+  / 1 irr). Asia 0.88 and europe 0.94 unchanged.
+- Backfill: 51,512 approved of 66,960 candidates (77%), 8 workers, 2 h 12 m,
+  0 batch failures. Flip `20261112023303` (replace, scoped to `us`): 79,846
+  in-window rows replaced by 51,512 judged; 592 out-of-window rows untouched.
+- Briefings forced and read back: europe 5,661 chars, asia 5,937, us 3h 4,664,
+  us 24h 5,140 — all cached and served.
+- Concurrency in the live path: 19:08/19:10 embed cycles log
+  `pill judge: N/N batches (100%), failures=0`, and the 18:29 cycle judged 213
+  items in one pass; `pill_judge_health.json` reports `status: ok`.
+- Live: `/api/views` = 19 views, `Regions` = {europe, asia, us}; US renders
+  "United States · 366 articles" with the pill active; `tests/smoke.sh` 20/20;
+  non-geo pill counts all grew against the 08:56 baseline.
+
+**Files** — `pipeline/tagger.py`, `pipeline/pill_eval.py`,
+`pipeline/prewarm_briefings.py`, `pipeline/pill_scorer.py`, `dashboard/views.py`.
+
+**Notes**
+- **Billing correction.** The judge/briefing alias
+  `accounts/fireworks/models/gpt-oss-120b` was repointed on **2026-11-09** to
+  **Venice Private `openai-gpt-oss-120b`** ($0.07 / $0.30 per 1M) because the
+  Fireworks account was suspended. Any note quoting Fireworks $0.15/$0.60 or
+  ~$0.000026/article is stale: observed now is **~$0.000012 per audited
+  article**, so the 14-day US backfill cost ~$0.95, not the ~$2.07 first
+  estimated. **Top up Venice, not Fireworks** — the account balance (USD) is the
+  only fleet-wide cap; per-key caps are not set.
+- Near-duplicate syndication inflates row-level eval precision, but on these
+  pills it turned out not to be the explanation (Asia: 0.551 row-level vs 0.542
+  event-level). Compute both before accepting a low number.
+- The frontend needed no change for a third group member, but note the SSR first
+  paint is global: reading `#resultsMeta` immediately after navigation shows
+  "All topics" until the view fetch resolves. Not a bug — I chased it once.
+- Judged history for `us` is 14 days (`flip_id=20261112023303`); 592
+  out-of-window rows remain keyword-only, same as the other region pills.
+
+---
+
 ## 2026-11-11 — Region pills (Europe, Asia) + concurrent judge backfill
 
 **What** — Two geographic pills, gated by the same LLM judge as every other

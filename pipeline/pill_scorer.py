@@ -386,7 +386,8 @@ def stage_batch(con, urls: list[str], vectors: np.ndarray,
         _ensure_lookups(to_judge)
         items = [{"url": u, "title": titles[u][0], "desc": titles[u][1]}
                  for u in to_judge if u in titles]
-        verdicts = pill_judge.judge(target_cat, items, breaker=breaker)
+        verdicts = pill_judge.judge(target_cat, items, breaker=breaker,
+                                    workers=JUDGE_WORKERS)
         if verdicts is None:
             # Gateway down: keyword tags stay as-is and nothing is demoted.
             # Flag it so score_new refuses to advance the watermark past these
@@ -467,6 +468,15 @@ def _write_judge_health(totals: dict, watermark_before: int,
 # and age out of the feed within days. rescore_pills.py can judge a window later.
 MAX_LAG_ROWS = 50_000
 SKIP_KEEP_ROWS = 2_000
+
+# Concurrent judge batches per pill inside one cycle. A batch of 20 costs ~30 s,
+# so a serial cycle cannot absorb the region pills: europe/asia/us add ~600-800
+# candidates per 15-min run, which is 30-40 batches = 15-20 min serial — longer
+# than the interval itself, at which point the judge queue only grows and pills
+# quietly fall back to keyword membership. Measured cost of concurrency is nil:
+# 4 workers gave 8x throughput with identical verdicts over 80 items, and the
+# backfill's 8-worker run completed 2,952 batches with 0 failures.
+JUDGE_WORKERS = 4
 
 
 def score_new(suffix: str = SUFFIX, chunk_rows: int = 50_000,

@@ -507,6 +507,49 @@ CATEGORIES: dict[str, dict] = {
         "gkg_theme_prefixes": [],
         "scan_description": True,
     },
+    "us": {
+        "description": (
+            "News events that take place in the United States or are principally about "
+            "U.S. institutions and domestic affairs: Congress and the White House, "
+            "federal and state courts, American elections and politics, the U.S. "
+            "economy and its regulators, and incidents, disasters and courts inside "
+            "the United States."
+        ),
+        "neg_description": (
+            "Stories about other regions that merely mention the United States or quote "
+            "an American official; foreign elections, wars and disasters covered with a "
+            "U.S. angle; global markets with a U.S. footnote; and articles where a U.S. "
+            "place name collides with a place elsewhere (Georgia the country, the "
+            "Washington Post as an outlet)."
+        ),
+        "judge_strict": True,
+        "keywords": [
+            "white house", "congress", "capitol hill", "senate", "house of representatives",
+            "supreme court", "pentagon", "state department", "justice department",
+            "federal reserve", "homeland security", "secret service", "national guard",
+            "border patrol", "internal revenue service", "department of education",
+            "department of agriculture", "governor", "congressman", "congresswoman",
+            "attorney general", "federal judge", "federal court", "u.s. military",
+            "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+            "connecticut", "delaware", "florida", "hawaii", "idaho", "illinois",
+            "indiana", "iowa", "kansas", "kentucky", "louisiana", "maine", "maryland",
+            "massachusetts", "michigan", "minnesota", "mississippi", "missouri",
+            "montana", "nebraska", "nevada", "new hampshire", "new jersey", "new mexico",
+            "new york", "north carolina", "north dakota", "ohio", "oklahoma", "oregon",
+            "pennsylvania", "rhode island", "south carolina", "south dakota",
+            "tennessee", "texas", "utah", "vermont", "virginia", "washington",
+            "west virginia", "wisconsin", "wyoming",
+            "new york city", "los angeles", "chicago", "houston", "phoenix",
+            "philadelphia", "san antonio", "san diego", "dallas", "san jose", "austin",
+            "jacksonville", "columbus", "charlotte", "indianapolis", "seattle",
+            "denver", "boston", "detroit", "nashville", "portland", "memphis",
+            "las vegas", "baltimore", "milwaukee", "albuquerque", "atlanta", "miami",
+            "cleveland", "new orleans", "minneapolis", "tampa", "pittsburgh",
+            "st. louis", "cincinnati", "kansas city", "salt lake city", "sacramento",
+        ],
+        "gkg_theme_prefixes": [],
+        "scan_description": True,
+    },
 }
 
 

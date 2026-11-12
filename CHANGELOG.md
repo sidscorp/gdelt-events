@@ -17,6 +17,32 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-12 — Pre-warm the region feeds (and why the pills looked cold)
+
+**What** — `pipeline/warm_feed.py` gains `europe`, `asia`, `us` in `PILL_COMBOS`,
+and a `--force` flag that bypasses the data-version/process-identity guard.
+
+**Why** — Adding a view to `dashboard/views.py` and `CURATED_VIEWS` does not put
+it in the feed pre-warmer: `warm_feed.PILL_COMBOS` is a second, hardcoded list.
+The three region pills were therefore never warmed, so each first visitor paid
+the cold query (measured 3.7-4.7 s) and the server-rendered first paint for those
+views stayed empty until someone loaded them. Briefings were already covered
+(the prewarm log shows `OK us:3h`, `OK europe:3h`, `SKIP ...:24h` when fresh) —
+this was only the feed cache.
+
+**How it was verified** — `warm_feed.py --force` warmed all 19 pills + both
+globals; region feeds then served in **0.05-0.08 s** against 4.42/4.70/3.72 s
+cold. `/api/warmstate` reports 256 cached entries.
+
+**Files** — `pipeline/warm_feed.py`.
+
+**Notes** — This is the third hand-maintained list a new view must be added to
+(`views.py`, `prewarm_briefings.CURATED_VIEWS`, `warm_feed.PILL_COMBOS`). The
+first two are already duplicated; a single registry would remove the class of
+bug. Tracked here rather than fixed now.
+
+---
+
 ## 2026-11-11 — United States pill, region briefings, and judge concurrency in the scorer
 
 **What** — Three follow-ups to the region pills. (1) A third region pill,

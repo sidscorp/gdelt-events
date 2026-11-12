@@ -20,6 +20,7 @@ PILL_COMBOS = [
     ("public-health", 24), ("medical-devices", 24),
     ("fda-agency", 24), ("nih-news", 24), ("cms-news", 24), ("va-news", 24),
     ("supply-chain-alerts", 24), ("geopolitics-conflict", 24), ("energy-climate", 24),
+    ("europe", 24), ("asia", 24), ("us", 24),
 ]
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
@@ -59,6 +60,8 @@ def _current_data_version() -> str:
 
 
 if __name__ == "__main__":
+    import sys
+    force = "--force" in sys.argv
     for v, h in GLOBAL_COMBOS:
         warm(v, h)
 
@@ -74,7 +77,7 @@ if __name__ == "__main__":
     boot = _dashboard_boot()
     marker = f"{version}|{boot}"
 
-    if version and boot and marker == last_warmed:
+    if version and boot and marker == last_warmed and not force:
         print(f"[{time.strftime('%H:%M:%S')}] pills: data + process unchanged "
               f"(version {version}) — skipping", flush=True)
     else:

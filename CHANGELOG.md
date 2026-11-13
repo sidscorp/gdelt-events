@@ -166,6 +166,25 @@ thing was started and stopped before this change.
 
 ---
 
+## 2026-11-13 — Social: all 19 topics, faster publish cadence
+
+**What** — PILOT_TOPICS now covers every curated category (was 9): adds
+europe, asia, us, medical_devices, ai_defense, ai_sector_impact,
+oss_vulnerabilities, nih_news, cms_news, va_news. Caps raised:
+MAX_POSTS_24H 5→10, MAX_TOPIC_POSTS_24H 2→3, MIN_POST_GAP_MIN 90→45,
+MAX_QUEUE_PER_DAY 10→20. auto_thresholds written for all 19 topic ids.
+**Why** — Sidd wants big events posted in real time without waiting for him.
+Auto mode was already live (11 auto-posts since 11-06; an earlier "0 auto"
+reading was a bad query — auto rows carry no review_decision). The real
+limiter was the caps: 4/4/5 posts/day hit the ceiling and 9 auto-approved
+candidates expired unpublished, never attempted. Region pills arrived 11-11
+(other agents) and weren't reaching the bot.
+**How it was verified** — manual run: scanned=9, queued=6, 4 auto-approved
+(Pakistan raids, Iran radar, Microsoft outage x2) with reviewed_by NULL.
+**Files** — pipeline/social_publisher.py (+ auto_thresholds setting).
+
+---
+
 ## 2026-11-09 — Briefing staleness: honest UI, wider prewarm, purge the museum
 
 **What** — Three parts. (1) The freshness bar (markdown.js) now says

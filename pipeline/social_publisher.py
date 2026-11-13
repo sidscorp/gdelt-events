@@ -74,6 +74,17 @@ PILOT_TOPICS = {
     "ai_regulation": ("ai-regulation", "AI Policy"),
     "semiconductors": ("semiconductors", "Semiconductors"),
     "ai_general": ("ai-general", "AI"),
+    # 2026-11-13: all remaining curated categories (regions + long-tail topics).
+    "europe": ("europe", "Europe"),
+    "asia": ("asia", "Asia"),
+    "us": ("us", "United States"),
+    "medical_devices": ("medical-devices", "Medical Devices"),
+    "ai_defense": ("ai-defense", "AI & Defense"),
+    "ai_sector_impact": ("ai-sector-impact", "AI in Industry"),
+    "oss_vulnerabilities": ("oss-vulnerabilities", "OSS Vulnerabilities"),
+    "nih_news": ("nih-news", "NIH"),
+    "cms_news": ("cms-news", "CMS"),
+    "va_news": ("va-news", "VA"),
 }
 TOPIC_ORDER = {cat: i for i, cat in enumerate(PILOT_TOPICS)}
 
@@ -86,10 +97,10 @@ MIN_SOURCES = 3
 MIN_TOPIC_MEMBERS = 1
 MAX_EVENT_AGE_H = 6
 MAX_EVENT_LIFE_H = 24
-MAX_QUEUE_PER_DAY = 10
-MAX_POSTS_24H = 5
-MAX_TOPIC_POSTS_24H = 2
-MIN_POST_GAP_MIN = 90
+MAX_QUEUE_PER_DAY = 20
+MAX_POSTS_24H = 10
+MAX_TOPIC_POSTS_24H = 3
+MIN_POST_GAP_MIN = 45
 POST_LIMIT = 300
 EXPLANATION_LIMIT = 150
 SHADOW_DAILY_CAP = 30  # hard cost guard; real volume is <= MAX_QUEUE_PER_DAY

@@ -31,7 +31,7 @@ $start = (Get-Date).AddMinutes(2)
 # Ten years is operationally indefinite while remaining valid task XML.
 $repeatDuration = New-TimeSpan -Days 3650
 $trigger = New-ScheduledTaskTrigger -Once -At $start `
-    -RepetitionInterval (New-TimeSpan -Minutes 15) `
+    -RepetitionInterval (New-TimeSpan -Minutes 5) `
     -RepetitionDuration $repeatDuration
 $settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `

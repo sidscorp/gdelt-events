@@ -172,7 +172,9 @@ thing was started and stopped before this change.
 europe, asia, us, medical_devices, ai_defense, ai_sector_impact,
 oss_vulnerabilities, nih_news, cms_news, va_news. Caps raised:
 MAX_POSTS_24H 5→10, MAX_TOPIC_POSTS_24H 2→3, MIN_POST_GAP_MIN 90→45,
-MAX_QUEUE_PER_DAY 10→20. auto_thresholds written for all 19 topic ids.
+MAX_QUEUE_PER_DAY 10→20, MIN_POST_GAP_MIN 45→15 (matches the task
+cadence; a breaking story approved mid-cycle now posts on the next run
+instead of waiting 45+ min). auto_thresholds written for all 19 topic ids.
 **Why** — Sidd wants big events posted in real time without waiting for him.
 Auto mode was already live (11 auto-posts since 11-06; an earlier "0 auto"
 reading was a bad query — auto rows carry no review_decision). The real

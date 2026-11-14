@@ -28,7 +28,7 @@
     <TimeTrigger>
       <StartBoundary>2026-04-10T19:01:54-04:00</StartBoundary>
       <Repetition>
-        <Interval>PT1H</Interval>
+        <Interval>PT15M</Interval>
         <Duration>P1000D</Duration>
         <StopAtDurationEnd>true</StopAtDurationEnd>
       </Repetition>
@@ -36,8 +36,8 @@
   </Triggers>
   <Actions Context="Author">
     <Exec>
-      <Command>wscript.exe</Command>
-      <Arguments>"C:\Users\siddh\bin\gdelt_ingest_hidden.vbs"</Arguments>
+      <Command>C:\Users\siddh\Code_Library\gdelt-events\.venv\Scripts\python.exe</Command>
+      <Arguments>"C:\Users\siddh\Code_Library\gdelt-events\pipeline\gdelt_ingest.py"</Arguments>
     </Exec>
   </Actions>
 </Task>

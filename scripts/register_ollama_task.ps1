@@ -14,7 +14,23 @@ $exe = "C:\Users\siddh\AppData\Local\Programs\Ollama\ollama.exe"
 
 if (-not (Test-Path $exe)) { throw "ollama.exe not found at $exe" }
 
-$action = New-ScheduledTaskAction -Execute $exe -Argument "serve"
+# A second task that also runs `ollama serve` holds :11434 and makes this one exit
+# immediately (found 2026-11-14: an out-of-repo "OllamaServe" was doing the serving).
+$legacy = 'OllamaServe'
+if (Get-ScheduledTask -TaskName $legacy -ErrorAction SilentlyContinue) {
+    Write-Warning "Task '$legacy' also runs ollama serve and will hold :11434. " +
+        "Stop and unregister it deliberately: Stop-ScheduledTask -TaskName $legacy; " +
+        "Unregister-ScheduledTask -TaskName $legacy -Confirm:`$false"
+}
+
+# Bind every interface, not loopback. The LiteLLM gateway reaches this server at its
+# Tailscale address (api_base http://100.127.16.82:11434/v1), so a loopback-only bind
+# silently breaks every ollama/* alias there - and the failure looks like a gateway
+# timeout, not a missing env var. Task Scheduler cannot set environment variables
+# directly, so a cmd wrapper does it. There must be NO space before '&&': a space
+# makes the value "0.0.0.0 " and Ollama rejects it.
+$action = New-ScheduledTaskAction -Execute "cmd.exe" `
+    -Argument "/c set OLLAMA_HOST=0.0.0.0&& `"$exe`" serve"
 
 # At startup AND at logon: startup covers unattended reboots, logon covers the
 # case where the machine is already up and the task host has not fired.

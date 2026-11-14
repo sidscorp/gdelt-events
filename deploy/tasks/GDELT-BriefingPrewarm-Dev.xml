@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="UTF-16"?>
+﻿<?xml version="1.0" encoding="UTF-8"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <URI>\GDELT-BriefingPrewarm-Dev</URI>
@@ -22,7 +22,7 @@
   </Settings>
   <Triggers>
     <TimeTrigger>
-      <StartBoundary>2026-01-01T01:02:00-04:00</StartBoundary>
+      <StartBoundary>2026-01-01T00:02:00-05:00</StartBoundary>
       <Repetition>
         <Interval>PT1H</Interval>
         <StopAtDurationEnd>true</StopAtDurationEnd>

@@ -23,7 +23,7 @@ dashboard/
   templates/        base.html + pages that {% extends %} it (event_detail.html is a standalone exception)
   static/css/       base.css (tokens + global dark mode) + per-page css ; static/js/ (rum, dashboard, markdown, portal, search — classic scripts, NOT modules)
 tests/        smoke.sh (20 curl checks) · e2e_smoke.mjs (Playwright UI) · test_queries.py + golden_queries.json
-deploy/       register_dashboard.ps1, register_task.ps1 (Windows — production), install.sh (Linux reference)
+deploy/       register_dashboard.ps1, register_task.ps1 (Windows — production), install.sh (Linux reference), tasks/ (generated snapshot, see its README)
 ```
 
 ## Deploy / run (production = Windows, gpu-host)

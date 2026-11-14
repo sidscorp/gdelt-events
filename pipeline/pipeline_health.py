@@ -131,6 +131,24 @@ def _write_backlog_history(values: list[int]) -> None:
         pass
 
 
+def evaluate_backlog(n: int, history: list[int]) -> tuple[str, str]:
+    """Decide the backlog verdict from one sample plus prior samples.
+
+    Split out from check_backlog so the rule can be tested without a database: the
+    check is only worth running if it is known to fire on a real stall.
+    """
+    history = (list(history) + [n])[-BACKLOG_HISTORY:]
+    trend = " -> ".join(str(x) for x in history)
+    grew = (len(history) >= BACKLOG_HISTORY
+            and all(b > a for a, b in zip(history, history[1:])))
+    if n >= BACKLOG_CEILING + 1:
+        return "FAIL", (f"backlog at the {BACKLOG_CEILING} ceiling "
+                        f"({n}+ unembedded in {BACKLOG_WINDOW_H}h; trend {trend})")
+    if grew:
+        return "FAIL", f"backlog growing across {BACKLOG_HISTORY} checks: {trend}"
+    return "PASS", f"{n} unembedded in {BACKLOG_WINDOW_H}h (trend {trend})"
+
+
 def check_backlog(results: list) -> None:
     """Recent articles still missing an embedding — the metric the old watchdog lacked.
 
@@ -166,23 +184,9 @@ def check_backlog(results: list) -> None:
             pass
     n = len(missing)
     history = _read_backlog_history()
-    history.append(n)
-    history = history[-BACKLOG_HISTORY:]
-    _write_backlog_history(history)
-    trend = " -> ".join(str(x) for x in history)
-
-    grew = (len(history) >= BACKLOG_HISTORY
-            and all(b > a for a, b in zip(history, history[1:])))
-    if n >= BACKLOG_CEILING + 1:
-        results.append(("FAIL", "embed-backlog",
-                        f"backlog at the {BACKLOG_CEILING} ceiling ({n}+ unembedded in "
-                        f"{BACKLOG_WINDOW_H}h; trend {trend})"))
-    elif grew:
-        results.append(("FAIL", "embed-backlog",
-                        f"backlog growing across {BACKLOG_HISTORY} checks: {trend}"))
-    else:
-        results.append(("PASS", "embed-backlog",
-                        f"{n} unembedded in {BACKLOG_WINDOW_H}h (trend {trend})"))
+    level, detail = evaluate_backlog(n, history)
+    _write_backlog_history((history + [n])[-BACKLOG_HISTORY:])
+    results.append((level, "embed-backlog", detail))
 
 
 def main() -> int:

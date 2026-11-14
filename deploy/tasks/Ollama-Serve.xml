@@ -34,8 +34,8 @@
   </Triggers>
   <Actions Context="Author">
     <Exec>
-      <Command>C:\Users\siddh\AppData\Local\Programs\Ollama\ollama.exe</Command>
-      <Arguments>serve</Arguments>
+      <Command>cmd.exe</Command>
+      <Arguments>/c set OLLAMA_HOST=0.0.0.0&amp;&amp; "C:\Users\siddh\AppData\Local\Programs\Ollama\ollama.exe" serve</Arguments>
     </Exec>
   </Actions>
 </Task>

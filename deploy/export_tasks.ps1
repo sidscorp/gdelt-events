@@ -23,8 +23,11 @@
 
 [CmdletBinding()]
 param(
-    # Where the XML files go. Defaults to deploy\tasks next to this script.
-    [string]$OutDir = (Join-Path $PSScriptRoot 'tasks'),
+    # Where the XML files go. Defaulted in the body, not here: PowerShell 5.1
+    # evaluates a parameter default before $PSScriptRoot is populated when the
+    # script is launched with `powershell -File ...`, so JoinPath threw
+    # "empty string not allowed" for the documented no-argument invocation.
+    [string]$OutDir = '',
 
     # Task-name regex. Both Ollama tasks are included on purpose: the host has
     # "Ollama-Serve" (registered by scripts\register_ollama_task.ps1) and a
@@ -39,6 +42,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+if (-not $OutDir) { $OutDir = Join-Path $PSScriptRoot 'tasks' }
 
 if (-not (Get-Command Export-ScheduledTask -ErrorAction SilentlyContinue)) {
     throw 'Export-ScheduledTask not found - run this on the Windows host, not on Linux/macOS.'

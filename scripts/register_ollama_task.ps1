@@ -18,9 +18,9 @@ if (-not (Test-Path $exe)) { throw "ollama.exe not found at $exe" }
 # immediately (found 2026-11-14: an out-of-repo "OllamaServe" was doing the serving).
 $legacy = 'OllamaServe'
 if (Get-ScheduledTask -TaskName $legacy -ErrorAction SilentlyContinue) {
-    Write-Warning "Task '$legacy' also runs ollama serve and will hold :11434. " +
+    Write-Warning ("Task '$legacy' also runs ollama serve and will hold :11434. " +
         "Stop and unregister it deliberately: Stop-ScheduledTask -TaskName $legacy; " +
-        "Unregister-ScheduledTask -TaskName $legacy -Confirm:`$false"
+        "Unregister-ScheduledTask -TaskName $legacy -Confirm:`$false")
 }
 
 # Bind every interface, not loopback. The LiteLLM gateway reaches this server at its

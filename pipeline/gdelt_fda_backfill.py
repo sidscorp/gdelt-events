@@ -13,6 +13,15 @@ import logging
 import time
 from pathlib import Path
 
+import sys
+from pathlib import Path
+
+# Run as a script from anywhere: put the repo root on sys.path so the
+# `pipeline` package resolves.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from pipeline.fda_matcher import import_companies, initial_match
 
 logging.basicConfig(

@@ -7,6 +7,15 @@ filters on persons/orgs/themes, explicit indexes help significantly.
 
 import time
 import duckdb
+import sys
+from pathlib import Path
+
+# Run as a script from anywhere: put the repo root on sys.path so the
+# `pipeline` package resolves.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from pipeline.config import DB_PATH
 
 con = duckdb.connect(str(DB_PATH))

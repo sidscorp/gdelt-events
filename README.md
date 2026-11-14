@@ -67,6 +67,9 @@ pipeline/              # ingest → tag/match → embed → faiss → cluster �
   tagger.py, fda_matcher.py, embedder.py, embedding_store.py
   build_faiss_index.py, build_clusters.py, cluster_schema.py, pruner.py
   prewarm_briefings.py, warm_feed.py, perf_summary.py
+  entrypoints: gdelt_ingest.py, gdelt_backfill.py, gdelt_gal_backfill.py,
+    gdelt_fda_backfill.py, rebuild_tags.py, build_gal_recent.py,
+    create_indexes.py, gdelt_status.py, gdelt_client.py
 
 dashboard/             # Flask app (modular)
   app.py               # thin app assembly: create app, logger, hooks, register blueprints
@@ -84,6 +87,11 @@ dashboard/             # Flask app (modular)
     js/                # rum.js, dashboard.js, markdown.js, portal.js, search.js
     sw.js, manifest.json, icons
 
+scripts/               # local tooling: search.py CLI, sync_dev.ps1
+deploy/                # Task Scheduler XML + register_*.ps1 (Windows), install.sh (systemd)
+eval/                  # briefing_audit: gold set + per-sentence judge harness
+docs/                  # setup notes, bluesky plans, README screenshots live in docs/assets/
+
 tests/
   smoke.sh             # 20 curl-based endpoint checks
   e2e_smoke.mjs        # Playwright dashboard UI check (renders, dark mode, refetch)
@@ -95,7 +103,7 @@ tests/
 ```bash
 python -m venv .venv && source .venv/bin/activate   # .venv\Scripts\activate on Windows
 pip install -r requirements.txt                      # requirements-dev.txt adds pytest
-python gdelt_ingest.py                                # initial ingest
+python pipeline/gdelt_ingest.py                       # initial ingest
 python dashboard/serve.py                             # http://localhost:8015
 ```
 

@@ -3,7 +3,7 @@
 
 $repoDir = "C:\Users\siddh\Code_Library\gdelt-events"
 $python = "$repoDir\.venv\Scripts\python.exe"
-$script = "$repoDir\gdelt_ingest.py"
+$script = "$repoDir\pipeline\gdelt_ingest.py"
 $taskName = "GDELT-Ingest"
 $logDir = "$repoDir\data\logs"
 

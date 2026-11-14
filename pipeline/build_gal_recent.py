@@ -18,6 +18,15 @@ import sys
 import time
 from datetime import datetime, timedelta
 
+import sys
+from pathlib import Path
+
+# Run as a script from anywhere: put the repo root on sys.path so the
+# `pipeline` package resolves.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from pipeline.config import DATA_DIR, DB_PATH
 from pipeline.loader import _open_connection
 from pipeline.gal_loader import GAL_RECENT_KEEP_DAYS

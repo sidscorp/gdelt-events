@@ -10,6 +10,15 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
+import sys
+from pathlib import Path
+
+# Run as a script from anywhere: put the repo root on sys.path so the
+# `pipeline` package resolves.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from pipeline.config import DATA_DIR, DB_PATH, GAL_RAW_DIR, RAW_DIR
 
 

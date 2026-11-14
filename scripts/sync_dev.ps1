@@ -79,7 +79,7 @@ foreach ($sub in @("dashboard", "pipeline", "tests", "scripts", "deploy")) {
     Write-Host "  synced $sub"
 }
 
-foreach ($f in @("gdelt_ingest.py", "config.py", "CLAUDE.md", "requirements.txt")) {
+foreach ($f in @("pipeline\gdelt_ingest.py", "CLAUDE.md", "requirements.txt")) {
     $src = Join-Path $tmp $f
     if (Test-Path $src) { Copy-Item $src (Join-Path $dev $f) -Force }
 }

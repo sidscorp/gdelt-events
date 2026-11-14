@@ -14,6 +14,15 @@ import logging
 import sys
 from datetime import datetime, timedelta
 
+import sys
+from pathlib import Path
+
+# Run as a script from anywhere: put the repo root on sys.path so the
+# `pipeline` package resolves.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from pipeline.config import GAL_RAW_DIR
 from pipeline.gal_downloader import backfill_gal
 from pipeline.gal_loader import ensure_gal_indexes, load_gal_batch

@@ -39,7 +39,16 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.rule import Rule
 
-from gdelt_client import (
+import sys
+from pathlib import Path
+
+# Run as a script from anywhere: put the repo root on sys.path so the
+# `pipeline` package resolves.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from pipeline.gdelt_client import (
     build_query, search_gdelt, parse_date,
     normalize_query, interpret_tone, SORT_OPTIONS,
 )

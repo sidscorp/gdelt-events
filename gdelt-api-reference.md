@@ -800,4 +800,4 @@ python search.py "medical device" --source US --domain fda.gov --days 30
 ```
 
 Note: `search.py` currently only uses `artlist` mode. The other modes (timeline, tone, geo)
-would need to be added to `gdelt_client.py` to use from the CLI.
+would need to be added to `pipeline/gdelt_client.py` to use from the CLI.

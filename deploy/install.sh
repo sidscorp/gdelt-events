@@ -38,7 +38,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=$REPO_DIR
-ExecStart=$PY $REPO_DIR/gdelt_ingest.py
+ExecStart=$PY $REPO_DIR/pipeline/gdelt_ingest.py
 Nice=10
 EOF
 sudo cp "$REPO_DIR/deploy/gdelt-ingest.timer" /etc/systemd/system/
@@ -52,6 +52,6 @@ systemctl list-timers gdelt-ingest.timer --no-pager
 echo ""
 echo "=== Done ==="
 echo "Next steps:"
-echo "  1. Run backfill:  cd $REPO_DIR && .venv/bin/python gdelt_backfill.py --days 60"
-echo "  2. Check status:  cd $REPO_DIR && .venv/bin/python gdelt_status.py"
+echo "  1. Run backfill:  cd $REPO_DIR && .venv/bin/python pipeline/gdelt_backfill.py --days 60"
+echo "  2. Check status:  cd $REPO_DIR && .venv/bin/python pipeline/gdelt_status.py"
 echo "  3. Monitor logs:  journalctl -u gdelt-ingest -f"

@@ -59,6 +59,34 @@ Browser  ←→  routes/ → services (articles.py, briefing.py) → db.py
 | Front-end | Server-rendered Jinja + buildless CSS/JS (no bundler); installable PWA |
 | Data source | GDELT Project v2 (GKG) + v3 (GAL) |
 
+## Design decisions
+
+**One writer, many readers.** Ingest is the only process that writes DuckDB; the web
+tier opens read-only connections with a statement timeout. The file lock never sits in
+a request path, and the cost is freshness: the feed is the last completed 15-minute load.
+
+**Cluster before rendering.** One wire story typically arrives as dozens of syndicated
+copies. Articles are embedded, near-duplicates found with FAISS and re-ranked by exact
+cosine, then rolled into a single event with a source count and a permalink. The feed
+shows events, not copies.
+
+**First paint never waits on the database.** Server rendering reads a warmed in-process
+cache. `warm_feed.py` keeps page 1 hot, and a cache miss degrades to the client-rendered
+shell instead of opening DuckDB mid-request.
+
+**Pills are judged, then measured.** Keyword matching and embeddings propose candidates;
+an LLM judge rules on the ambiguous ones. Each pill's precision is measured against a
+sample before its tags go live (Europe 0.94, Asia 0.88, United States 0.98 at the last
+measurement), and a pill that scores badly is retuned rather than shipped.
+
+**Briefings are verified, not just generated.** Every claim in an AI briefing is checked
+against the source articles it cites, and `eval/briefing_audit` scores the writer against
+a hand-labelled gold set. The first audit found roughly half of sentences only partly
+supported, which is why the verifier sits in the publish path rather than in a report.
+
+**Two test layers.** Offline tests run in CI and cover pure logic and render contracts.
+The live layer exercises a running deployment and is excluded by default (`-m live`).
+
 ## Project structure
 
 ```

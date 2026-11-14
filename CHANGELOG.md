@@ -175,7 +175,10 @@ tense, no significance verbs, name the subject, no leading pronouns") and
 re-checks; a deterministic salvage keeps the first sentence when that fails.
 `grounding.repaired` records which path produced a post. (2) Region pills
 (`us`, `europe`, `asia`) now need 5 distinct sources, both at scan time
-(`REGION_MIN_SOURCES`) and in `auto_thresholds`; topical pills keep 3.
+(`REGION_MIN_SOURCES`) and in `auto_thresholds`; topical pills keep 3. Region
+pills also get 5 posts/day each (`TOPIC_POST_CAPS`) instead of 3 — a flat 3 made
+a queue holding only `us` items go silent for hours. One stale pre-gate item
+(the K-pop residency, 3 sources) was rejected.
 **Why** — 3-4 candidates a day were reaching Sidd because the gate objected to
 phrasing rather than facts ("predictive, advisory, or causal language" on the
 Alaska governor and Cambodia summit items; a malformed JSON answer on the

@@ -95,6 +95,10 @@ MIN_SOURCES = 3
 # celebrity items sourced from 3 outlets.
 REGION_TOPIC_IDS = frozenset({"us", "europe", "asia"})
 REGION_MIN_SOURCES = 5
+# A region pill covers a whole continent, so its daily share cannot be the same
+# as one narrow subject's. 2026-11-14: with a flat 3/topic cap, a queue holding
+# only `us` items went silent for hours behind a cap that was doing its job.
+TOPIC_POST_CAPS = {"us": 5, "europe": 5, "asia": 5}
 # A single judge-approved member assigns the topic to its near-duplicate event
 # cluster. Requiring two independently tagged variants sounded safer, but a
 # production replay showed it suppressed every fresh candidate: pill scoring
@@ -929,8 +933,9 @@ def publish_one(dry_run: bool = False) -> int:
     for candidate in queue:
         # A human approval outranks the per-topic throttle — Sidd reviewed it
         # deliberately and expects it to post. The 10/day total cap still binds.
+        cap = TOPIC_POST_CAPS.get(candidate["topic_id"], MAX_TOPIC_POSTS_24H)
         if candidate.get("reviewed_by") is None and \
-                topic_counts.get(candidate["topic_id"], 0) >= MAX_TOPIC_POSTS_24H:
+                topic_counts.get(candidate["topic_id"], 0) >= cap:
             skipped.append(candidate["topic_id"])
             continue
         if dry_run:
@@ -946,8 +951,8 @@ def publish_one(dry_run: bool = False) -> int:
         except Exception as exc:
             mark_publish_error(candidate["cluster_id"], str(exc))
             raise
-    LOG.info("publish skipped: all %d approved candidates are at the %d/topic cap (%s)",
-             len(queue), MAX_TOPIC_POSTS_24H, ", ".join(sorted(set(skipped))))
+    LOG.info("publish skipped: all %d approved candidates are at their per-topic cap (%s)",
+             len(queue), ", ".join(sorted(set(skipped))))
     return 0
 
 

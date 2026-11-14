@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 # Smaller = lower memory, more disk churn. Larger = faster but more RAM.
 BATCH_COMMIT_SIZE = 50
 
-# Cap DuckDB memory. rainbow-boi has 48 GB total; 8 GB leaves plenty for
+# Cap DuckDB memory. The gpu-host has 48 GB total; 8 GB leaves plenty for
 # Frigate + Ollama + other workloads.
 DUCKDB_MEMORY_LIMIT = "8GB"
 

@@ -5,7 +5,7 @@ any FDA-registered medical device manufacturer in either the GKG
 V2ENHANCEDORGANIZATIONS field, the extracted page title, or the GAL title.
 
 Aho-Corasick scales to 20K+ patterns with near-linear throughput (~56K
-rows/sec for GKG with typical org-field sizes on rainbow-boi, ~2 min for a
+rows/sec for GKG with typical org-field sizes on the gpu-host, ~2 min for a
 full 6.8M-row scan). Regex alternation with word boundaries was 120x slower
 in benchmarks — the word-boundary check defeats RE2's automaton optimization.
 

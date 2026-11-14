@@ -1,7 +1,7 @@
 #!/bin/bash
 # Linux (systemd) installer for the GDELT ingest pipeline.
 #
-# NOTE: Production runs on Windows (rainbow-boi) via Task Scheduler — see
+# NOTE: Production runs on Windows (the gpu-host) via Task Scheduler — see
 # deploy/register_task.ps1 and deploy/register_dashboard.ps1, which are the
 # authoritative deploy. This script is the Linux-parity reference installer:
 # it sets up the venv, the 15-minute ingest service, and its timer.

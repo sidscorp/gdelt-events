@@ -549,7 +549,7 @@ def grounded_explanation(candidate: dict) -> tuple[str, str, dict, str]:
 
 
 def _web_search(query: str, n: int = 5) -> list[dict]:
-    """Self-hosted SearXNG (snambiar-linux); free, no key. Empty list on failure."""
+    """Self-hosted SearXNG; free, no key. Empty list on failure."""
     try:
         url = SEARCH_URL + "?" + urllib.parse.urlencode({"q": query, "format": "json"})
         with urllib.request.urlopen(url, timeout=15) as response:

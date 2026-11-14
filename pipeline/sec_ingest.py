@@ -38,7 +38,7 @@ REPO = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO / "data"
 LOG_DIR = DATA_DIR / "logs"
 
-UA = "gdeltmonitor.com sidd@snambiar.com"
+UA = "gdeltmonitor.com ops@example.com"
 BULK_URL = "https://www.sec.gov/Archives/edgar/daily-index/xbrl/companyfacts.zip"
 SUBMISSIONS_ZIP = "https://www.sec.gov/Archives/edgar/daily-index/bulkdata/submissions.zip"
 DAILY_IDX = "https://www.sec.gov/Archives/edgar/daily-index/{yr}/QTR{q}/form.{ymd}.idx"

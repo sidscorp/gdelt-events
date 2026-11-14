@@ -93,7 +93,7 @@ def social_pending():
     """Machine-readable pending queue for the beardy notify poller.
 
     Token-gated (data/.social_notify_token, X-GDELT-Social-Token header) rather
-    than session auth — this is called by a timer on snambiar-linux, not a browser.
+    than session auth — this is called by a timer on the pipeline host, not a browser.
     """
     token_file = DATA_DIR / ".social_notify_token"
     expected = token_file.read_text(encoding="utf-8").strip() if token_file.exists() else ""

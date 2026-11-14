@@ -1,6 +1,6 @@
 """Bulk-embed all English GAL articles for FAISS-ready vector storage.
 
-Designed to run on rainbow-boi where Ollama is local. Resumable — saves
+Designed to run on the gpu-host where Ollama is local. Resumable — saves
 progress after each chunk so it picks up where it left off if interrupted.
 
 Usage:

@@ -1,4 +1,4 @@
-# Core runtime — pinned to what production runs (rainbow-boi .venv, Python 3.13)
+# Core runtime — pinned to what production runs (gpu-host .venv, Python 3.13)
 requests==2.33.1
 duckdb==1.5.1
 Flask==3.1.3

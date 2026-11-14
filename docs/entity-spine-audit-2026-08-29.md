@@ -5,7 +5,7 @@ auto-join alias rows carrying news evidence (`auto_join AND gkg_mentions > 0`). 
 (an entity's own SEC/FDA name matching itself) are excluded — auditing
 `ABBOTT LABORATORIES -> ABBOTT LABORATORIES` measures nothing.
 Adjudicated by hand 2026-08-29 against the entity's name, ticker, exchange and SIC.
-Raw sample kept at `data/entity_audit.tsv` on rainbow-boi.
+Raw sample kept at `data/entity_audit.tsv` on gpu-host.
 
 ## Two different things get measured, and they must not be conflated
 

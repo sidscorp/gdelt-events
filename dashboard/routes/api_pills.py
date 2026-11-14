@@ -54,7 +54,7 @@ def api_pills_create():
         except (TypeError, ValueError):
             scan_days = 60
 
-        # Embed the description via rainbow-boi
+        # Embed the description via Ollama
         import sys, struct
         _pipeline = str(Path(__file__).resolve().parent.parent / "pipeline")
         if _pipeline not in sys.path:

@@ -26,7 +26,7 @@ tests/        smoke.sh (20 curl checks) · e2e_smoke.mjs (Playwright UI) · test
 deploy/       register_dashboard.ps1, register_task.ps1 (Windows — production), install.sh (Linux reference)
 ```
 
-## Deploy / run (production = Windows, rainbow-boi)
+## Deploy / run (production = Windows, gpu-host)
 Only the owner-approved release operator changes production. Workers commit locally;
 Sidd pushes. Security fixes are deployed and verified before public publication.
 Commit the candidate and verification entry first, test with isolated data and workers
@@ -71,7 +71,7 @@ So, for any change that reaches prod:
    stale silently because nothing tests them. If you touched the thing a page describes,
    re-read the page.
 4. **Post to the shared news feed** so other machines see it:
-   `ssh snambiar@snambiar-linux "~/news/news.sh claude-code '<what changed>'"`.
+   post a one-line summary (what changed, and why) to the shared team news feed.
 
 ## Gotchas (learned the hard way)
 - **Jinja caches templates in prod** — a template or base.html change needs a dashboard **restart** to show. Static (css/js) serve fresh.
@@ -83,10 +83,10 @@ So, for any change that reaches prod:
 
 ## Keys (under data/, gitignored)
 - `data/.openrouter_key` — **misnamed**: holds a LiteLLM *virtual key* for the self-hosted
-  gateway at llm.snambiar.com, which routes briefings and the pill judge to Fireworks.
+  gateway at llm.internal, which routes briefings and the pill judge to Fireworks.
   OpenRouter is not in the path at all (the real OpenRouter key is parked at
   `.openrouter_key.orig`).
-- `data/.langfuse_key` — env-style `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY`/`LANGFUSE_HOST`. Briefing tracing is no-op if absent. Project: "GDELT Monitor" on langfuse.snambiar.com.
+- `data/.langfuse_key` — env-style `LANGFUSE_PUBLIC_KEY`/`LANGFUSE_SECRET_KEY`/`LANGFUSE_HOST`. Briefing tracing is no-op if absent. Project: "GDELT Monitor" on langfuse.internal.
 
 ## Tests
 ```bash

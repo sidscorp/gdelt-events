@@ -57,7 +57,7 @@ with the news cycle and are checked by operational health metrics instead.
 
 ## Layer 3 — LLM relevance validation (scaffold, manual)
 
-Uses the local Ollama on rainbow-boi to score top-N article relevance against each query's intent. **Not wired into CI** — this is for tuning, not gating.
+Uses the local Ollama on gpu-host to score top-N article relevance against each query's intent. **Not wired into CI** — this is for tuning, not gating.
 
 ```bash
 # Score every query flagged with llm_check: true

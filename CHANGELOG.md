@@ -201,6 +201,23 @@ thing was started and stopped before this change.
 
 ---
 
+## 2026-11-14 — Repo hygiene pass 3: generic host names
+
+**What** — Replaced the fleet-specific names in the prose, changelog, docs, code comments
+and docstrings with generic ones (`gpu-host`, `pipeline-host`, `llm.internal`,
+`langfuse.internal`), and pointed the tuning tool's default dashboard URL at the current
+domain instead of an old subdomain.
+**Why** — This started as a personal tool and kept growing into something worth showing
+people; the machine names read as noise to anyone else opening the repo. They remain in git
+history and are not secret.
+**Deliberately unchanged** — the LLM gateway URL constants, the Ollama host default in
+`tests/llm_validate.py`, and the `.mailmap` address. Those are functional values the running
+system (or git) reads; renaming them here would require env plumbing on the host in the same
+change.
+**Files** — 18 files, comments and docs only (plus one SEC User-Agent string).
+
+---
+
 ## 2026-11-14 — Repo hygiene pass 2: SSR tests, flat-root cleanup, branches
 
 **What** — (1) `tests/test_ssr_server.py`: offline SSR contract tests covering
@@ -435,7 +452,7 @@ pipeline/social_publisher.py.
 **What** — New read-only endpoint returns pending review candidates with their
 shadow verdicts. Auth is a shared token (data/.social_notify_token,
 X-GDELT-Social-Token header), not a login session — the caller is a systemd
-timer on snambiar-linux that drops new candidates into beardy's inbox so Sidd
+timer on pipeline-host that drops new candidates into beardy's inbox so Sidd
 gets a Matrix DM when something needs review.
 **Why** — Review candidates expire 6h after queueing; without a notification
 they died unreviewed (66 of 69 did). Calibration needs decisions, and decisions
@@ -444,7 +461,7 @@ need Sidd to know a candidate exists.
 list; end-to-end DM verified via beardy.
 **Files** — dashboard/routes/social.py, dashboard/social_store.py.
 **Notes** — Token also lives in ~/.config/gdelt-social-notify.env on
-snambiar-linux (chmod 600). Endpoint is exposed via Cloudflare like the rest of
+pipeline-host (chmod 600). Endpoint is exposed via Cloudflare like the rest of
 the dashboard; the token is the only gate, so rotate if it leaks.
 
 ---
@@ -452,7 +469,7 @@ the dashboard; the token is the only gate, so rotate if it leaks.
 ## 2026-10-30 — Shadow auto-approver for Bluesky candidates
 
 **What** — Every newly queued candidate now also gets a shadow verdict: one
-self-hosted SearXNG query (snambiar-linux:8889, free) + one LLM call judging
+self-hosted SearXNG query (pipeline-host:8889, free) + one LLM call judging
 corroboration, overstatement (attribution must stay attributed — the Binance
 lesson), and relevance. The verdict (would_post/would_block + reason) is stored
 in the new social_shadow table and shown on the review card. It NEVER changes
@@ -462,7 +479,7 @@ bypassing the 50-decision calibration gate, the shadow approver accumulates
 paired decisions against human review; auto gets flipped only once agreement is
 ~90%+ with zero shadow-approves that a human rejected.
 **How it was verified** — Jinja parse + py_compile; live shadow_verdict() test
-on rainbow-boi against a real candidate (search hits + verdict recorded);
+on gpu-host against a real candidate (search hits + verdict recorded);
 shadow rows populate on the next queued candidate.
 **Files** — pipeline/social_publisher.py, dashboard/social_store.py,
 dashboard/routes/social.py, dashboard/templates/social_admin.html.
@@ -537,7 +554,7 @@ the 409 getRecord branch rather than posting a duplicate.
 **How it was verified** — TID output validated against the official atproto SDK
 TID regex (13 chars, base32-sortable alphabet, leading-char range), determinism
 and per-cluster uniqueness checked locally; py_compile + live task run on
-rainbow-boi, which published the approved Binance candidate.
+gpu-host, which published the approved Binance candidate.
 **Files** — pipeline/social_publisher.py.
 **Notes** — social_publications rows created before this fix keep the old
 `evt-*` record_key; it is local bookkeeping only and never sent to Bluesky.
@@ -557,7 +574,7 @@ Bluesky docs the 400 message names the offending field; we were discarding it.
 Ruled out beforehand: credentials/session, account status (active, bot label set),
 clock skew, record schema (validated against the official atproto SDK with and
 without the thumb blob), text length, facet byte offsets.
-**How it was verified** — py_compile + `--dry-run` on rainbow-boi; the real error
+**How it was verified** — py_compile + `--dry-run` on gpu-host; the real error
 body will be captured by the next approved-candidate publish attempt.
 **Files** — pipeline/social_publisher.py.
 **Notes** — Diagnostic-only; success path unchanged. The 409 duplicate branch in
@@ -695,7 +712,7 @@ set. Publishing the existing AI briefing directly would attach predictions and c
 claims to an automated account, so the social writer has a narrower evidence contract and
 falls back to the neutral event title whenever generation or verification is uncertain.
 
-**How it was verified** — On rainbow-boi, the focused social/importance/SSR suite reported
+**How it was verified** — On gpu-host, the focused social/importance/SSR suite reported
 24 passed in 3.05s; the Flask route/Jinja import check and PowerShell parser check also passed.
 A production-DuckDB replay found 217 clusters and eight operational-topic
 clusters in the latest 24 hours; it also showed why topic assignment must operate at cluster
@@ -971,7 +988,7 @@ back healthy on :8016. Slice window moved from 2026-07-19..07-26 to
 **2026-08-22 19:46 .. 2026-08-29 22:47**, latest article 53 minutes old, 1,818,352 rows total
 (gal 782,451 / gal_recent 782,451 / gkg 140,024 / article_tags 29,384 / clusters 1,836 /
 cluster_members 5,774 + the reference tables whole). `tests/smoke.sh` run from the Mac against
-`BASE=http://rainbow-boi:8016`: **20/20**. Prod smoke re-run: 20/20.
+`BASE=http://gpu-host:8016`: **20/20**. Prod smoke re-run: 20/20.
 
 **Files** - `scripts/build_dev_snapshot.py` (new).
 
@@ -1030,7 +1047,7 @@ clean.) No endpoint was added and no sec-tracker code changed - the 404s had exa
 and it was not in the application.
 
 This is the same class as the documented "ssh-spawned processes survive as unkillable orphans"
-gotcha, which until now was recorded only against rainbow-boi. It happens on snambiar-linux too,
+gotcha, which until now was recorded only against gpu-host. It happens on pipeline-host too,
 and an orphan can outlive the session that made it by months without anyone noticing, because
 the only symptom is log noise on a service nobody was watching.
 
@@ -1950,7 +1967,7 @@ ingest lag — the 1h window returns 0 with no filters at all).
   against ~$132/month for the 102-combo × 5 plan on Cerebras with threads everywhere.
   This is a projection from measured token counts and configured rates — **the real
   number should be checked against `spend_lib` in a few days.**
-- Running briefings on rainbow-boi's local GPU was considered and rejected: ~$0.22/mo
+- Running briefings on gpu-host's local GPU was considered and rejected: ~$0.22/mo
   of electricity vs ~$1.40 cloud, for a saving of about a dollar a month, in exchange
   for coupling briefings to the GPU that already runs Frigate and the embedding model
   (which silently died for 11 days in July), plus citation quality risk on a small model.

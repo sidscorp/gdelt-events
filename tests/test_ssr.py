@@ -2,7 +2,7 @@
 
 Run against a live instance with a warm feed cache:
     BASE=https://gdeltmonitor.com pytest tests/test_ssr.py -v
-    BASE=http://rainbow-boi:8016 pytest tests/test_ssr.py -v
+    BASE=http://localhost:8016 pytest tests/test_ssr.py -v
 
 The SSR article assertions require the cache to be warm (pipeline/warm_feed.py
 runs every ~2 minutes in prod). A cold instance legitimately serves the empty

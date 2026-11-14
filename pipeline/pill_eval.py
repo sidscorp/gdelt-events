@@ -1,7 +1,7 @@
 """LLM-judged precision evaluation for dashboard pill categories.
 
 For each pill, samples recent tagged articles and asks an LLM judge
-(cerebras-fast via the llm.snambiar.com gateway) whether each article is
+(via the self-hosted LLM gateway) whether each article is
 actually relevant to the pill's intent. Produces a per-pill precision table
 and a JSON report under data/pill_eval/.
 

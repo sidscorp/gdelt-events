@@ -22,7 +22,7 @@ from _paths import OPENROUTER_KEY_PATH
 req_log = logging.getLogger("dashboard.requests")
 
 
-# Routed through the self-hosted LLM gateway (LiteLLM @ llm.snambiar.com). The key
+# Routed through the self-hosted LLM gateway (LiteLLM). The key
 # file now holds the gateway virtual key, and the model is a gateway alias.
 OPENROUTER_URL = "https://llm.snambiar.com/v1/chat/completions"
 # Fireworks gpt-oss-120b ($0.15/$0.60 per 1M) — NOT cerebras-fast. Cerebras is
@@ -84,7 +84,7 @@ def _get_openrouter_key():
 # Keys live in <data>/.langfuse_key (gitignored), env-style:
 #   LANGFUSE_PUBLIC_KEY=pk-lf-...
 #   LANGFUSE_SECRET_KEY=sk-lf-...
-#   LANGFUSE_HOST=https://langfuse.snambiar.com
+#   LANGFUSE_HOST=https://langfuse.internal
 LANGFUSE_KEY_PATH = _OPENROUTER_KEY_PATH.parent / ".langfuse_key"
 _langfuse = None
 _langfuse_checked = False

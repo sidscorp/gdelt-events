@@ -10,7 +10,7 @@ Run manually:
     python tests/llm_validate.py --query gal_supply_chain_week --verbose
 
 Requires a reachable Ollama instance. The dashboard pipeline already uses
-rainbow-boi's Ollama (nomic-embed-text) for the planned transformer classifier,
+the gpu-host's Ollama (nomic-embed-text) for the planned transformer classifier,
 so the same host answers classification prompts for these relevance checks.
 
 This file is DELIBERATELY not imported by test_queries.py — it's not a pytest
@@ -24,9 +24,9 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-DEFAULT_DASHBOARD = "https://gdelt.snambiar.com"
+DEFAULT_DASHBOARD = "https://gdeltmonitor.com"
 DEFAULT_OLLAMA = "http://rainbow-boi:11434"
-DEFAULT_MODEL = "gemma3:latest"  # small-ish, fast on rainbow-boi 4060
+DEFAULT_MODEL = "gemma3:latest"  # small-ish, fast on a 4060
 
 CASES_FILE = Path(__file__).parent / "golden_queries.json"
 

@@ -1,0 +1,6 @@
+# Lint-only dependency, kept separate so the CI lint job does not have to
+# install the runtime stack (duckdb, faiss, pandas) just to check syntax.
+# Included by requirements-dev.txt so a local dev install matches CI.
+# Pinned to a minor: rule behaviour can shift between ruff releases, and this
+# gate is meant to be stable rather than to chase new rules.
+ruff>=0.17,<0.18

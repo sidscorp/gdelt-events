@@ -4,3 +4,6 @@ pytest>=8.0
 
 # scripts/search.py CLI (rich console output)
 rich>=13
+
+# Lint gate (also installed on its own by the CI lint job)
+-r requirements-lint.txt

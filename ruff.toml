@@ -1,0 +1,38 @@
+# Ruff configuration — lint only. There is no formatter step here on purpose:
+# `ruff format` would rewrite nearly every file, and this repo is linted to
+# catch breakage, not to re-style 20k lines of working code.
+#
+# The rule set below is deliberately narrow. Each family was chosen because it
+# is already clean across the tree (see CHANGELOG, 2026-11-14), so CI starts
+# green and the gate only fires on new defects:
+#   E9, F7, F63, F82 — the code cannot run (syntax error, undefined name,
+#                      invalid comparison)
+#   F6               — malformed str.format / % field
+#   E722             — bare `except:` swallowing everything
+#   E713, E714       — `not x in y` / `not x is y` precedence bugs
+#   W605             — invalid escape sequence in a string literal
+#   B006             — mutable default argument shared across calls
+#   PGH004           — blanket `# noqa` with no rule codes
+#
+# Deliberately NOT enabled yet, with current violation counts, because each
+# needs a code change first: E4/E7/E9/F default set 170 (F401 unused imports 33,
+# E402 module-import-not-at-top 44 — the moved entrypoints bootstrap sys.path
+# before importing), E501 943 (line length), I 74 (import sort), F841 5,
+# F811 9, F541 10.
+
+target-version = "py313"
+
+[lint]
+select = [
+    "B006",
+    "E713",
+    "E714",
+    "E722",
+    "E9",
+    "F6",
+    "F63",
+    "F7",
+    "F82",
+    "PGH004",
+    "W605",
+]

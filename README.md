@@ -6,6 +6,16 @@ Real-time global news intelligence dashboard. Continuously ingests the GDELT Pro
 
 Live at [gdeltmonitor.com](https://gdeltmonitor.com)
 
+![GDELT Monitor home page: curated topic pills over an AI briefing of the last three hours](docs/assets/home.png)
+
+Curated views filter the feed to one topic. Each article card shows why it matched, and near-duplicate stories roll up into a single event:
+
+![Semiconductors curated view with AI-judged article cards, source outlets, and event rollups](docs/assets/curated-view.png)
+
+Every event gets a shareable permalink that gathers the outlets covering it, with an AI-assisted explanation checked against those sources:
+
+![Event permalink page for one story covered by 40 sources, with a source-grounded explanation](docs/assets/event.png)
+
 ## Features
 
 - **Preset monitoring views**: Medical Device Companies (FDA matcher), Supply Chain Alerts, Semiconductor & Chip Geopolitics, AI & Machine Learning, AI Regulation & Policy, and more.

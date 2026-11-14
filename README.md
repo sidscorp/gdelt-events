@@ -1,5 +1,7 @@
 # GDELT Monitor
 
+[![tests](https://github.com/sidscorp/gdelt-events/actions/workflows/tests.yml/badge.svg)](https://github.com/sidscorp/gdelt-events/actions/workflows/tests.yml)
+
 Real-time global news intelligence dashboard. Continuously ingests the GDELT Project's news feed — 44,000+ sources worldwide — de-duplicates it into distinct events, and surfaces the signals that matter through curated topic filters, custom keyword/semantic monitoring, semantic search, and on-demand AI briefings.
 
 Live at [gdeltmonitor.com](https://gdeltmonitor.com)

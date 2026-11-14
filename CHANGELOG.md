@@ -17,6 +17,41 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-14 — Repo hygiene: collectable tests, CI, licence, screenshots
+
+**What** — No application behaviour changed. The test suite runs end to end:
+`test_social_title.py` is collectable, the social review test asserts the
+post-`d4a20ca` TID record key, and the live-network SSR module is marked `live`.
+Added a GitHub Actions workflow, an MIT `LICENSE`, README screenshots, and repo
+topics/homepage.
+
+**Why** — `python -m pytest tests/ -m "not live"` died with INTERNALERROR:
+`tests/test_social_title.py` had a module-level `sys.exit()`, so pytest aborted
+during collection and none of its 18 checks ran. `test_social.py` still asserted
+`publisher._record_key`, deleted in `d4a20ca` when bsky.social began rejecting
+non-TID record keys — a permanently failing test. With no CI, none of this
+showed up on push, and the repo presented as unmaintained.
+
+**How it was verified** — `python -m pytest tests/ -m "not live"` →
+**125 passed, 1 skipped, 36 deselected** (was: collection crash). Same result in
+a clean Python 3.13 venv built from `requirements.txt` + `requirements-dev.txt`.
+First Actions run (43616780395) green with the same 125 passed. Deliberately
+corrupting the persisted record key makes the social test fail, so the rewritten
+assertion is not vacuous.
+
+**Files** — `tests/test_social_title.py`, `tests/test_social.py`,
+`tests/test_ssr.py`, `.github/workflows/tests.yml`, `README.md`, `LICENSE`,
+`docs/assets/home.png`, `docs/assets/curated-view.png`, `docs/assets/event.png`.
+
+**Notes** — `test_ssr.py` fetches gdeltmonitor.com and needs a warm SSR cache;
+it was never marked `live`, although `tests/README.md` and `pytest.ini` both say
+the default offline profile excludes the live layers. The marker is a
+classification fix, not a weakened assertion: it still runs under `-m live`.
+Separately, several curated views (e.g. `geopolitics-conflict`) served **0**
+rendered articles from production while this was checked — worth its own look.
+
+---
+
 ## 2026-11-12 — Pre-warm the region feeds (and why the pills looked cold)
 
 **What** — `pipeline/warm_feed.py` gains `europe`, `asia`, `us` in `PILL_COMBOS`,

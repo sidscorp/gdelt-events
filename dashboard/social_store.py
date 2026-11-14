@@ -362,28 +362,56 @@ def expire_stale() -> int:
     return max(0, n)
 
 
-def next_approved() -> dict | None:
+def approved_queue(limit: int = 50) -> list[dict]:
+    """Approved candidates still inside the 24h publish window, best first.
+
+    2026-11-14: the publisher used to take only the head of this queue and
+    give up if that one candidate's topic was at its daily cap, which stalled
+    the whole feed for 17h behind one capped `us` item. It now walks the queue
+    and skips topics that are full.
+    """
     con = get_social_db()
-    row = con.execute(
+    rows = con.execute(
         "SELECT * FROM social_candidates WHERE status='approved' "
         "AND COALESCE(reviewed_at, created_at) > datetime('now','-24 hours') "
-        "ORDER BY importance_score DESC, created_at ASC LIMIT 1"
-    ).fetchone()
+        "ORDER BY importance_score DESC, created_at ASC LIMIT ?",
+        (limit,),
+    ).fetchall()
     con.close()
-    return _row_dict(row)
+    return [dict(r) for r in rows]
 
 
-def publication_counts(topic_id: str) -> tuple[int, int, str | None]:
+def next_approved() -> dict | None:
+    queue = approved_queue(1)
+    return queue[0] if queue else None
+
+
+def publication_topic_counts() -> dict[str, int]:
+    """Posts per topic in the trailing 24h, for the per-topic cap."""
+    con = get_social_db()
+    rows = con.execute(
+        "SELECT topic_id, count(*) FROM social_publications "
+        "WHERE published_at >= datetime('now','-24 hours') AND record_uri IS NOT NULL "
+        "GROUP BY topic_id"
+    ).fetchall()
+    con.close()
+    return {r[0]: r[1] for r in rows}
+
+
+def publication_counts(topic_id: str | None = None) -> tuple[int, int, str | None]:
     con = get_social_db()
     total = con.execute(
         "SELECT count(*) FROM social_publications "
         "WHERE published_at >= datetime('now','-24 hours') AND record_uri IS NOT NULL"
     ).fetchone()[0]
-    topic = con.execute(
-        "SELECT count(*) FROM social_publications WHERE topic_id=? "
-        "AND published_at >= datetime('now','-24 hours') AND record_uri IS NOT NULL",
-        (topic_id,),
-    ).fetchone()[0]
+    if topic_id is None:
+        topic = 0
+    else:
+        topic = con.execute(
+            "SELECT count(*) FROM social_publications WHERE topic_id=? "
+            "AND published_at >= datetime('now','-24 hours') AND record_uri IS NOT NULL",
+            (topic_id,),
+        ).fetchone()[0]
     latest = con.execute(
         "SELECT max(published_at) FROM social_publications WHERE record_uri IS NOT NULL"
     ).fetchone()[0]

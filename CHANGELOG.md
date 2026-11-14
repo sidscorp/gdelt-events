@@ -166,6 +166,27 @@ thing was started and stopped before this change.
 
 ---
 
+## 2026-11-14 — Social: fix the 17h silent stall behind one capped topic
+
+**What** — `publish_one` now walks the whole approved queue instead of testing
+only the head. It skips topics that are at the 3/24h cap and publishes the best
+candidate that still has room; a cap-blocked head (usually `us`, the broadest
+pill) no longer stops every other topic. Candidates Sidd approved by hand
+bypass the per-topic cap (the 10/day total still binds). Skips are logged
+instead of returning a silent 0. New `approved_queue()` /
+`publication_topic_counts()` in social_store.
+**Why** — Between 2026-11-13 21:25 and 2026-11-14 15:26 the feed posted
+nothing. Runs reported `ok` with `published=0` every 5 minutes because the
+head of the queue was a `us` item and `us` already had 3 posts in 24h, so the
+function returned 0 without ever looking at the Asia/Europe/Supply-Chain
+items behind it. Sidd's own manual approvals (10:23) hit the same wall.
+**How it was verified** — dry run picked the Asia tanker story off the queue
+(us skipped at 3/3); real run published it at 15:26. Probe shows the queue
+walking us(auto, capped) -> supply-chain next.
+**Files** — pipeline/social_publisher.py, dashboard/social_store.py.
+
+---
+
 ## 2026-11-13 — Social: all 19 topics, faster publish cadence
 
 **What** — PILOT_TOPICS now covers every curated category (was 9): adds

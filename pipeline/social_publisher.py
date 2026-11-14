@@ -35,9 +35,9 @@ sys.path.insert(0, str(REPO / "dashboard"))
 
 from importance import compute_importance  # noqa: E402
 from social_store import (  # noqa: E402
-    begin_run, count_created_today, count_shadow_today, expire_stale, finish_run,
-    get_social_db, init_social_db, mark_publish_error, mark_published,
-    mark_publishing, next_approved, publication_counts, recent_titles,
+    approved_queue, begin_run, count_created_today, count_shadow_today, expire_stale,
+    finish_run, get_social_db, init_social_db, mark_publish_error, mark_published,
+    mark_publishing, publication_counts, publication_topic_counts, recent_titles,
     record_shadow, set_setting, setting, shadow_done, upsert_candidate,
     update_post_text,
 )
@@ -813,11 +813,18 @@ def publish_candidate(candidate: dict) -> tuple[str, str | None]:
 
 
 def publish_one(dry_run: bool = False) -> int:
-    candidate = next_approved()
-    if not candidate:
-        return 0
-    total, topic, latest = publication_counts(candidate["topic_id"])
-    if total >= MAX_POSTS_24H or topic >= MAX_TOPIC_POSTS_24H:
+    """Publish the best approved candidate whose topic still has room today.
+
+    2026-11-14: this used to look at only the head of the approved queue and
+    return 0 if that topic was capped, so one full topic (usually `us`, the
+    broadest pill) blocked every other topic — the feed went silent for 17h
+    while runs reported ok/published=0. Now the queue is walked and capped
+    topics are skipped; the reason is logged instead of failing silently.
+    Candidates Sidd approved by hand bypass the per-topic cap.
+    """
+    total, _, latest = publication_counts(None)
+    if total >= MAX_POSTS_24H:
+        LOG.info("publish skipped: %d posts in trailing 24h (cap %d)", total, MAX_POSTS_24H)
         return 0
     if latest:
         try:
@@ -826,17 +833,34 @@ def publish_one(dry_run: bool = False) -> int:
                 return 0
         except ValueError:
             pass
-    if dry_run:
-        LOG.info("dry-run would publish %s", candidate["cluster_id"])
+    queue = approved_queue(50)
+    if not queue:
         return 0
-    try:
-        uri, cid = publish_candidate(candidate)
-        mark_published(candidate["cluster_id"], uri, cid)
-        LOG.info("published %s as %s", candidate["cluster_id"], uri)
-        return 1
-    except Exception as exc:
-        mark_publish_error(candidate["cluster_id"], str(exc))
-        raise
+    topic_counts = publication_topic_counts()
+    skipped: list[str] = []
+    for candidate in queue:
+        # A human approval outranks the per-topic throttle — Sidd reviewed it
+        # deliberately and expects it to post. The 10/day total cap still binds.
+        if candidate.get("reviewed_by") is None and \
+                topic_counts.get(candidate["topic_id"], 0) >= MAX_TOPIC_POSTS_24H:
+            skipped.append(candidate["topic_id"])
+            continue
+        if dry_run:
+            LOG.info("dry-run would publish %s (%s)",
+                     candidate["cluster_id"], candidate["topic_id"])
+            return 0
+        try:
+            uri, cid = publish_candidate(candidate)
+            mark_published(candidate["cluster_id"], uri, cid)
+            LOG.info("published %s (%s) as %s",
+                     candidate["cluster_id"], candidate["topic_id"], uri)
+            return 1
+        except Exception as exc:
+            mark_publish_error(candidate["cluster_id"], str(exc))
+            raise
+    LOG.info("publish skipped: all %d approved candidates are at the %d/topic cap (%s)",
+             len(queue), MAX_TOPIC_POSTS_24H, ", ".join(sorted(set(skipped))))
+    return 0
 
 
 def calibrate() -> tuple[bool, dict]:

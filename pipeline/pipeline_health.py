@@ -31,7 +31,13 @@ OLLAMA_TASK = "Ollama-Serve"
 INGEST_MAX_AGE_MIN = 20      # ingest runs every 15 min
 EMBED_LOG_MAX_AGE_MIN = 45   # embed task runs every 15 min
 BACKLOG_WINDOW_H = 2         # the incremental embedder looks back 2h
-BACKLOG_MAX = 200            # more than this in a 2h window means it is falling behind
+# The incremental embedder drains in 15-minute batches (a normal cycle finds and
+# embeds ~650), so a few hundred unembedded at any instant is expected between runs.
+# The signal that matters is whether the backlog is DRAINING, so the check compares
+# consecutive samples and only fires on sustained growth or a multi-cycle ceiling.
+BACKLOG_CEILING = 2000       # ~3 normal cycles piled up
+BACKLOG_HISTORY = 3          # consecutive increases before it counts as growth
+BACKLOG_STATE = DATA / ".pipeline_backlog.json"
 FEED_MIN_CARDS = 1
 
 
@@ -110,6 +116,21 @@ def check_embed_run(results: list) -> None:
         results.append(("PASS", "embed-log", f"last run {age:.0f} min ago"))
 
 
+def _read_backlog_history() -> list[int]:
+    try:
+        return [int(x) for x in json.loads(BACKLOG_STATE.read_text())][-BACKLOG_HISTORY:]
+    except (OSError, ValueError, TypeError):
+        return []
+
+
+def _write_backlog_history(values: list[int]) -> None:
+    try:
+        BACKLOG_STATE.parent.mkdir(parents=True, exist_ok=True)
+        BACKLOG_STATE.write_text(json.dumps(values))
+    except OSError:
+        pass
+
+
 def check_backlog(results: list) -> None:
     """Recent articles still missing an embedding — the metric the old watchdog lacked.
 
@@ -132,7 +153,7 @@ def check_backlog(results: list) -> None:
     con = None
     try:
         con = duckdb.connect(str(db), read_only=True)
-        missing = find_missing_urls(con, BACKLOG_MAX + 1, hours_back=BACKLOG_WINDOW_H)
+        missing = find_missing_urls(con, BACKLOG_CEILING + 1, hours_back=BACKLOG_WINDOW_H)
     except Exception as exc:
         # Doppler/busy database during an ingest cycle is normal, not a failure.
         results.append(("WARN", "embed-backlog", f"skipped: {str(exc)[:80]}"))
@@ -144,12 +165,24 @@ def check_backlog(results: list) -> None:
         except Exception:
             pass
     n = len(missing)
-    if n > BACKLOG_MAX:
+    history = _read_backlog_history()
+    history.append(n)
+    history = history[-BACKLOG_HISTORY:]
+    _write_backlog_history(history)
+    trend = " -> ".join(str(x) for x in history)
+
+    grew = (len(history) >= BACKLOG_HISTORY
+            and all(b > a for a, b in zip(history, history[1:])))
+    if n >= BACKLOG_CEILING + 1:
         results.append(("FAIL", "embed-backlog",
-                        f"{n}+ articles unembedded in the last {BACKLOG_WINDOW_H}h "
-                        f"(limit {BACKLOG_MAX})"))
+                        f"backlog at the {BACKLOG_CEILING} ceiling ({n}+ unembedded in "
+                        f"{BACKLOG_WINDOW_H}h; trend {trend})"))
+    elif grew:
+        results.append(("FAIL", "embed-backlog",
+                        f"backlog growing across {BACKLOG_HISTORY} checks: {trend}"))
     else:
-        results.append(("PASS", "embed-backlog", f"{n} unembedded in last {BACKLOG_WINDOW_H}h"))
+        results.append(("PASS", "embed-backlog",
+                        f"{n} unembedded in {BACKLOG_WINDOW_H}h (trend {trend})"))
 
 
 def main() -> int:

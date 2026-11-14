@@ -33,9 +33,10 @@ CreateObject("WScript.Shell").Run cmd, 0, False
 
 $action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "`"$vbs`""
 
-# Start a few minutes past the ingest boundary so a cycle has had time to finish,
+# :18 sits after the :07 embed run and the :13 ingest cycle, so the backlog sample is
+# taken at a stable phase rather than mid-drain.
 # then repeat every 15 minutes (the ingest interval).
-$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddHours(7).AddMinutes(7) `
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).Date.AddHours(7).AddMinutes(18) `
     -RepetitionInterval (New-TimeSpan -Minutes 15) `
     -RepetitionDuration (New-TimeSpan -Days 3650)
 

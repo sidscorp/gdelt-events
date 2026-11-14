@@ -1,7 +1,7 @@
 # deploy/tasks — generated snapshot, do not hand-edit
 
 The scheduled-task definitions here are **output**, not configuration. The
-source of truth is the Windows host (rainbow-boi). These files exist so the
+source of truth is the production Windows host. These files exist so the
 host can be rebuilt after a disk loss, and so that a change to a live task
 shows up as a reviewable diff.
 

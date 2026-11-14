@@ -17,7 +17,7 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
-## 2026-11-14 — Repo hygiene pass 3: task snapshots, stale references, lint gate
+## 2026-11-14 — Repo hygiene pass 4: task snapshots, stale references, lint gate
 
 **What** — No application behaviour changed. Four things. (1) `deploy/tasks/`
 is now generated output: `deploy/export_tasks.ps1` re-exports the live scheduled

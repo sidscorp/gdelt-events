@@ -246,6 +246,37 @@ thing was started and stopped before this change.
 
 ---
 
+## 2026-11-14 — SSR: serve the previous payload across the ingest gap
+
+**What** — `_ssr_feed` falls back to the last cached payload for the same query when the
+current `data_version` key is cold, bounded to one ingest cycle (`_SSR_STALE_MAX_S`, 900s).
+The SSR path still never opens DuckDB.
+**Why** — The feed cache key carries `data_version`, so each 15-minute ingest invalidates
+every entry at once and `warm_feed` refills them on its next 2-minute run. Sampling
+production every 8s put the window at **14 consecutive zero-article samples, 18:14:49 →
+18:16:35 UTC**, immediately after the 18:13:54 ingest; warm either side. Cold responses are
+not slower (0.11s vs 0.13s warm) — the shell simply has no content, so the real paint waits
+for the client fetch.
+**How it was verified** — Two regression tests, both failing against the previous code (the
+gap test because nothing renders). Post-deploy sampling across a later ingest boundary is
+the production check.
+**Note** — a dashboard *restart* still starts cold, because the cache is empty and there is
+no previous payload to serve; `warm_feed` covers that within ~2 minutes.
+**Files** — dashboard/routes/pages.py, tests/test_ssr_server.py.
+
+## 2026-11-14 — Fix the deploy-guard scripts under PS 5.1
+
+**What** — `deploy_guard.ps1`, `test_deploy_guard.ps1` and `deploy/export_tasks.ps1` all
+computed a path from `$PSScriptRoot` inside a **parameter default**, which PowerShell 5.1
+evaluates before the variable is populated. Every documented invocation threw
+`Split-Path: empty string`. All three now resolve the default after binding.
+**Why** — Found while deploying: `powershell -File scripts\deploy_guard.ps1 claim ...` failed
+before it could take the lock, so the release-guard path was unusable as documented.
+**How it was verified** — The no-argument forms now run on the host; `test_deploy_guard.ps1`
+runs its contract tests (mismatched tokens, malformed locks, lease lifetime) for the first
+time since it was written.
+**Files** — scripts/deploy_guard.ps1, scripts/test_deploy_guard.ps1, deploy/export_tasks.ps1.
+
 ## 2026-11-14 — Repo hygiene pass 3: generic host names
 
 **What** — Replaced the fleet-specific names in the prose, changelog, docs, code comments

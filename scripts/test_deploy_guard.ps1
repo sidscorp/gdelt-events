@@ -1,7 +1,11 @@
 # Isolated Windows contract tests. Restart service commands are mocked; no real tasks.
-param([string]$Guard=(Join-Path $PSScriptRoot 'deploy_guard.ps1'),
-      [string]$Restart=(Join-Path $PSScriptRoot 'restart_dash.ps1'))
+param([string]$Guard='',
+      [string]$Restart='')
 $ErrorActionPreference='Stop'
+# Resolved here, not in the param block: PS 5.1 leaves $PSScriptRoot empty while
+# parameter defaults are evaluated.
+if (-not $Guard) { $Guard = Join-Path $PSScriptRoot 'deploy_guard.ps1' }
+if (-not $Restart) { $Restart = Join-Path $PSScriptRoot 'restart_dash.ps1' }
 $testRoot=Join-Path ([IO.Path]::GetTempPath()) ('gdelt-lock-test-'+[guid]::NewGuid().ToString())
 New-Item -ItemType Directory $testRoot | Out-Null
 $token=[guid]::NewGuid().ToString()

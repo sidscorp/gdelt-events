@@ -17,9 +17,12 @@ param(
     [string]$Token='',
     [switch]$Force,
     [string]$ExpectedHash='',
-    [string]$RepoRoot=(Split-Path $PSScriptRoot -Parent)
+    # Defaulted in the body: PS 5.1 does not populate $PSScriptRoot while
+    # parameter defaults are evaluated, so this threw on every documented call.
+    [string]$RepoRoot=''
 )
 $ErrorActionPreference='Stop'
+if (-not $RepoRoot) { $RepoRoot = Split-Path $PSScriptRoot -Parent }
 $RepoRoot=[IO.Path]::GetFullPath($RepoRoot)
 $Lock=Join-Path $RepoRoot 'data\.deploy_lock'
 $sha=[Security.Cryptography.SHA256]::Create()

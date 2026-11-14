@@ -14,6 +14,13 @@ import re
 import time
 import urllib.request
 
+import pytest
+
+# Every test here fetches a running dashboard and its warm SSR cache over HTTP,
+# so the module is a live layer (see tests/README.md) and is excluded from the
+# default offline suite by pytest.ini's `-m "not live"`.
+pytestmark = pytest.mark.live
+
 BASE = os.environ.get("BASE", "https://gdeltmonitor.com")
 
 VIEW = "geopolitics-conflict"  # warmed at its 24h default by warm_feed.py

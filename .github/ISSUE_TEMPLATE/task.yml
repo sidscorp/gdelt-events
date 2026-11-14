@@ -50,7 +50,7 @@ body:
       description: >
         Path under tests/cic/ for the browser verification script, if this change
         is visible in the UI. Leave as "n/a" for backend-only work.
-      placeholder: tests/cic/001-ssr-feed.md
+      placeholder: tests/cic/NNN-short-name.md
     validations:
       required: true
 

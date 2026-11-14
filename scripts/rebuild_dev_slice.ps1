@@ -3,8 +3,9 @@
 # The dev dashboard MUST be stopped first: DuckDB is single-writer and the
 # running dashboard holds the dev database open.
 #
-# Intended to be run as a one-shot scheduled task (ssh-spawned processes on this
-# box survive as unkillable orphans); see scripts/kick_rebuild.ps1.
+# Intended to be run as a one-shot scheduled task rather than from an ssh
+# session: ssh-spawned processes on this box survive as unkillable orphans when
+# the connection drops.
 
 $ErrorActionPreference = "Continue"
 $log = "C:\Users\siddh\Code_Library\gdelt-events-dev\data\logs\rebuild_slice.log"

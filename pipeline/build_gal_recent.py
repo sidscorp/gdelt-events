@@ -4,7 +4,7 @@ dashboard/articles.py::_gal_table / RECENT_HOURS=168). Scanning ~3M rows
 instead of ~24M is what makes cold pill/search queries fast.
 
 Run with the dashboard and GDELT-Ingest STOPPED (single-writer DuckDB) —
-prep_rebuild.ps1 / restart_dash.ps1 patterns apply. Safe to re-run: CREATE
+the restart_dash.ps1 stop/swap/restart sequence applies. Safe to re-run: CREATE
 TABLE IF NOT EXISTS + idempotent backfill (skips if already populated for the
 current window; use --force to rebuild anyway).
 

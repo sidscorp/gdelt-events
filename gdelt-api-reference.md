@@ -783,21 +783,21 @@ query=%22medical+device%22+market%3A%22National%22\
 &mode=timelinevol&format=json&timespan=6m"
 ```
 
-### 11. Using search.py (Our CLI)
+### 11. Using scripts/search.py (Our CLI)
 
 ```bash
 # Basic search
-python search.py "medical device recall" --days 7 --limit 50
+python scripts/search.py "medical device recall" --days 7 --limit 50
 
 # With country context
-python search.py "pacemaker recall" --country "United States" --days 30
+python scripts/search.py "pacemaker recall" --country "United States" --days 30
 
 # Export to CSV
-python search.py "medtronic recall" --days 30 --limit 250 --csv medtronic_recalls.csv
+python scripts/search.py "medtronic recall" --days 30 --limit 250 --csv medtronic_recalls.csv
 
 # Specific source country
-python search.py "medical device" --source US --domain fda.gov --days 30
+python scripts/search.py "medical device" --source US --domain fda.gov --days 30
 ```
 
-Note: `search.py` currently only uses `artlist` mode. The other modes (timeline, tone, geo)
+Note: `scripts/search.py` currently only uses `artlist` mode. The other modes (timeline, tone, geo)
 would need to be added to `pipeline/gdelt_client.py` to use from the CLI.

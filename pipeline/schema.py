@@ -3,8 +3,8 @@
 import duckdb
 
 # ── Column Definitions ──────────────────────────────────────────────────────
-# Sourced from GDELT codebooks and verified against actual data in
-# data-exploration-march-2026/analyze_gdelt.py
+# Sourced from GDELT codebooks and verified against actual data in the
+# March-2026 data exploration (local, gitignored — not part of this repo)
 
 EVENTS_COLUMNS = {
     "GlobalEventID": "BIGINT",

@@ -24,7 +24,7 @@ from pipeline.config import DATA_DIR, DB_PATH, GAL_RAW_DIR, RAW_DIR
 
 def main():
     if not DB_PATH.exists():
-        print("Database not initialized. Run gdelt_backfill.py or gdelt_ingest.py first.")
+        print("Database not initialized. Run pipeline/gdelt_backfill.py or pipeline/gdelt_ingest.py first.")
         return
 
     import duckdb

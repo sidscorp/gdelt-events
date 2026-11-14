@@ -119,3 +119,49 @@ def _title(html: str) -> str:
     start = html.find("<title>")
     end = html.find("</title>", start)
     return html[start + 7:end] if start >= 0 and end > start else ""
+
+
+def test_previous_cycle_payload_covers_the_post_ingest_gap(client, monkeypatch):
+    """New data is the real invalidator: the key carries data_version, so every
+    ingest blanks the cache until warm_feed refills it. The first paint must not
+    fall back to the client shell in that gap."""
+    import json as _json
+    import time as _time
+
+    import articles
+
+    articles._feed_cache.clear()
+    with app_module.app.test_request_context(
+        "/api/articles?hours=3&match_types=legal&en_only=1&page=1&per_page=50"
+    ):
+        previous_key = articles._feed_cache_key()
+    articles._feed_cache[previous_key] = (
+        _time.time() + articles._FEED_TTL_S,
+        _json.dumps(_feed(2)).encode(),
+    )
+
+    monkeypatch.setattr(articles, "_data_version", lambda: "9999999999")
+    html = client.get("/").get_data(as_text=True)
+    assert html.count('<li class="article">') == 2
+    assert 'data-ssr="1"' in html
+
+
+def test_stale_payload_is_not_served_forever(client, monkeypatch):
+    """The fallback is bounded to one ingest cycle, so a render cannot outlive
+    the data it describes."""
+    import json as _json
+    import time as _time
+
+    import articles
+
+    articles._feed_cache.clear()
+    with app_module.app.test_request_context(
+        "/api/articles?hours=3&match_types=legal&en_only=1&page=1&per_page=50"
+    ):
+        previous_key = articles._feed_cache_key()
+    too_old = _time.time() + articles._FEED_TTL_S - (pages._SSR_STALE_MAX_S + 300)
+    articles._feed_cache[previous_key] = (too_old, _json.dumps(_feed(2)).encode())
+
+    monkeypatch.setattr(articles, "_data_version", lambda: "9999999999")
+    html = client.get("/").get_data(as_text=True)
+    assert '<li class="article">' not in html

@@ -40,6 +40,9 @@ def _resolve_view_hours():
     return view, hours
 
 
+_SSR_STALE_MAX_S = 900  # one ingest cycle — never serve older than the last but one
+
+
 def _ssr_feed(view_id, hours):
     """Page 1 of the feed straight from the warmed in-process cache.
 
@@ -47,18 +50,40 @@ def _ssr_feed(view_id, hours):
     trigger a recompute (issue #6). The probe request context mirrors the
     exact query string the client and pipeline/warm_feed.py send, so the key
     lands on the warmed entry.
+
+    A miss is normal right after ingest: the cache key carries data_version, so
+    a new cycle invalidates every entry at once and warm_feed refills them on its
+    next 2-minute run. During that gap we serve the previous cycle's payload for
+    the same view rather than dropping to the client shell (2026-11-14). The
+    fallback is bounded to one ingest cycle, so a stale render cannot outlive the
+    data it describes.
     """
-    from articles import _feed_cache, _feed_cache_key
+    from articles import _FEED_TTL_S, _feed_cache, _feed_cache_key
     qs = f"hours={hours}&match_types=legal&en_only=1&page=1&per_page=50"
     if view_id:
         qs += f"&view={view_id}"
     try:
         with current_app.test_request_context(f"/api/articles?{qs}"):
             key = _feed_cache_key()
+        now = time.time()
         hit = _feed_cache.get(key)
-        if not hit or hit[0] <= time.time():
+        if hit and hit[0] > now:
+            data = json.loads(hit[1])
+            if data.get("articles"):
+                return data
+        suffix = "|" + key.partition("|")[2]
+        best_written, best_payload = None, None
+        for cached_key, (expiry, payload) in list(_feed_cache.items()):
+            if not cached_key.endswith(suffix):
+                continue
+            written = expiry - _FEED_TTL_S
+            if now - written > _SSR_STALE_MAX_S:
+                continue
+            if best_written is None or written > best_written:
+                best_written, best_payload = written, payload
+        if best_payload is None:
             return None
-        data = json.loads(hit[1])
+        data = json.loads(best_payload)
         return data if data.get("articles") else None
     except Exception:
         return None

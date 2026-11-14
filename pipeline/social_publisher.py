@@ -89,6 +89,12 @@ PILOT_TOPICS = {
 TOPIC_ORDER = {cat: i for i, cat in enumerate(PILOT_TOPICS)}
 
 MIN_SOURCES = 3
+# Region pills are broad ("anything from the US"), so they need wider
+# multi-outlet corroboration than a topical pill before they earn a post.
+# 2026-11-14: the `us` pill was filling its daily cap with travel delays and
+# celebrity items sourced from 3 outlets.
+REGION_TOPIC_IDS = frozenset({"us", "europe", "asia"})
+REGION_MIN_SOURCES = 5
 # A single judge-approved member assigns the topic to its near-duplicate event
 # cluster. Requiring two independently tagged variants sounded safer, but a
 # production replay showed it suppressed every fresh candidate: pill scoring
@@ -392,6 +398,20 @@ def _deterministic_grounding(explanation: str, source_text: str) -> tuple[bool, 
     return True, "deterministic checks passed"
 
 
+def _draft_fields(raw: str) -> tuple[str, str, list[int]]:
+    """Parse a draft/repair response into (title, explanation, support).
+
+    Raises ValueError via _json_object when the model returns no JSON object,
+    which is the failure that used to drop a whole candidate straight to the
+    facts fallback on one bad response.
+    """
+    generated = _json_object(raw)
+    title = re.sub(r"\s+", " ", str(generated.get("title") or "")).strip().rstrip(".!?")
+    explanation = re.sub(r"\s+", " ", str(generated.get("explanation") or "")).strip()
+    support = sorted({int(n) for n in generated.get("support", []) if str(n).isdigit()})
+    return title, explanation, support
+
+
 def grounded_explanation(candidate: dict) -> tuple[str, str, dict, str]:
     """Return explanation, kind, grounding record and the social card title.
 
@@ -424,11 +444,71 @@ def grounded_explanation(candidate: dict) -> tuple[str, str, dict, str]:
         "Sources:\n" + source_text
     )
     try:
-        generated = _json_object(_gateway_call(prompt))
-        title = re.sub(r"\s+", " ", str(generated.get("title") or "")).strip().rstrip(".!?")
-        explanation = re.sub(r"\s+", " ", str(generated.get("explanation") or "")).strip()
-        support = sorted({int(n) for n in generated.get("support", []) if str(n).isdigit()})
+        try:
+            title, explanation, support = _draft_fields(_gateway_call(prompt))
+        except Exception as exc:
+            # One stricter retry: a single unparseable response used to send the
+            # candidate straight to the facts fallback (and a human ask) even
+            # when the story was perfectly writable. 2026-11-14.
+            LOG.info("social draft unparseable (%s); retrying once", exc)
+            title, explanation, support = _draft_fields(
+                _gateway_call(prompt + "\n\nReturn ONLY the JSON object: no prose, "
+                                       "no markdown fence, nothing before or after it.")
+            )
         ok, reason = _deterministic_grounding(explanation, source_text)
+        repaired = False
+        if not ok and explanation:
+            # Repair pass: the deterministic gate rejects *wording* (predictions,
+            # advice, causal framing, detached numbers) far more often than it
+            # rejects facts, and each rejection became a human ask. Ask the model
+            # to rewrite the same claims within the rules, then re-check. One
+            # attempt only — it is cheaper than a review, and a second failure
+            # still falls back to facts. 2026-11-14.
+            rejected = reason
+            repair_prompt = (
+                "Rewrite this draft for an automated public-interest news signal so it "
+                "passes strict verification. Keep only facts stated in the sources and "
+                "add nothing new. Describe only what happened, in the past or present "
+                "tense. If a detail can only be written with 'will', 'could', 'would', "
+                "'expected', or a claim about what comes next, leave that detail out. "
+                "Do not explain significance or use editorial verbs (underscores, "
+                "highlights, signals, sets up). Do not compare or rank against other "
+                "events. Only use a number if it appears verbatim in a source and is "
+                "restated the same way. Never write about markets, investors, or advice. "
+                "Write one or two complete sentences that name the subject explicitly — "
+                "never begin a sentence with He, She, It, They, His, Her, or Their, and "
+                "never leave a reader needing the original headline for context.\n"
+                f"Rejected because: {rejected}\n\n"
+                'Output ONLY JSON: {"title":"...","explanation":"...","support":[1,2]}\n\n'
+                f"DRAFT TITLE: {title}\nDRAFT EXPLANATION: {explanation}\n\n"
+                "Sources:\n" + source_text
+            )
+            try:
+                r_title, r_explanation, r_support = _draft_fields(_gateway_call(repair_prompt))
+                r_ok, r_reason = _deterministic_grounding(r_explanation, source_text)
+                if r_ok:
+                    title = r_title or title
+                    explanation = r_explanation
+                    support = r_support or support
+                    ok, repaired = True, True
+                    LOG.info("social explanation repaired (was: %s)", rejected)
+                else:
+                    explanation = r_explanation or explanation
+            except Exception as exc:
+                LOG.warning("social explanation repair failed: %s", exc)
+        if not ok and explanation:
+            # Deterministic salvage, no extra model call: the first sentence is
+            # almost always the plain event statement, while the banned framing
+            # ("...underscores a campaign...", "...will be the youngest...") sits
+            # in the second. Keep the first sentence if it stands on its own.
+            first_sentence = re.split(r"(?<=[.!?])\s+", explanation.strip())[0]
+            if first_sentence and first_sentence != explanation:
+                s_ok, _ = _deterministic_grounding(first_sentence, source_text)
+                if s_ok:
+                    explanation = first_sentence
+                    ok, repaired = True, True
+                    LOG.info("social explanation trimmed to its event sentence (was: %s)",
+                             reason)
         tok, treason = _title_grounding(title, explanation, source_text)
         if not ok or not support or any(n not in by_n for n in support):
             return fallback, "facts", {"supported": False,
@@ -454,6 +534,7 @@ def grounded_explanation(candidate: dict) -> tuple[str, str, dict, str]:
             "support": support,
             "model": SOCIAL_MODEL,
             "title_kind": "generated" if tok else "fallback",
+            "repaired": repaired,
         }
         if supported:
             return explanation, "generated", grounding, ship_title
@@ -578,11 +659,17 @@ def scan_candidates() -> list[dict]:
 
     candidates = list(grouped.values())
     compute_importance(candidates)
+    kept: list[dict] = []
     for item in candidates:
         category, tag_members = sorted(
             item.pop("topics"), key=lambda pair: (-pair[1], TOPIC_ORDER[pair[0]])
         )[0]
         topic_id, topic_name = PILOT_TOPICS[category]
+        # Region pills ("anything from the US") need wider corroboration before
+        # they are worth posting; topical pills keep the normal bar. 2026-11-14.
+        minimum = REGION_MIN_SOURCES if topic_id in REGION_TOPIC_IDS else MIN_SOURCES
+        if item["source_count"] < minimum:
+            continue
         item.update({
             "topic_id": topic_id,
             "topic_name": topic_name,
@@ -590,7 +677,8 @@ def scan_candidates() -> list[dict]:
             "importance_score": float(item.pop("_imp", 0)),
             "event_url": f"{CANON_BASE}/event/{item['cluster_id']}?src=bsky",
         })
-    return candidates
+        kept.append(item)
+    return kept
 
 
 def _passes_auto_threshold(candidate: dict) -> bool:

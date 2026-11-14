@@ -166,6 +166,32 @@ thing was started and stopped before this change.
 
 ---
 
+## 2026-11-14 — Social: repair pass for wording rejections, 5-source region pills
+
+**What** — two changes. (1) `grounded_explanation` now retries once when the
+model returns no JSON object, and when the deterministic grounding check
+rejects the *wording* it issues one repair call ("same facts, past/present
+tense, no significance verbs, name the subject, no leading pronouns") and
+re-checks; a deterministic salvage keeps the first sentence when that fails.
+`grounding.repaired` records which path produced a post. (2) Region pills
+(`us`, `europe`, `asia`) now need 5 distinct sources, both at scan time
+(`REGION_MIN_SOURCES`) and in `auto_thresholds`; topical pills keep 3.
+**Why** — 3-4 candidates a day were reaching Sidd because the gate objected to
+phrasing rather than facts ("predictive, advisory, or causal language" on the
+Alaska governor and Cambodia summit items; a malformed JSON answer on the
+monsoons piece). Separately the `us` pill was filling its 3/day cap with
+travel delays and a K-pop residency sourced from 3 outlets.
+**How it was verified** — replayed both rejected candidates through the real
+gateway: Alaska now returns generated + judge-supported ("All claims directly
+cited") with a clean card title; Cambodia still falls back to facts, correctly,
+because its framing really is speculative. `scan_candidates` dropped 7 -> 3
+candidates, all at 5+ sources. Live run printed the new
+`publish skipped: all 3 approved candidates are at the 3/topic cap (us)` line
+instead of a silent 0.
+**Files** — pipeline/social_publisher.py (+ auto_thresholds setting).
+
+---
+
 ## 2026-11-14 — Social: fix the 17h silent stall behind one capped topic
 
 **What** — `publish_one` now walks the whole approved queue instead of testing

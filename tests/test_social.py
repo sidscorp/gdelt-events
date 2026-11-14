@@ -106,7 +106,30 @@ def test_review_workflow_and_idempotent_candidate_insert(social_modules):
     row = store.get_candidate(candidate["cluster_id"])
     assert row["review_decision"] == "approve"
     assert row["explanation_kind"] == "edited"
-    assert publisher._record_key(candidate["cluster_id"]) == "evt-c0123456789abcde"
+
+    # d4a20ca replaced the old `evt-<cluster>` record key with a deterministic
+    # atproto TID, because bsky.social rejects non-TID rkeys on
+    # app.bsky.feed.post ("Invalid TID string format"). The key must be a valid
+    # TID, stable across retries (so a retry after a lost response hits the 409
+    # getRecord branch instead of duplicating the post), and vary per candidate.
+    record_key = publisher._tid_for(candidate["cluster_id"], row["created_at"])
+    assert len(record_key) == 13
+    assert set(record_key) <= set(publisher._TID_ALPHABET)
+    assert not record_key.startswith("evt-")
+    assert record_key == publisher._tid_for(candidate["cluster_id"], row["created_at"])
+    assert record_key != publisher._tid_for("cfffffffffffffff", row["created_at"])
+
+    # ...and the TID is the record key actually persisted for the publication,
+    # which is what publish_candidate sends as `rkey` to createRecord.
+    store.mark_publishing(candidate, record_key, "Three hospitals reported a disruption.")
+    con = store.get_social_db()
+    persisted = con.execute(
+        "SELECT record_key, topic_id FROM social_publications WHERE cluster_id=?",
+        (candidate["cluster_id"],),
+    ).fetchone()
+    con.close()
+    assert persisted[0] == record_key
+    assert persisted[1] == candidate["topic_id"]
 
 
 def test_auto_mode_stays_locked_before_calibration(social_modules):

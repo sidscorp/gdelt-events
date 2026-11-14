@@ -246,6 +246,33 @@ thing was started and stopped before this change.
 
 ---
 
+## 2026-11-14 — One Ollama task, and a real monitor in place of the watchdog
+
+**What** — (1) `Ollama-Serve` is now the only Ollama task, registered with
+`OLLAMA_HOST=0.0.0.0` through a cmd wrapper; the out-of-repo `OllamaServe` duplicate was
+removed. The registration script warns if a second task is present and documents the
+no-space-before-`&&` trap. (2) `GDELT-EmbedWatchdog` retired: it watched the one-off
+`bulk_embed.py` backfill and **disabled itself** when that job finished, so "disabled" was
+its terminal state rather than a fault — nothing was watching the incremental pipeline.
+Replaced by `pipeline/pipeline_health.py` + `GDELT-PipelineCheck` (every 15 min, :18), which
+asserts content: Ollama serving a model list, the dashboard rendering ≥1 article card, a
+completed ingest cycle inside 20 min, an embed run inside 45 min, and an embedding backlog
+that is draining.
+**Why** — The serving Ollama was the task nothing in the repo creates, and the repo's
+version bound loopback only while the LiteLLM gateway reaches it at `100.127.16.82:11434`;
+running the repo script would have broken every `ollama/*` alias with no obvious cause.
+The watchdog is the 2026-07 failure mode in miniature: the check that was meant to catch a
+dead embedder had itself been dead for months.
+**How it was verified** — Cold restart of the task returns 12 models on both localhost and
+the Tailscale address; the embed cycle ran after the change (650 embedded) and the pill
+scorer completed. The new check reports HEALTHY 5/5 on the host and exits non-zero on a
+simulated failure. First live run also caught a flaw in itself: an absolute backlog
+threshold fired at 201 unembedded, which is normal between 15-minute drains, so the check
+now compares consecutive samples at a stable phase and fires on sustained growth.
+**Files** — scripts/register_ollama_task.ps1, pipeline/pipeline_health.py,
+scripts/register_pipeline_check.ps1, pipeline/embed_watchdog.ps1 (marked obsolete),
+deploy/tasks/ snapshot.
+
 ## 2026-11-14 — SSR: serve the previous payload across the ingest gap
 
 **What** — `_ssr_feed` falls back to the last cached payload for the same query when the

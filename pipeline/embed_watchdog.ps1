@@ -1,3 +1,15 @@
+# OBSOLETE (2026-11-14) - kept only as the recovery recipe for a stalled bulk backfill.
+#
+# This watched bulk_embed.py, the one-off full backfill, and disabled its own task once
+# that job finished (so "disabled" was its terminal state, not a fault). Nothing watched
+# the incremental pipeline in its place: a running embedder whose every batch fails looks
+# identical to a healthy one from outside. That gap is now covered by
+# pipeline/pipeline_health.py (task GDELT-PipelineCheck): it asserts the backlog is
+# draining and the feed actually rendered, not that a process exists.
+#
+# Run by hand only, if a future bulk backfill stalls:
+#   powershell -File pipeline\embed_watchdog.ps1
+#
 # Watchdog for bulk_embed.py — restarts if progress stalls.
 # Run via Windows Task Scheduler every 10 min.
 # Logic: if progress.json hasn't been updated in 5+ minutes and

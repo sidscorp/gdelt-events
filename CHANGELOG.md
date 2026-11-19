@@ -17,6 +17,78 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-19 — Ingest wedge: zombie PID lock + gkg publication lag
+
+**What** — Two ingest fixes. (1) `_pid_alive()` now asks `GetExitCodeProcess`
+whether the process is `STILL_ACTIVE` instead of trusting `OpenProcess()` to
+succeed. (2) `run_ingest()` uses a new `fetch_recent_slots()` that re-checks the
+trailing 8 fifteen-minute slots (2 hours) across export/mentions/gkg instead of
+only the newest slot, and loads every file in that window rather than only the
+ones downloaded this cycle. `load_file()`/`load_gal_file()` still skip anything
+already in `_ingest_log`/`_gal_ingest_log`, so both halves are idempotent.
+
+**Why** — Ingestion had been dead for 69 hours (2026-11-16 18:45 EST →
+2026-11-19 15:28 EST) and nothing alerted. A run crashed with exit code
+`0xC0000409` after its Tagger stage, leaving `data/.ingest.lock` holding PID
+30660. That PID was gone from the process table but Windows kept a terminated
+process object alive, and `OpenProcess()` succeeds on that object — so the lock
+called a long-dead ingest "alive" and every 15-minute cycle logged `Another
+ingest is running, exiting.` and exited 0. The site looked up: `/api/stats`
+returned 200 with `latest_ago: 2d 20h ago`, `/api/articles` returned 0 for 3h,
+6h and 24h and 80 for 72h, and the front page silently auto-widened every time
+window 3h → 6h → 24h → 72h (reproduced in a browser: clicking 6h printed
+`No articles in the last 6h — showing the last 3 days` and moved the pill to
+72h). Every topic pill also forces its own `default_hours: 24`, so the two
+together read as "it keeps going back to 24h" — but the cause was zero data,
+not a default.
+
+Separately, GKG had been frozen at 1,035,490 rows since the same moment.
+Upstream GDELT publishes `gkg.csv.zip` roughly 45-60 minutes *after* the
+matching export file. Because the fetcher asked only for the newest slot, it
+404'd on gkg every single cycle and never looked back — a permanent, silent
+loss of one of the two corpora.
+
+**How it was verified** — Lock: `_pid_alive(os.getpid())` True, and
+`_pid_alive(30660)`/`_pid_alive(999999)`/`_pid_alive(0)` all False, where the
+old code returned True for 30660. GKG: the 15:58 cycle logged
+`Recent-slot scan: 8 slots -> 19 files (16 to fetch, 3 already on disk)` and
+`Loaded — events: 8892, mentions: 29481, gkg: 6466`, after three days of
+`gkg: 0`; `gkg_articles` moved off 1,035,490 and `/api/stats` `latest` now
+agrees with `latest_display`. Self-healing: the 75-minute maintenance window
+taken for the backfill was absorbed automatically by the 17:28 cycle
+(`GAL loaded: 4498`, gkg scanned 13,539) with no manual catch-up.
+Gap restoral: 911 event/gkg files (1.5 GB) and 735 GAL files downloaded in
+4.5 min with the site up, then loaded as 441,196 events / 1,028,892 mentions /
+372,966 gkg and 1,404,170 GAL rows, 0 errors (172 GAL files skipped as already
+loaded — idempotency working after the first failed attempt). `gal` is
+now 38,084,330 rows with Nov 16-19 at 452,999 / 465,764 / 483,931 / 417,072
+per day (no hole). `tests/smoke.sh` 20/20 against prod. Raw feed totals with
+`order=date`: 3h 15,928, 24h 441,987, 168h 2,364,861.
+
+**Files** — `pipeline/downloader.py`, `pipeline/gdelt_ingest.py`,
+`CHANGELOG.md`. Prod backups in `_backup_20261119_155018/`.
+
+**Notes** — The backfill hit DuckDB's checkpoint OOM twice (`memory_limit=8GB`,
+`7.4 GiB/7.4 GiB used`) because the three `gal` indexes were live during a
+735-file bulk insert. The loader's own docstring prescribes drop-load-recreate;
+doing that with `memory_limit=20GB` worked (index recreate 43s / 74s / ~7 min
+on 36.7M rows). Anyone doing another bulk GAL load should drop
+`idx_gal_crawled/domain/url` first.
+
+**Known limitation, not fixed here**: the 69-hour gap has no embeddings and no
+clusters. `embed_new_articles.py` only scans the trailing 2 hours, so the
+backfilled articles will never be picked up by the incremental pass, and
+`build_clusters.py` ages out unembedded articles beyond `STALE_MINUTES`. The
+date-ordered feed, briefings and pills on recent windows are unaffected; the
+importance-ranked feed and semantic search will be thin for Nov 17-19.
+Closing it needs `backfill_embeddings.py --hours 72` (~1.4M articles at the
+measured 57/sec ≈ 7 hours of GPU), then a cluster pass.
+
+Also worth a ticket: `gdelt_backfill.py` and `gdelt_gal_backfill.py` filter UTC
+file timestamps against naive `datetime.now()` / `datetime.now(tz=None)`, which
+silently drops the last ~5 hours of every backfill in EST. This session passed
+explicit UTC datetimes to work around it.
+
 ## 2026-11-14 — Repo hygiene pass 4: task snapshots, stale references, lint gate
 
 **What** — No application behaviour changed. Four things. (1) `deploy/tasks/`

@@ -31,7 +31,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from pipeline.config import DATA_DIR, DB_PATH, LOCK_FILE, LOG_DIR, MIN_FREE_GB, RAW_DIR
-from pipeline.downloader import fetch_latest, download_batch
+from pipeline.downloader import fetch_latest, fetch_recent_slots, download_batch
 from pipeline.loader import load_batch
 from pipeline.pruner import prune
 
@@ -76,24 +76,43 @@ def acquire_lock():
 
 
 def _pid_alive(pid: int) -> bool:
-    """Return True if a process with the given PID exists."""
+    """Return True only if a *running* process with this PID exists.
+
+    OpenProcess() alone is not enough on Windows. A process that exits with a
+    fail-fast code (e.g. 0xC0000409) can linger as a zombie object while any
+    handle to it is still open: OpenProcess succeeds, so the old check called a
+    long-dead ingest "alive" and refused to start a new one forever. That wedged
+    ingestion for three days in Nov 2026. GetExitCodeProcess distinguishes a
+    running process (STILL_ACTIVE) from a terminated one.
+    """
     if pid <= 0:
         return False
-    if os.name == "nt":
-        # Windows: use tasklist or ctypes
-        import ctypes
-        PROCESS_QUERY_INFORMATION = 0x0400
-        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_INFORMATION, False, pid)
-        if handle:
-            ctypes.windll.kernel32.CloseHandle(handle)
-            return True
-        return False
-    else:
+    if os.name != "nt":
         try:
             os.kill(pid, 0)
             return True
         except OSError:
             return False
+
+    import ctypes
+    from ctypes import wintypes
+
+    PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+    ERROR_ACCESS_DENIED = 5
+    STILL_ACTIVE = 259
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        # Access denied means the process exists but belongs to another account.
+        return ctypes.get_last_error() == ERROR_ACCESS_DENIED
+    try:
+        code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return False
+        return code.value == STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def release_lock(lock_handle):
@@ -161,27 +180,35 @@ def run_ingest(force_prune: bool = False, prune_days: int | None = None) -> None
             prune(retention_days=prune_days, vacuum=True)
             return
 
-        # Download latest batch
+        # Download the trailing window of slots (not just the newest): gkg is
+        # published ~45+ min late, so a newest-slot-only fetch skips it forever.
         log.info("Fetching latest GDELT files...")
-        entries = fetch_latest()
+        entries = fetch_recent_slots()
         if not entries:
-            log.warning("No files returned from lastupdate.txt")
-            return
+            # Nothing new is downloadable; still fall through so the GAL pass
+            # and prune below run as usual.
+            log.info("No new files in the recent-slot window")
 
         new_files = download_batch(entries)
         log.info("Downloaded %d new files", len(new_files))
         data_changed = False
 
-        # Load only the newly-downloaded files. The `_ingest_log` table is the
-        # source of truth for what has been loaded — no need to scan the whole
-        # raw dir every 15 minutes (17K files means 17K pointless is_loaded checks).
-        if new_files:
-            summary = load_batch(new_files)
+        # Load every file in the window, not only the ones downloaded this
+        # cycle: load_file() skips anything already recorded in _ingest_log, so
+        # a file whose download succeeded just before a crash still gets loaded.
+        window_files = [
+            RAW_DIR / e["filename"] for e in entries
+            if (RAW_DIR / e["filename"]).exists()
+        ]
+        if window_files:
+            summary = load_batch(window_files)
             log.info(
-                "Loaded — events: %d, mentions: %d, gkg: %d, errors: %d",
+                "Loaded — events: %d, mentions: %d, gkg: %d, errors: %d (window: %d files)",
                 summary["events"], summary["mentions"], summary["gkg"], summary["errors"],
+                len(window_files),
             )
-            data_changed = True
+            if summary["events"] or summary["mentions"] or summary["gkg"]:
+                data_changed = True
 
         # GAL (Global Article List) — broader coverage, no NER. Non-fatal.
         try:

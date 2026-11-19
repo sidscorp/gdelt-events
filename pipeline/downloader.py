@@ -54,6 +54,107 @@ def fetch_latest() -> list[dict]:
     return entries
 
 
+# 8 slots = the trailing 2 hours, re-checked every cycle.
+RECENT_SLOTS = 8
+FILE_TEMPLATES = (
+    ("{ts}.export.CSV.zip", "export"),
+    ("{ts}.mentions.CSV.zip", "mentions"),
+    ("{ts}.gkg.csv.zip", "gkg"),
+)
+
+
+def slot_timestamps(newest: str, slots: int = RECENT_SLOTS) -> list[str]:
+    """The `slots` 15-minute timestamps ending at `newest`, oldest first."""
+    base = datetime.strptime(newest, "%Y%m%d%H%M%S")
+    return [
+        (base - timedelta(minutes=15 * i)).strftime("%Y%m%d%H%M%S")
+        for i in range(slots - 1, -1, -1)
+    ]
+
+
+def fetch_recent_slots(slots: int = RECENT_SLOTS, raw_dir: Path | None = None) -> list[dict]:
+    """Return entries for a trailing window of 15-minute slots, all file types.
+
+    Why not just the newest slot (what fetch_latest returns): GDELT publishes
+    gkg.csv.zip roughly 45+ minutes *after* the matching export file. A
+    newest-slot-only fetch therefore 404s on gkg every single cycle and GKG
+    silently stops being ingested forever (observed 2026-11-16 -> 11-19).
+    Re-checking a short trailing window also self-heals brief outages.
+
+    Sizes come from a HEAD request so download_file()'s size check still
+    applies. Files already on disk are reported but not re-fetched (their real
+    size is used), and files already loaded are skipped by load_file()'s
+    _ingest_log check, so the whole path is idempotent.
+    """
+    raw_dir = raw_dir or RAW_DIR
+    resp = requests.get(LAST_UPDATE_URL, timeout=DOWNLOAD_TIMEOUT)
+    resp.raise_for_status()
+
+    newest = None
+    prefix = None
+    for line in resp.text.strip().splitlines():
+        entry = parse_file_entry(line)
+        if not entry:
+            continue
+        if newest is None or entry["timestamp"] > newest:
+            newest = entry["timestamp"]
+            prefix = entry["url"].rsplit("/", 1)[0]
+    if not newest or not prefix:
+        log.warning("lastupdate.txt had no parseable entries")
+        return []
+
+    entries: list[dict] = []
+    for ts in slot_timestamps(newest, slots):
+        for template, file_type in FILE_TEMPLATES:
+            filename = template.format(ts=ts)
+            dest = raw_dir / filename
+            url = f"{prefix}/{filename}"
+            if dest.exists() and dest.stat().st_size > 0:
+                # Include on-disk files: download_batch skips them, and the
+                # caller passes them to load_batch so a file downloaded just
+                # before a crash still gets loaded (load_file checks _ingest_log).
+                entries.append(
+                    {
+                        "size": dest.stat().st_size,
+                        "md5": "",
+                        "url": url,
+                        "filename": filename,
+                        "timestamp": ts,
+                        "file_type": file_type,
+                        "on_disk": True,
+                    }
+                )
+                continue
+            try:
+                head = requests.head(url, timeout=DOWNLOAD_TIMEOUT, allow_redirects=True)
+            except requests.RequestException:
+                continue
+            if head.status_code != 200:
+                continue  # not published yet (normal for gkg in the newest slots)
+            try:
+                size = int(head.headers.get("content-length", 0))
+            except (TypeError, ValueError):
+                size = 0
+            if size <= 0:
+                continue
+            entries.append(
+                {
+                    "size": size,
+                    "md5": "",
+                    "url": url,
+                    "filename": filename,
+                    "timestamp": ts,
+                    "file_type": file_type,
+                }
+            )
+    to_fetch = sum(1 for e in entries if not e.get("on_disk"))
+    log.info(
+        "Recent-slot scan: %d slots -> %d files (%d to fetch, %d already on disk)",
+        slots, len(entries), to_fetch, len(entries) - to_fetch,
+    )
+    return entries
+
+
 def fetch_file_list(since: datetime, until: datetime | None = None) -> list[dict]:
     """Fetch the full master file list and filter by date range (for backfill)."""
     log.info("Fetching master file list (this may take a moment)...")

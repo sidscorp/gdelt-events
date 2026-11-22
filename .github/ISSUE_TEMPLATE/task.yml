@@ -43,6 +43,20 @@ body:
     validations:
       required: true
 
+  - type: textarea
+    id: estimate
+    attributes:
+      label: Estimate and measurement
+      description: >
+        Before implementation: the estimate (cost, wall time, data touched, expected
+        effect) and how the result will be measured afterwards. "Unknown until we try"
+        is acceptable only when the measurement that resolves it is named.
+      placeholder: |
+        Estimate: ~7h GPU at 57 articles/sec for 1.4M rows; no schema change.
+        Measured after: embedding coverage for the window, recorded in this issue.
+    validations:
+      required: true
+
   - type: input
     id: cic
     attributes:

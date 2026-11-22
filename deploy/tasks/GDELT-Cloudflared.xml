@@ -5,7 +5,6 @@
   </RegistrationInfo>
   <Principals>
     <Principal id="Author">
-      <UserId>S-1-5-21-2512699296-1746762344-1301134065-1001</UserId>
       <LogonType>S4U</LogonType>
     </Principal>
   </Principals>
@@ -31,7 +30,7 @@
   </Triggers>
   <Actions Context="Author">
     <Exec>
-      <Command>C:\Users\siddh\cloudflared.exe</Command>
+      <Command>%USERPROFILE%\cloudflared.exe</Command>
       <Arguments>tunnel run</Arguments>
     </Exec>
   </Actions>

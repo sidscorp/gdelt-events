@@ -1,5 +1,4 @@
 # Canonical author identity for git shortlog / log --format=%an.
 # GitHub groups commits by email, not by this file; the two names below share
-# the same address, and the third is an old machine-local address.
+# the same address.
 Siddhartha Nambiar <siddharthanambiar@gmail.com> Sidd Nambiar <siddharthanambiar@gmail.com>
-Siddhartha Nambiar <siddharthanambiar@gmail.com> <siddh@rainbow-boi>

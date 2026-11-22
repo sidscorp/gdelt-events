@@ -25,7 +25,7 @@ import urllib.request
 from pathlib import Path
 
 DEFAULT_DASHBOARD = "https://gdeltmonitor.com"
-DEFAULT_OLLAMA = "http://rainbow-boi:11434"
+DEFAULT_OLLAMA = "http://localhost:11434"
 DEFAULT_MODEL = "gemma3:latest"  # small-ish, fast on a 4060
 
 CASES_FILE = Path(__file__).parent / "golden_queries.json"

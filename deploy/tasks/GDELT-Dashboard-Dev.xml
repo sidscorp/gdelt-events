@@ -6,7 +6,6 @@
   </RegistrationInfo>
   <Principals>
     <Principal id="Author">
-      <UserId>S-1-5-21-2512699296-1746762344-1301134065-1001</UserId>
       <LogonType>S4U</LogonType>
     </Principal>
   </Principals>
@@ -28,8 +27,8 @@
   <Actions Context="Author">
     <Exec>
       <Command>powershell.exe</Command>
-      <Arguments>-ExecutionPolicy Bypass -NonInteractive -File "C:\Users\siddh\Code_Library\gdelt-events-dev\scripts\serve_dev.ps1"</Arguments>
-      <WorkingDirectory>C:\Users\siddh\Code_Library\gdelt-events-dev</WorkingDirectory>
+      <Arguments>-ExecutionPolicy Bypass -NonInteractive -File "%USERPROFILE%\Code_Library\gdelt-events-dev\scripts\serve_dev.ps1"</Arguments>
+      <WorkingDirectory>%USERPROFILE%\Code_Library\gdelt-events-dev</WorkingDirectory>
     </Exec>
   </Actions>
 </Task>

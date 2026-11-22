@@ -6,7 +6,6 @@
   </RegistrationInfo>
   <Principals>
     <Principal id="Author">
-      <UserId>S-1-5-21-2512699296-1746762344-1301134065-1001</UserId>
       <LogonType>S4U</LogonType>
     </Principal>
   </Principals>
@@ -36,9 +35,9 @@
   </Triggers>
   <Actions Context="Author">
     <Exec>
-      <Command>C:\Users\siddh\Code_Library\gdelt-events\.venv\Scripts\python.exe</Command>
-      <Arguments>"C:\Users\siddh\Code_Library\gdelt-events\pipeline\gdelt_ingest.py"</Arguments>
-      <WorkingDirectory>C:\Users\siddh\Code_Library\gdelt-events</WorkingDirectory>
+      <Command>%USERPROFILE%\Code_Library\gdelt-events\.venv\Scripts\python.exe</Command>
+      <Arguments>"%USERPROFILE%\Code_Library\gdelt-events\pipeline\gdelt_ingest.py"</Arguments>
+      <WorkingDirectory>%USERPROFILE%\Code_Library\gdelt-events</WorkingDirectory>
     </Exec>
   </Actions>
 </Task>

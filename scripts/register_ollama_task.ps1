@@ -24,7 +24,7 @@ if (Get-ScheduledTask -TaskName $legacy -ErrorAction SilentlyContinue) {
 }
 
 # Bind every interface, not loopback. The LiteLLM gateway reaches this server at its
-# Tailscale address (api_base http://100.127.16.82:11434/v1), so a loopback-only bind
+# Tailscale address (api_base http://100.x.x.x:11434/v1), so a loopback-only bind
 # silently breaks every ollama/* alias there - and the failure looks like a gateway
 # timeout, not a missing env var. Task Scheduler cannot set environment variables
 # directly, so a cmd wrapper does it. There must be NO space before '&&': a space

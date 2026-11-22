@@ -65,6 +65,21 @@ foreach ($task in $selected) {
     # it that way - UTF-16 in git shows up as an undiffable binary blob).
     $xml = $xml -replace 'encoding="UTF-16"', 'encoding="UTF-8"'
     $xml = $xml -replace "`r`n", "`n"
+
+    # Sanitise machine/account identifiers: this repo is PUBLIC, and a task
+    # snapshot only needs to describe *what* runs, not *who* owns the account.
+    #   <UserId>S-1-5-21-...</UserId>  -> dropped. Re-importing with
+    #       Register-ScheduledTask then scopes the principal to the registering
+    #       user, which is what scripts\register_*.ps1 already do.
+    #   C:\Users\<account>             -> %USERPROFILE%
+    # This is why a checked-in XML is not byte-identical to Export-ScheduledTask:
+    # it is a sanitised snapshot of the same definition. Compare instants and
+    # structure, not raw bytes, when checking for drift.
+    $xml = $xml -replace '\s*<UserId>S-1-5-21-[0-9-]*</UserId>', ''
+    if ($env:USERPROFILE) {
+        $xml = $xml -replace [regex]::Escape($env:USERPROFILE), '%USERPROFILE%'
+    }
+
     $xml = $xml.TrimEnd("`n") + "`n"
 
     $path = Join-Path $OutDir ($task.TaskName + '.xml')

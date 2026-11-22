@@ -331,7 +331,7 @@ asserts content: Ollama serving a model list, the dashboard rendering ≥1 artic
 completed ingest cycle inside 20 min, an embed run inside 45 min, and an embedding backlog
 that is draining.
 **Why** — The serving Ollama was the task nothing in the repo creates, and the repo's
-version bound loopback only while the LiteLLM gateway reaches it at `100.127.16.82:11434`;
+version bound loopback only while the LiteLLM gateway reaches it at `100.x.x.x:11434`;
 running the repo script would have broken every `ollama/*` alias with no obvious cause.
 The watchdog is the 2026-07 failure mode in miniature: the check that was meant to catch a
 dead embedder had itself been dead for months.

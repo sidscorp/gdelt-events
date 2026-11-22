@@ -5,7 +5,6 @@
   </RegistrationInfo>
   <Principals>
     <Principal id="Author">
-      <UserId>S-1-5-21-2512699296-1746762344-1301134065-1001</UserId>
       <LogonType>InteractiveToken</LogonType>
     </Principal>
   </Principals>
@@ -32,7 +31,7 @@
   <Actions Context="Author">
     <Exec>
       <Command>wscript.exe</Command>
-      <Arguments>"C:\Users\siddh\bin\gdelt_prewarm_dev_hidden.vbs"</Arguments>
+      <Arguments>"%USERPROFILE%\bin\gdelt_prewarm_dev_hidden.vbs"</Arguments>
     </Exec>
   </Actions>
 </Task>

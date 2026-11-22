@@ -234,7 +234,12 @@ def test_successful_bounded_run_advances_watermark(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         pill_scorer,
-        "stage_batch",
+        "plan_batch",
+        lambda *_args, **_kwargs: {"urls": ["u1"]},
+    )
+    monkeypatch.setattr(
+        pill_scorer,
+        "judge_plan",
         lambda *_args, **_kwargs: ([], [], {"judged": 1}),
     )
 
@@ -257,7 +262,12 @@ def test_failed_chunk_holds_watermark(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(
         pill_scorer,
-        "stage_batch",
+        "plan_batch",
+        lambda *_args, **_kwargs: {"urls": ["u1"]},
+    )
+    monkeypatch.setattr(
+        pill_scorer,
+        "judge_plan",
         lambda *_args, **_kwargs: (
             [], [], {"judged": 0, "judge_failed": True,
                      "failure_code": "provider_unavailable"}

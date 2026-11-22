@@ -69,6 +69,10 @@ JUDGE_HEALTH = DATA_DIR / "pill_judge_health.json"
 SUFFIX = ""  # FLIPPED LIVE 2026-07-09 — judged tags write straight to the real categories
 
 IN_BATCH = 400  # ≤500 per the GAL point-lookup gotcha
+# article_tags / fda_match_cache lookups: how many URLs to hand DuckDB in one
+# list parameter. At 400 the engine re-scanned a category's index range once
+# per chunk (see _select_ids); 20k is one query at real cycle sizes.
+TAG_QUERY_BATCH = 20_000
 
 
 # ---------------------------------------------------------------------------
@@ -207,18 +211,51 @@ def _crawled_at_for(con, urls: list[str]) -> dict[str, int]:
     return out
 
 
-def _existing_tags(con, category: str, urls: list[str]) -> set[str]:
+def _select_ids(con, sql: str, params: list, urls: list[str]) -> set[str]:
+    """Run a `... article_id IN (SELECT unnest(?))` lookup over `urls`.
+
+    One list parameter per 20k URLs, not IN-chunks of 400: the chunked form
+    made DuckDB re-scan the table's index range once per chunk. Results are
+    identical (checked against the live category counts), and this keeps the
+    25M-row GAL lookups out of it — those stay two-step for the reason in
+    _crawled_at_for.
+    """
     found: set[str] = set()
-    for i in range(0, len(urls), IN_BATCH):
-        chunk = urls[i:i + IN_BATCH]
-        ph = ",".join(["?"] * len(chunk))
-        for (u,) in con.execute(
-            f"SELECT DISTINCT article_id FROM article_tags "
-            f"WHERE category = ? AND source_type='gal' AND article_id IN ({ph})",
-            [category] + chunk,
-        ).fetchall():
+    for i in range(0, len(urls), TAG_QUERY_BATCH):
+        chunk = urls[i:i + TAG_QUERY_BATCH]
+        for (u,) in con.execute(sql, params + [chunk]).fetchall():
             found.add(u)
     return found
+
+
+def _tags_by_category(con, categories: list[str], urls: list[str],
+                      judged: bool = False) -> dict[str, set[str]]:
+    """{category: set(article_id)} for every category in ONE grouped query.
+
+    plan_batch asks the same question of ~19 pills per cycle; one query per
+    category meant 38 index-range scans inside the staging hold (measured
+    41 s before single-query form, 4.3 s after, 11.9 s end-to-end on the
+    first cycle — issue #70). Grouping them makes it two queries.
+    """
+    out: dict[str, set[str]] = {c: set() for c in categories}
+    if not categories or not urls:
+        return out
+    verdict = " AND matched_via = 'judge'" if judged else ""
+    for i in range(0, len(urls), TAG_QUERY_BATCH):
+        chunk = urls[i:i + TAG_QUERY_BATCH]
+        for cat, u in con.execute(
+            "SELECT DISTINCT category, article_id FROM article_tags "
+            "WHERE source_type='gal' AND category IN (SELECT unnest(?))"
+            + verdict +
+            " AND article_id IN (SELECT unnest(?))",
+            [list(categories), chunk],
+        ).fetchall():
+            out.setdefault(cat, set()).add(u)
+    return out
+
+
+def _existing_tags(con, category: str, urls: list[str]) -> set[str]:
+    return _tags_by_category(con, [category], urls)[category]
 
 
 def _judged_tags(con, category: str, urls: list[str]) -> set[str]:
@@ -230,33 +267,17 @@ def _judged_tags(con, category: str, urls: list[str]) -> set[str]:
     category == live category, so the candidate set and the skip set were the
     same query). Only a judge row means the question has been answered.
     """
-    found: set[str] = set()
-    for i in range(0, len(urls), IN_BATCH):
-        chunk = urls[i:i + IN_BATCH]
-        ph = ",".join(["?"] * len(chunk))
-        for (u,) in con.execute(
-            f"SELECT DISTINCT article_id FROM article_tags "
-            f"WHERE category = ? AND source_type='gal' AND matched_via = 'judge' "
-            f"AND article_id IN ({ph})",
-            [category] + chunk,
-        ).fetchall():
-            found.add(u)
-    return found
+    return _tags_by_category(con, [category], urls, judged=True)[category]
 
 
 def _fda_candidates(con, urls: list[str]) -> set[str]:
-    found: set[str] = set()
-    for i in range(0, len(urls), IN_BATCH):
-        chunk = urls[i:i + IN_BATCH]
-        ph = ",".join(["?"] * len(chunk))
-        for (u,) in con.execute(
-            f"SELECT DISTINCT article_id FROM fda_match_cache "
-            f"WHERE source_type='gal' AND match_type IN ('legal','contextual','stripped') "
-            f"AND article_id IN ({ph})",
-            chunk,
-        ).fetchall():
-            found.add(u)
-    return found
+    return _select_ids(
+        con,
+        "SELECT DISTINCT article_id FROM fda_match_cache "
+        "WHERE source_type='gal' AND match_type IN ('legal','contextual','stripped') "
+        "AND article_id IN (SELECT unnest(?))",
+        [], urls,
+    )
 
 
 # Semantic candidate net: loose on purpose — it only nominates keyword-less
@@ -306,62 +327,52 @@ def _open_read(retries: int = 30):
     raise RuntimeError(f"could not open read-only connection: {last}")
 
 
-def stage_batch(con, urls: list[str], vectors: np.ndarray,
-                pills: list[dict], pill_vecs: dict[str, np.ndarray],
-                suffix: str = SUFFIX, breaker=None):
-    """Judge-gated membership for one batch of articles — STAGES operations
-    without writing. `con` must be a READ-ONLY connection: judge calls take
-    minutes and holding the write lock that long 503s the live dashboard.
+def plan_batch(con, urls: list[str], vectors: np.ndarray,
+               pills: list[dict], pill_vecs: dict[str, np.ndarray],
+               suffix: str = SUFFIX) -> dict:
+    """Read-only pass: stage everything the judge will need into memory.
 
-    Returns (insert_rows, deletes, counters): insert_rows are article_tags
-    tuples; deletes are (live_category, url) pairs for judged-irrelevant
-    keyword tags. Custom pills stay pure-cosine (user-tuned)."""
-    try:
-        from . import pill_judge
-    except ImportError:
-        from pipeline import pill_judge
+    This function touches the database and nothing else — no network, no
+    writes, no LLM calls. That separation is the point (issue #70): DuckDB
+    allows many readers OR one writer, never both, and `pill_judge.judge`
+    takes minutes of gateway round-trips. The caller closes `con` as soon as
+    this returns, judges with no connection open (`judge_plan`), and opens a
+    write connection only for the final burst.
 
-    breaker = breaker or pill_judge.JudgeCircuitBreaker()
-
+    `con` must be READ-ONLY. Returns a plain dict; every entry is either a
+    value already computed here or a reference the judge phase may mutate
+    in place (nothing in the plan is shared with DuckDB)."""
     keys = [p["key"] for p in pills]
     scores = _score_matrix(vectors, pill_vecs, keys)
     col = {k: i for i, k in enumerate(keys)}
     idx_of = {u: i for i, u in enumerate(urls)}
 
-    crawled = None   # lazy
-    titles = None    # lazy
-    inserts: list[tuple] = []
-    deletes: list[tuple] = []
-    counters = {"judged": 0}
-
-    def _ensure_lookups(cand_urls):
-        nonlocal crawled, titles
-        if crawled is None:
-            crawled = _crawled_at_for(con, urls)
-        if titles is None:
-            titles = _titles_for(con, cand_urls)
-        else:
-            missing = [u for u in cand_urls if u not in titles]
-            if missing:
-                titles.update(_titles_for(con, missing))
-
+    steps: list[dict] = []
     fda_cand = None
+    needs_crawled = False
+    title_urls: list[str] = []
+
+    # One grouped lookup for all pills, not two queries per pill inside the
+    # staging hold (issue #70: the hold is what blocks the ingest writer).
+    existing_cats = list(dict.fromkeys(p["key"] for p in pills if p["kind"] != "fda"))
+    judged_cats = list(dict.fromkeys(
+        p["key"] + suffix for p in pills if p["kind"] != "custom"))
+    existing_map = _tags_by_category(con, existing_cats, urls)
+    judged_map = _tags_by_category(con, judged_cats, urls, judged=True)
+
     for p in pills:
         k = p["key"]
         s = scores[:, col[k]]
 
         # Custom pills: pure cosine at the user's threshold, no judge.
         if p["kind"] == "custom":
-            already = _existing_tags(con, k, urls)
-            member_idx = [i for i in np.nonzero(s >= p["hi"])[0]
+            already = existing_map.get(k, set())
+            member_idx = [int(i) for i in np.nonzero(s >= p["hi"])[0]
                           if urls[i] not in already]
             if member_idx:
-                if crawled is None:
-                    crawled = _crawled_at_for(con, urls)
-                inserts.extend(
-                    (urls[i], "gal", k, "semantic", f"{s[i]:.3f}", crawled.get(urls[i]))
-                    for i in member_idx if crawled.get(urls[i])
-                )
+                needs_crawled = True
+            steps.append({"kind": "custom", "key": k, "s": s,
+                          "member_idx": member_idx})
             continue
 
         # Curated/FDA: gather candidates for the judge.
@@ -372,21 +383,81 @@ def stage_batch(con, urls: list[str], vectors: np.ndarray,
             cand = set(fda_cand)
             kw_tagged = set()
         else:
-            kw_tagged = _existing_tags(con, k, urls)  # live keyword tags
+            kw_tagged = existing_map.get(k, set())  # live keyword tags
             cand = set(kw_tagged)
             cand.update(urls[i] for i in np.nonzero(s >= SEM_NET)[0])
 
         # Skip only what the judge has ALREADY ruled on. Using _existing_tags
         # here meant keyword hits were their own skip set once suffix was ""
         # and they were never judged at all.
-        already = _judged_tags(con, target_cat, urls)
+        already = judged_map.get(target_cat, set())
         to_judge = sorted(cand - already)
+        if to_judge:
+            needs_crawled = True
+            title_urls.extend(to_judge)
+        steps.append({"kind": p["kind"], "key": k, "target_cat": target_cat,
+                      "strict": bool(p.get("strict")), "suffix": suffix,
+                      "s": s, "kw_tagged": kw_tagged, "to_judge": to_judge})
+
+    # The old lazy lookups fired only when something actually needed them
+    # (a custom-pill member or a non-empty candidate set); keep that, so a
+    # quiet cycle does not pay for two extra scans it never used.
+    crawled = _crawled_at_for(con, urls) if needs_crawled else {}
+    titles = _titles_for(con, list(dict.fromkeys(title_urls))) if title_urls else {}
+
+    return {
+        "urls": urls,
+        "scores": scores,
+        "idx_of": idx_of,
+        "steps": steps,
+        "crawled": crawled,
+        "titles": titles,
+        "last_row": None,
+    }
+
+
+def judge_plan(plan: dict, breaker=None):
+    """Judge one planned batch with NO database connection open.
+
+    Returns (insert_rows, deletes, counters), identical in shape and content
+    to the pre-#70 `stage_batch`. insert_rows are article_tags tuples;
+    deletes are (live_category, url) pairs for judged-irrelevant keyword
+    tags. Custom pills stay pure-cosine (user-tuned) — they never reach the
+    judge, so a cycle with only custom pills makes no gateway calls at all.
+    """
+    try:
+        from . import pill_judge
+    except ImportError:
+        from pipeline import pill_judge
+
+    breaker = breaker or pill_judge.JudgeCircuitBreaker()
+    urls = plan["urls"]
+    idx_of = plan["idx_of"]
+    crawled = plan["crawled"]
+    titles = plan["titles"]
+
+    inserts: list[tuple] = []
+    deletes: list[tuple] = []
+    counters = {"judged": 0}
+
+    for step in plan["steps"]:
+        k = step["key"]
+        s = step["s"]
+
+        # Custom pills: pure cosine at the user's threshold, no judge.
+        if step["kind"] == "custom":
+            inserts.extend(
+                (urls[i], "gal", k, "semantic", f"{s[i]:.3f}", crawled.get(urls[i]))
+                for i in step["member_idx"] if crawled.get(urls[i])
+            )
+            continue
+
+        to_judge = step["to_judge"]
         if not to_judge:
             continue
-        _ensure_lookups(to_judge)
         items = [{"url": u, "title": titles[u][0], "desc": titles[u][1]}
                  for u in to_judge if u in titles]
-        verdicts = pill_judge.judge(target_cat, items, breaker=breaker,
+        verdicts = pill_judge.judge(step["target_cat"], items, breaker=breaker,
                                     workers=JUDGE_WORKERS)
         if verdicts is None:
             # Gateway down: keyword tags stay as-is and nothing is demoted.
@@ -398,19 +469,19 @@ def stage_batch(con, urls: list[str], vectors: np.ndarray,
             break
         counters["judged"] += len(verdicts)
 
-        accept = {"relevant"} if p.get("strict") else pill_judge.ACCEPT
+        accept = {"relevant"} if step["strict"] else pill_judge.ACCEPT
         approved = [u for u, v in verdicts.items() if v in accept]
         # An article with no crawled_at cannot be inserted (the column is the
         # feed's time index), so track what actually got a judge row rather
         # than what was merely approved — the delete below keys off this.
         inserted = {u for u in approved if crawled.get(u)}
         inserts.extend(
-            (u, "gal", target_cat, "judge",
+            (u, "gal", step["target_cat"], "judge",
              f"{verdicts[u]}|{s[idx_of[u]]:.3f}" if u in idx_of else verdicts[u],
              crawled.get(u))
             for u in inserted)
 
-        if suffix == "":
+        if step["suffix"] == "":
             # Post-flip the live and target categories are the same, so a
             # verdict on a keyword-tagged article REPLACES its keyword row:
             #   approved + inserted -> drop the keyword row, judge row stands
@@ -423,9 +494,24 @@ def stage_batch(con, urls: list[str], vectors: np.ndarray,
             # replacing it.
             deletes.extend(
                 (k, u) for u, v in verdicts.items()
-                if u in kw_tagged and (v == "irrelevant" or u in inserted)
+                if u in step["kw_tagged"] and (v == "irrelevant" or u in inserted)
             )
     return inserts, deletes, counters
+
+
+def stage_batch(con, urls: list[str], vectors: np.ndarray,
+                pills: list[dict], pill_vecs: dict[str, np.ndarray],
+                suffix: str = SUFFIX, breaker=None):
+    """Plan + judge in one call, with `con` held throughout.
+
+    Kept for callers that already hold a read connection for their own
+    reasons. `score_new` does NOT use this any more — it calls `plan_batch`,
+    closes the connection, then `judge_plan`, because holding the read lock
+    across the judging loop blocks the ingest writer (issue #70). New code
+    that judges should do the same.
+    """
+    plan = plan_batch(con, urls, vectors, pills, pill_vecs, suffix=suffix)
+    return judge_plan(plan, breaker=breaker)
 
 
 # ---------------------------------------------------------------------------
@@ -447,6 +533,11 @@ def _write_judge_health(totals: dict, watermark_before: int,
         "watermark_before": watermark_before,
         "watermark_after": watermark_after,
         "elapsed_s": totals.get("elapsed_s"),
+        # How long the read-only DuckDB connection was actually held (issue
+        # #70). Must stay in seconds, not minutes: the ingest writer is
+        # blocked for exactly this long.
+        "db_hold_s": totals.get("db_hold_s"),
+        "judge_s": totals.get("judge_s"),
     }
     tmp = JUDGE_HEALTH.with_name(f"{JUDGE_HEALTH.name}.{os.getpid()}.tmp")
     try:
@@ -528,50 +619,68 @@ def score_new(suffix: str = SUFFIX, chunk_rows: int = 50_000,
 
     pill_vecs = get_pill_vectors(pills)
 
-    # Phase 1: stage everything on a READ-ONLY connection (judge calls take
-    # minutes — never hold the write lock through them).
     totals = {"inserted": 0, "demoted": 0, "articles": 0, "judged": 0}
     all_inserts: list[tuple] = []
     all_deletes: list[tuple] = []
     max_row = next_row - 1
+
+    # Phase 1: stage everything the judge needs on a READ-ONLY connection,
+    # then CLOSE it. The judging loop below runs minutes of gateway calls, and
+    # DuckDB allows many readers or one writer, never both — holding this
+    # connection through the loop is what made the ingest's writer wait (issue
+    # #70: median hold 302 s, p95 1041 s, max 1760 s). Nothing in a plan is
+    # borrowed from DuckDB, so the close is safe.
+    plans: list[dict] = []
     rcon = _open_read()
-    chunks_seen = 0
+    hold_started = time.monotonic()
     try:
         for urls, vectors, last_row in embedding_store.iter_active_chunks(
                 chunk_rows=max(1, int(chunk_rows)), min_row_index=next_row):
-            chunks_seen += 1
-            ins, dels, c = stage_batch(
-                rcon, urls, vectors, pills, pill_vecs,
-                suffix=suffix, breaker=breaker,
-            )
-            all_inserts.extend(ins)
-            all_deletes.extend(dels)
-            totals["judged"] += c["judged"]
-            totals["articles"] += len(urls)
-            if c.get("judge_failed"):
-                # The gateway was down for at least one pill in this chunk.
-                # Stop here WITHOUT advancing past it: the watermark is a
-                # monotonic row_index with no rewind, so advancing would leave
-                # these articles permanently unjudged (keyword-only forever)
-                # with nothing reporting it. Next run retries the same rows.
-                totals["halted_on_judge_failure"] = True
-                totals["failure_code"] = (
-                    c.get("failure_code") or breaker.failure_code or "judge_error"
-                )
-                log.warning(
-                    "pill_scorer: judge unavailable at row %s — holding watermark "
-                    "at %s so these articles are retried, not skipped",
-                    last_row, max_row + 1,
-                )
-                break
-            max_row = last_row
-            if max_chunks is not None and chunks_seen >= max_chunks:
-                totals["bounded_run_complete"] = True
+            plan = plan_batch(rcon, urls, vectors, pills, pill_vecs, suffix=suffix)
+            plan["last_row"] = last_row
+            plans.append(plan)
+            if max_chunks is not None and len(plans) >= max_chunks:
                 break
     finally:
         rcon.close()
+        db_hold_s = time.monotonic() - hold_started
+    # Log the hold as soon as it ends: waiting for the summary line would hide
+    # it behind the whole judging loop (issue #70 is about that loop's length).
+    log.info("pill_scorer: read connection held %.1fs and closed before judging", db_hold_s)
 
-    # Phase 2: one brief write burst.
+    # Phase 2: judge with NO connection open.
+    judge_started = time.monotonic()
+    judged_chunks = 0
+    for plan in plans:
+        totals["articles"] += len(plan["urls"])
+        ins, dels, c = judge_plan(plan, breaker=breaker)
+        all_inserts.extend(ins)
+        all_deletes.extend(dels)
+        totals["judged"] += c["judged"]
+        if c.get("judge_failed"):
+            # The gateway was down for at least one pill in this chunk.
+            # Stop here WITHOUT advancing past it: the watermark is a
+            # monotonic row_index with no rewind, so advancing would leave
+            # these articles permanently unjudged (keyword-only forever)
+            # with nothing reporting it. Next run retries the same rows.
+            totals["halted_on_judge_failure"] = True
+            totals["failure_code"] = (
+                c.get("failure_code") or breaker.failure_code or "judge_error"
+            )
+            log.warning(
+                "pill_scorer: judge unavailable at row %s — holding watermark "
+                "at %s so these articles are retried, not skipped",
+                plan["last_row"], max_row + 1,
+            )
+            break
+        max_row = plan["last_row"]
+        judged_chunks += 1
+    if max_chunks is not None and judged_chunks >= max_chunks:
+        totals["bounded_run_complete"] = True
+    totals["judge_s"] = round(time.monotonic() - judge_started, 1)
+    totals["db_hold_s"] = round(db_hold_s, 1)
+
+    # Phase 3: one brief write burst.
     if all_inserts or all_deletes:
         wcon = _open_connection(DB_PATH)
         try:

@@ -1,0 +1,139 @@
+{
+ "counters": {
+  "judged": 6
+ },
+ "deletes": [
+  [
+   "ai_general",
+   "u1"
+  ],
+  [
+   "ai_general",
+   "u2"
+  ]
+ ],
+ "final_tags": [
+  [
+   "u1",
+   "gal",
+   "ai_general",
+   "judge",
+   "relevant|0.900",
+   20261120000000
+  ],
+  [
+   "u3",
+   "gal",
+   "ai_general",
+   "judge",
+   "borderline|0.680",
+   20261120000000
+  ],
+  [
+   "u5",
+   "gal",
+   "ai_general",
+   "judge",
+   "relevant|0.850",
+   20261120000000
+  ],
+  [
+   "u5",
+   "gal",
+   "ai_general",
+   "keyword",
+   "kw",
+   20261120000000
+  ],
+  [
+   "u7",
+   "gal",
+   "custom_7",
+   "semantic",
+   "0.750",
+   20261120000000
+  ],
+  [
+   "u8",
+   "gal",
+   "custom_7",
+   "semantic",
+   "0.800",
+   20261120000000
+  ],
+  [
+   "u9",
+   "gal",
+   "meddev",
+   "judge",
+   "relevant|0.938",
+   20261120000000
+  ],
+  [
+   "u10",
+   "gal",
+   "supply_chain",
+   "keyword",
+   "kw",
+   20261120000000
+  ]
+ ],
+ "generated_from": "commit bb98352 (before issue #70) via stage_batch",
+ "inserts": [
+  [
+   "u1",
+   "gal",
+   "ai_general",
+   "judge",
+   "relevant|0.900",
+   20261120000000
+  ],
+  [
+   "u3",
+   "gal",
+   "ai_general",
+   "judge",
+   "borderline|0.680",
+   20261120000000
+  ],
+  [
+   "u7",
+   "gal",
+   "custom_7",
+   "semantic",
+   "0.750",
+   20261120000000
+  ],
+  [
+   "u9",
+   "gal",
+   "meddev",
+   "judge",
+   "relevant|0.938",
+   20261120000000
+  ]
+ ],
+ "judge_calls": [
+  {
+   "category": "ai_general",
+   "urls": [
+    "u1",
+    "u2",
+    "u3"
+   ]
+  },
+  {
+   "category": "supply_chain",
+   "urls": [
+    "u10",
+    "u4"
+   ]
+  },
+  {
+   "category": "meddev",
+   "urls": [
+    "u9"
+   ]
+  }
+ ]
+}

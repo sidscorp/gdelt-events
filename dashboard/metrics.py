@@ -8,6 +8,7 @@ produced (timestamps, statuses, notes), never from exit codes.
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -26,7 +27,22 @@ _REPO = Path(__file__).resolve().parent.parent
 if str(_REPO) not in sys.path:           # eval/ and pipeline/ live at the repo root
     sys.path.insert(0, str(_REPO))
 
-GATEWAY_KEY_INFO = "https://llm.snambiar.com/key/info"
+GATEWAY_URL_FILE = DATA_DIR / ".gateway_url"
+
+
+def _gateway_key_info() -> str | None:
+    """Gateway /key/info URL from the host-configured endpoint.
+
+    Returns None when unconfigured: /admin/metrics renders one error card rather
+    than a 500, so a missing setting must not raise here.
+    """
+    url = os.environ.get("GDELT_BRIEFING_GATEWAY_URL") or (
+        GATEWAY_URL_FILE.read_text(encoding="utf-8").strip()
+        if GATEWAY_URL_FILE.exists() else None
+    )
+    if not url:
+        return None
+    return url.split("/v1/")[0] + "/key/info"
 BOT_RE = re.compile(r"bot|crawl|spider|slurp|headless|preview|facebookexternalhit|curl|python-requests|wget", re.I)
 PROBLEM = ("overstated", "unsupported", "contradicted")
 KEY_FILES = {  # file in data/ -> what uses it (a key alias can serve several)
@@ -244,7 +260,10 @@ def spend(data_dir: Path = DATA_DIR, timeout: float = 5) -> dict:
         path = data_dir / fname
         if not path.exists():
             continue
-        req = urllib.request.Request(GATEWAY_KEY_INFO, headers={"Authorization": f"Bearer {path.read_text().strip()}"})
+        info_url = _gateway_key_info()
+        if not info_url:
+            continue
+        req = urllib.request.Request(info_url, headers={"Authorization": f"Bearer {path.read_text().strip()}"})
         try:
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 info = json.loads(r.read().decode("utf-8", "replace")).get("info") or {}

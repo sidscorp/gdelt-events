@@ -6,6 +6,7 @@ this module.
 """
 
 import json
+import os
 import re
 import time
 import logging
@@ -15,7 +16,7 @@ from datetime import datetime
 from db import get_db, _hours_cutoff
 from views import find_view
 from webutil import usable_title
-from _paths import OPENROUTER_KEY_PATH
+from _paths import DATA_DIR, OPENROUTER_KEY_PATH
 
 # Same singleton logger app.py configures; getLogger by name returns it (no
 # circular import on app).
@@ -24,7 +25,26 @@ req_log = logging.getLogger("dashboard.requests")
 
 # Routed through the self-hosted LLM gateway (LiteLLM). The key
 # file now holds the gateway virtual key, and the model is a gateway alias.
-OPENROUTER_URL = "https://llm.snambiar.com/v1/chat/completions"
+GATEWAY_URL_FILE = DATA_DIR / ".gateway_url"
+
+
+def _briefing_gateway_url() -> str:
+    """LLM gateway endpoint, configured on the host.
+
+    Resolution: GDELT_BRIEFING_GATEWAY_URL, then data/.gateway_url. Never a
+    literal in the repo: this repository is public and the endpoint is internal
+    infrastructure.
+    """
+    url = os.environ.get("GDELT_BRIEFING_GATEWAY_URL") or (
+        GATEWAY_URL_FILE.read_text(encoding="utf-8").strip()
+        if GATEWAY_URL_FILE.exists() else None
+    )
+    if not url:
+        raise RuntimeError(
+            "no LLM gateway configured: set GDELT_BRIEFING_GATEWAY_URL or write "
+            f"{GATEWAY_URL_FILE}"
+        )
+    return url
 # Fireworks gpt-oss-120b ($0.15/$0.60 per 1M) — NOT cerebras-fast. Cerebras is
 # not free: its observed blended rate is ~$1.90/1M, which made it 8x pricier
 # per briefing and the single largest line item across the whole LLM fleet.
@@ -299,7 +319,7 @@ def _chat(prompt: str, max_tokens: int, temperature: float,
         # gateways that do not support the field.
         body_kwargs["reasoning_effort"] = reasoning_effort
     payload = json.dumps(body_kwargs).encode()
-    req = Request(OPENROUTER_URL, data=payload, headers={
+    req = Request(_briefing_gateway_url(), data=payload, headers={
         "Content-Type": "application/json",
         "Authorization": f"Bearer {key}",
     })
@@ -694,7 +714,7 @@ def _generate_briefing_stream(sources, view_name, view_desc, hours, prev=None, t
     }).encode()
 
     req = Request(
-        OPENROUTER_URL,
+        _briefing_gateway_url(),
         data=payload,
         headers={
             "Content-Type": "application/json",

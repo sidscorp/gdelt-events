@@ -31,7 +31,28 @@ import urllib.request
 from collections import deque
 from pathlib import Path
 
-GATEWAY_URL = os.environ.get("GDELT_EVAL_GATEWAY_URL", "https://llm.snambiar.com/v1/chat/completions")
+GATEWAY_URL_FILE = Path(__file__).resolve().parents[2] / "data" / ".gateway_url"
+
+
+def _gateway_url() -> str:
+    """LLM gateway endpoint, configured on the host.
+
+    Resolution: GDELT_EVAL_GATEWAY_URL, then data/.gateway_url. Never a literal
+    in the repo — this repository is public and the endpoint is internal
+    infrastructure.
+    """
+    url = os.environ.get("GDELT_EVAL_GATEWAY_URL") or (
+        GATEWAY_URL_FILE.read_text(encoding="utf-8").strip()
+        if GATEWAY_URL_FILE.exists() else None
+    )
+    if not url:
+        raise RuntimeError(
+            "no LLM gateway configured: set GDELT_EVAL_GATEWAY_URL or write "
+            f"{GATEWAY_URL_FILE}"
+        )
+    return url
+
+
 KEY_FILE = Path(__file__).resolve().parents[2] / "data" / ".gdelt_eval_gateway_key"
 JEV_MODEL = "jev-1.13.0"       # sent inside the user JSON for the record; the deployment's model wins
 WRITER_MODEL = "accounts/fireworks/models/gpt-oss-120b"  # = dashboard/briefing.py BRIEFING_MODEL
@@ -139,7 +160,7 @@ class Gateway:
     def _post(self, body: dict, retries: int = 4, timeout: int = 90, limiter: RateLimiter | None = None) -> dict:
         data = json.dumps(body).encode()
         for attempt in range(retries):
-            req = urllib.request.Request(GATEWAY_URL, data=data, headers={
+            req = urllib.request.Request(_gateway_url(), data=data, headers={
                 "Authorization": f"Bearer {self.key}", "Content-Type": "application/json"})
             try:
                 with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -167,7 +188,7 @@ class Gateway:
         """max_budget - spend for this key per the gateway; None if unknown
         (no cap, or the gateway is unreachable — callers then run normally,
         and the server-side cap still holds)."""
-        url = GATEWAY_URL.split("/v1/")[0] + "/key/info"
+        url = _gateway_url().split("/v1/")[0] + "/key/info"
         req = urllib.request.Request(url, headers={"Authorization": f"Bearer {self.key}"})
         try:
             with urllib.request.urlopen(req, timeout=10) as r:

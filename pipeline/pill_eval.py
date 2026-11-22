@@ -30,7 +30,28 @@ from pathlib import Path
 
 from .config import DATA_DIR, DB_PATH
 
-GATEWAY_URL = "https://llm.snambiar.com/v1/chat/completions"
+GATEWAY_URL_FILE = DATA_DIR / ".gateway_url"
+
+
+def _gateway_url() -> str:
+    """LLM gateway endpoint, configured on the host.
+
+    Resolution: GDELT_PILL_GATEWAY_URL, then data/.gateway_url. Never a literal
+    in the repo — this repository is public and the endpoint is internal
+    infrastructure.
+    """
+    url = os.environ.get("GDELT_PILL_GATEWAY_URL") or (
+        GATEWAY_URL_FILE.read_text(encoding="utf-8").strip()
+        if GATEWAY_URL_FILE.exists() else None
+    )
+    if not url:
+        raise RuntimeError(
+            "no LLM gateway configured: set GDELT_PILL_GATEWAY_URL or write "
+            f"{GATEWAY_URL_FILE}"
+        )
+    return url
+
+
 # Fireworks gpt-oss-120b: ~10x cheaper than Cerebras GLM at observed blended
 # rates ($9.35/day burn on 2026-07-08 -> ~$0.10-0.15/day). Validated against
 # Cerebras-judged pills before the switch (agreement eval in pill_eval history).
@@ -267,7 +288,7 @@ def _judge_call(prompt: str, retries: int = 3) -> str:
         "max_tokens": 6000,
         "temperature": 0.0,
     }).encode()
-    req = urllib.request.Request(GATEWAY_URL, data=payload, headers={
+    req = urllib.request.Request(_gateway_url(), data=payload, headers={
         "Content-Type": "application/json",
         "Authorization": f"Bearer {_get_key()}",
     })

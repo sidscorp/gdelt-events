@@ -119,9 +119,7 @@ _search_url_warned = False
 LOCK_FILE = DATA_DIR / ".social_publisher.lock"
 SECRETS_FILE = DATA_DIR / ".bluesky_bot"
 GATEWAY_KEY_FILE = DATA_DIR / ".social_gateway_key"
-GATEWAY_URL = os.environ.get(
-    "GDELT_SOCIAL_GATEWAY_URL", "https://llm.snambiar.com/v1/chat/completions"
-)
+GATEWAY_URL_FILE = DATA_DIR / ".gateway_url"
 SOCIAL_MODEL = os.environ.get(
     "GDELT_SOCIAL_MODEL", "accounts/fireworks/models/gpt-oss-120b"
 )
@@ -314,6 +312,25 @@ def _gateway_key() -> str | None:
     )
 
 
+def _gateway_url() -> str:
+    """LLM gateway endpoint.
+
+    Configured on the host, never in the repo: the gateway hostname is internal
+    infrastructure and this repository is public. Resolution order matches the
+    other social settings: GDELT_SOCIAL_GATEWAY_URL, then data/.gateway_url.
+    """
+    url = os.environ.get("GDELT_SOCIAL_GATEWAY_URL") or (
+        GATEWAY_URL_FILE.read_text(encoding="utf-8").strip()
+        if GATEWAY_URL_FILE.exists() else None
+    )
+    if not url:
+        raise RuntimeError(
+            "no LLM gateway configured: set GDELT_SOCIAL_GATEWAY_URL or write "
+            f"{GATEWAY_URL_FILE}"
+        )
+    return url
+
+
 def _search_url() -> str | None:
     """SearXNG endpoint used to corroborate a candidate before posting.
 
@@ -364,7 +381,7 @@ def _gateway_call(prompt: str, max_tokens: int = 1200) -> str:
     if not key:
         raise RuntimeError("dedicated social gateway key is not configured")
     body = _json_request(
-        GATEWAY_URL,
+        _gateway_url(),
         {
             "model": SOCIAL_MODEL,
             "messages": [{"role": "user", "content": prompt}],

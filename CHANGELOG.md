@@ -17,6 +17,43 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-22 — Freshness gate: make the failure actually surface
+
+**What** — Three follow-ups to the gate in the entry below. (1) Failures and recoveries
+post one line to the fleet news feed on snambiar-linux over the existing ssh key,
+throttled to the first failure and every 12th (~3h) after, so a long outage neither goes
+silent nor spams. (2) The `GDELT-PipelineCheck` wrapper now waits for python and returns
+its exit code (`WScript.Quit rc`), so a failing check reaches `LastTaskResult`. (3)
+`_post_news` passes `ssh -n` and `stdin=DEVNULL`; without them the child inherited the
+caller's stdin and blocked until the 25s timeout.
+
+**Why** — The gate could see a stall but nothing was told. The wrapper was
+`WScript.Shell.Run cmd, 0, False`, so every failing run reported 0 and the record was a
+log nobody reads — the same shape as the 69-hour outage. Confirmed live at 19:18Z: the
+log said FAIL while `LastTaskResult` said 0.
+
+**How it was verified** — Wrapper: a throwaway task running the check against a
+deliberately stale fixture DB returned last-task-result **1** (0 before the change), and a
+synthetic wrapper whose command exits 7 yielded ERRORLEVEL 7. Delivery: the same drill
+under the S4U principal logged `news delivered=True` and wrote `delivered: true` to the
+alert record, in about a second. Transport from an S4U task to snambiar-linux confirmed
+independently (ssh echo returned rc 0; key present; OpenSSH on PATH). Tests: 9/9, with
+delivery suppressed by `GDELT_FRESHNESS_NO_DELIVER` so stale fixtures cannot announce a
+fake outage. The production task needed no re-registration — its action already pointed at
+the wrapper, so replacing the file was enough.
+
+**Files** — `pipeline/pipeline_health.py`, `tests/test_freshness_gate.py`,
+`scripts/register_pipeline_check.ps1`, `CHANGELOG.md`, and on the host (outside the repo)
+`C:\Users\siddh\bin\gdelt_pipeline_check_hidden.vbs`.
+
+**Notes** — A console-less Python (e.g. running the module from an ssh session) still
+blocks on ssh until the timeout; under the real task the wrapper supplies a console and it
+works in about a second, so the timeout stays as the guard rather than the path. The news
+feed was chosen over beardy's Matrix credentials and over beardy's private SQLite inbox:
+no new credential, and it lands where the whole fleet already looks. The 60-minute
+threshold is a single constant; raise it if slow upstream periods start producing false
+FAILs.
+
 ## 2026-11-22 — A freshness gate: the check the 69-hour stall needed
 
 **What** — `pipeline.pipeline_health` gains a `freshness` check. It reads

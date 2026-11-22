@@ -9,6 +9,7 @@ check nobody has watched fail is not a check.
 
 Run with the repo venv:  .venv\\Scripts\\python.exe -m pytest tests\\test_freshness_gate.py -v
 """
+import os
 import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
@@ -17,6 +18,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "pipeline"))
 
 import pipeline_health as ph  # noqa: E402
+
+# The gate now posts to the fleet news feed on failure. Tests use stale fixtures on
+# purpose, so without this they would announce a fake outage on every run.
+os.environ.setdefault("GDELT_FRESHNESS_NO_DELIVER", "1")
 
 NOW = datetime(2026, 11, 22, 19, 0, 0, tzinfo=timezone.utc)
 

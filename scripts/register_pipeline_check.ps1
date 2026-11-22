@@ -28,7 +28,12 @@ New-Item -ItemType Directory -Force -Path (Split-Path $log) | Out-Null
 ' GDELT pipeline health check. Emits HEALTHY:/PROBLEMS: and exits non-zero on failure.
 Q = Chr(34)
 cmd = "cmd /c " & Q & "cd /d " & Q & "$repo" & Q & " && " & Q & "$py" & Q & " -u -m $module --quiet >> " & Q & "$log" & Q & " 2>&1 " & Q
-CreateObject("WScript.Shell").Run cmd, 0, False
+Set shell = CreateObject("WScript.Shell")
+' Wait (True) so python's exit code becomes wscript's, which Task Scheduler
+' records as LastTaskResult. Fire-and-forget (False) made every failing run
+' look like 0, which is how 69 hours of stale data stayed invisible.
+rc = shell.Run(cmd, 0, True)
+WScript.Quit rc
 "@ | Set-Content -Path $vbs -Encoding ASCII
 
 $action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument "`"$vbs`""

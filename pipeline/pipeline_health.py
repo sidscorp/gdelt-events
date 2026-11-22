@@ -65,6 +65,9 @@ FRESH_PAUSE_FILE = DATA / ".freshness_pause"
 # alert into the production alert path; the same idea as config.GDELT_DATA_DIR.
 ALERT_DIR = Path(os.environ.get("GDELT_ALERT_DIR") or (DATA / "alerts"))
 FRESH_ALERT_FILE = ALERT_DIR / "freshness.json"
+NEWS_SSH_HOST = os.environ.get("GDELT_NEWS_SSH_HOST", "snambiar@snambiar-linux")
+NEWS_SCRIPT = os.environ.get("GDELT_NEWS_SCRIPT", "~/news/news.sh")
+NEWS_REPOST_EVERY = 12  # re-announce every ~3h while still failing
 
 
 def _get(url: str, timeout: float) -> tuple[int, str]:
@@ -242,11 +245,44 @@ def _write_freshness_alert(record: dict) -> None:
             "could not write %s: %s", FRESH_ALERT_FILE, exc)
 
 
+def _post_news(message: str, severity: str = "crit") -> bool:
+    """Post one line to the fleet news feed. Best-effort: never raises.
+
+    BatchMode makes a missing key fail immediately instead of waiting on a prompt,
+    and the timeout caps the scheduler's exposure. A failed post is logged; the
+    freshness record still carries the facts, so nothing is lost by the failure.
+    """
+    log = logging.getLogger("pipeline_health")
+    if os.environ.get("GDELT_FRESHNESS_NO_DELIVER"):
+        log.info("news delivery suppressed by GDELT_FRESHNESS_NO_DELIVER")
+        return False
+    escaped = message.replace("'", "'\"'\"'")
+    remote = (f"{NEWS_SCRIPT} opencode '{escaped}' --project gdelt "
+              f"--severity {severity}")
+    cmd = ["ssh", "-n", "-o", "BatchMode=yes", "-o", "ConnectTimeout=8",
+           NEWS_SSH_HOST, remote]
+    try:
+        # -n plus an explicit DEVNULL: without them ssh inherits the caller's stdin and
+        # waits on it, which hung this call for the full timeout under the scheduler.
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=25,
+                             stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.error("news post failed: %s", exc)
+        return False
+    if res.returncode != 0:
+        log.error("news post failed (rc=%s): %s", res.returncode,
+                  (res.stderr or "").strip()[:160])
+        return False
+    log.info("news posted: %s", message[:100])
+    return True
+
+
 def notify_freshness_unhealthy(newest, detail: str, now=None) -> bool:
     """THE delivery point for a freshness failure. Currently: log ERROR + write a file.
 
-    Deliberately one function with one call site, because there is no alert channel in
-    this repo that this host can reach without inventing a credential:
+    Deliberately one function with one call site. The delivery channel is the fleet news
+    feed on snambiar-linux, reached over the existing ssh key - chosen over the options
+    rejected below because it needs no new credential:
 
       * `social_store.list_pending_notify()` is Bluesky-candidate specific and is polled
         by beardy. Writing a fake candidate into it would corrupt that pipeline's state.
@@ -259,7 +295,9 @@ def notify_freshness_unhealthy(newest, detail: str, now=None) -> bool:
     So the failure is logged at ERROR and written to data/alerts/freshness.json, shaped
     like the payload a sender would need (state, what, measured age, limit, first
     failure, consecutive count) so adding a channel does not mean re-deriving the facts.
-    Returns True only if a message was actually delivered; nothing delivers yet.
+    Delivery is throttled to the first failure and every NEWS_REPOST_EVERY checks after
+    it, so a long outage does not spam the feed. Returns True only when the post actually
+    succeeded.
     """
     now = now or datetime.now(timezone.utc)
     log = logging.getLogger("pipeline_health")
@@ -281,9 +319,18 @@ def notify_freshness_unhealthy(newest, detail: str, now=None) -> bool:
         "delivered": False,
     }
     _write_freshness_alert(record)
-    log.error("FRESHNESS FAILURE: %s -- no alert channel configured; "
-              "record written to %s", detail, FRESH_ALERT_FILE)
-    return False
+
+    count = record["consecutive_failures"]
+    delivered = False
+    if count == 1 or count % NEWS_REPOST_EVERY == 0:
+        suffix = "" if count == 1 else f" (still failing, {count} checks)"
+        delivered = _post_news(f"GDELT freshness FAILED: {detail}{suffix}")
+        if delivered:
+            record["delivered"] = True
+            _write_freshness_alert(record)
+    log.error("FRESHNESS FAILURE: %s (news delivered=%s; record at %s)",
+              detail, delivered, FRESH_ALERT_FILE)
+    return delivered
 
 
 def _mark_freshness_recovered(detail: str, now: datetime) -> None:
@@ -299,6 +346,12 @@ def _mark_freshness_recovered(detail: str, now: datetime) -> None:
         "consecutive_failures": previous.get("consecutive_failures"),
     })
     _write_freshness_alert(record)
+    if int(previous.get("consecutive_failures") or 0) >= 2:
+        _post_news(
+            "GDELT freshness RECOVERED: "
+            f"{detail} (was failing since {previous.get('first_failed_at')})",
+            severity="warn",
+        )
     logging.getLogger("pipeline_health").info(
         "freshness recovered: %s (was failing since %s)",
         detail, previous.get("first_failed_at"))

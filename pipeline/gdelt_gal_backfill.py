@@ -12,7 +12,6 @@ Usage:
 import argparse
 import logging
 import sys
-from datetime import datetime, timedelta
 
 import sys
 from pathlib import Path
@@ -23,6 +22,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from pipeline.backfill_range import resolve_range
 from pipeline.config import GAL_RAW_DIR
 from pipeline.gal_downloader import backfill_gal
 from pipeline.gal_loader import ensure_gal_indexes, load_gal_batch
@@ -38,21 +38,18 @@ def main():
     parser = argparse.ArgumentParser(description="GDELT GAL historical backfill")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--days", type=int, default=60, help="Days to backfill (default 60)")
-    group.add_argument("--since", type=str, help="Start date (YYYY-MM-DD)")
-    parser.add_argument("--until", type=str, help="End date (YYYY-MM-DD)")
+    group.add_argument("--since", type=str, help="Start date (YYYY-MM-DD, UTC)")
+    parser.add_argument("--until", type=str, help="End date (YYYY-MM-DD, UTC), default: now (UTC)")
     parser.add_argument("--workers", type=int, default=8, help="Parallel download threads")
     parser.add_argument("--download-only", action="store_true", help="Skip DB load")
     parser.add_argument("--load-only", action="store_true", help="Skip download")
     args = parser.parse_args()
 
-    if args.since:
-        since = datetime.strptime(args.since, "%Y-%m-%d")
-    else:
-        since = datetime.utcnow() - timedelta(days=args.days)
-    until = datetime.strptime(args.until, "%Y-%m-%d") if args.until else datetime.utcnow()
+    # Resolve date range (UTC: GDELT file timestamps are UTC)
+    since, until = resolve_range(days=args.days, since=args.since, until=args.until)
 
-    log.info("GAL backfill range: %s to %s",
-             since.strftime("%Y-%m-%d"), until.strftime("%Y-%m-%d"))
+    log.info("GAL backfill range (UTC): %s to %s",
+             since.strftime("%Y-%m-%d %H:%M"), until.strftime("%Y-%m-%d %H:%M"))
 
     if not args.load_only:
         backfill_gal(

@@ -32,7 +32,7 @@ if str(_REPO_ROOT) not in sys.path:
 
 from pipeline.config import DATA_DIR, DB_PATH, LOCK_FILE, LOG_DIR, MIN_FREE_GB, RAW_DIR
 from pipeline.downloader import fetch_latest, fetch_recent_slots, download_batch
-from pipeline.loader import load_batch
+from pipeline.loader import DbLockTimeout, load_batch
 from pipeline.pruner import prune
 
 
@@ -45,6 +45,31 @@ def setup_logging() -> None:
         "%(asctime)s %(levelname)s %(name)s: %(message)s"
     ))
     logging.basicConfig(level=logging.INFO, handlers=[handler, logging.StreamHandler()])
+
+
+# The host registers GDELT-Ingest with ExecutionTimeLimit PT10M (see
+# deploy/tasks/GDELT-Ingest.xml). Task Scheduler kills the process at that limit, so a
+# lock wait that overruns it loses the cycle silently AND without an "Ingest failed"
+# line - the exact failure shape issue #42 exists to prevent. The wait is therefore
+# clamped to the window the task actually has left, and the cycle aims to finish inside
+# 90% of the limit. Measured 2026-11-22 since 11-20 (n=256 cycles): work takes median
+# 79 s, p99 152 s, max 386 s, so the 240 s reserve covers the work after the wait.
+# With the 240 s ceiling and a typical 20-60 s of download and tagging around it, the
+# cycle stays well inside 300 s of wait + work, leaving >=300 s of the hard limit as
+# margin for a slow load.
+INGEST_TASK_TIME_LIMIT_S = 600.0
+INGEST_CYCLE_TARGET_S = 540.0
+INGEST_LOCK_RESERVE_S = 240.0
+INGEST_LOCK_WAIT_WANT_S = 240.0
+DEFER_EXIT_CODE = 3  # non-zero: a deferral is not success (see #42)
+
+
+def ingest_lock_budget(cycle_started: float, now: float | None = None,
+                       want: float = INGEST_LOCK_WAIT_WANT_S) -> float:
+    """Seconds this cycle may spend queueing behind a reader, within its task window."""
+    now = time.monotonic() if now is None else now
+    headroom = INGEST_CYCLE_TARGET_S - INGEST_LOCK_RESERVE_S - (now - cycle_started)
+    return max(0.0, min(want, headroom))
 
 
 def check_disk_space() -> float:
@@ -190,6 +215,8 @@ def run_ingest(force_prune: bool = False, prune_days: int | None = None) -> None
         sys.exit(2)
 
     try:
+        cycle_started = time.monotonic()
+
         # Check disk space
         free_gb = check_disk_space()
         if free_gb < MIN_FREE_GB:
@@ -218,7 +245,8 @@ def run_ingest(force_prune: bool = False, prune_days: int | None = None) -> None
             if (RAW_DIR / e["filename"]).exists()
         ]
         if window_files:
-            summary = load_batch(window_files)
+            summary = load_batch(window_files,
+                                 lock_budget_s=ingest_lock_budget(cycle_started))
             log.info(
                 "Loaded — events: %d, mentions: %d, gkg: %d, errors: %d (window: %d files)",
                 summary["events"], summary["mentions"], summary["gkg"], summary["errors"],
@@ -234,7 +262,9 @@ def run_ingest(force_prune: bool = False, prune_days: int | None = None) -> None
 
             gal_files = fetch_recent_gal(minutes_back=20)
             if gal_files:
-                gal_summary = load_gal_batch(gal_files)
+                gal_summary = load_gal_batch(
+                    gal_files, lock_budget_s=ingest_lock_budget(cycle_started),
+                )
                 log.info(
                     "GAL loaded: %d articles from %d files (skipped %d, errors %d)",
                     gal_summary["gal"], gal_summary["files"],
@@ -242,6 +272,10 @@ def run_ingest(force_prune: bool = False, prune_days: int | None = None) -> None
                 )
                 if gal_summary["gal"]:
                     data_changed = True
+        except DbLockTimeout as exc:
+            # GAL is what the freshness gate reads, so say so plainly - but a GAL
+            # deferral in a cycle that already loaded events/GKG is not a failure.
+            log.warning("GAL deferred: %s", exc)
         except Exception:
             log.exception("GAL ingest failed (non-fatal)")
 
@@ -290,6 +324,19 @@ def run_ingest(force_prune: bool = False, prune_days: int | None = None) -> None
             result = prune(retention_days=prune_days, vacuum=is_sunday)
             log.info("Prune complete: %s", result)
 
+    except DbLockTimeout as exc:
+        # A held database is not a failure: it is a named deferral. The next cycle
+        # (15 minutes away, MultipleInstancesPolicy=IgnoreNew) re-reads the trailing
+        # two-hour window from 5920e81, so the slot the deferral skipped is ingested
+        # then - no data is lost. Exit 3 keeps it distinct from success (issue #42:
+        # declining must never look like success), and the holder's PID/command line
+        # goes in the line so the next occurrence needs no archaeology. This is why
+        # the budget is bounded: the task is killed at ExecutionTimeLimit PT10M.
+        log.warning(
+            "Ingest deferred (database held): %s. Next cycle re-reads the 2h window; "
+            "exit %d.", exc, DEFER_EXIT_CODE,
+        )
+        sys.exit(DEFER_EXIT_CODE)
     except Exception:
         log.exception("Ingest failed")
         sys.exit(1)

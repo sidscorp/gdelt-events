@@ -17,6 +17,80 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-22 — Ingest queues behind the DuckDB reader, then defers by name
+
+**What** — `pipeline/loader.py::_open_connection` now waits on a time budget instead of 20
+retries with backoff (~82 s), logs how long it waited and who released the file, and on
+exhaustion raises `DbLockTimeout` carrying the competing process's **PID, executable and
+command line** (or `holder unknown`). The ingest computes its wait *per cycle* from the
+scheduled task's own `ExecutionTimeLimit` (`ingest_lock_budget`: 240 s wait ceiling, 240 s
+reserved for the work that follows, 540 s cycle target inside the 600 s hard limit), and
+turns a timeout into a first-class **deferral**: one `Ingest deferred (database held): …`
+WARNING naming the holder, `exit 3` (non-zero, so it never looks like success — issue #42),
+and the next cycle re-reads the trailing two-hour window from `5920e81`. Backfills keep a
+1800 s budget, short-lived writers inside a cycle keep 90 s.
+
+**Why** — Cycles were dying with `_duckdb.IOException: IO Error: Cannot open file
+"...gdelt.duckdb": The process cannot access the file because it is being used by another
+process`, and the log never said who held it. Measured across the four rotated
+`data/logs/ingest.log*` files (2026-05-28 → 11-22): **159 `Ingest failed` lines, 155 of them
+this lock error**; 699 contention episodes, of which **151 gave up**. The rate is worse than
+the 4% the issue recorded — 15 failures on 11-20, 33 on 11-21, 26 on 11-22, out of 96
+cycles/day (16–34%) — because ingestion only started running normally again on 11-19.
+
+**Who actually holds the file** — The DuckDB message names the holder in 155 of the 159
+give-ups, and every named holder is a Python process; the one behind the 16:00:14 failure on
+11-22 was PID 7864, a child of 29632, both `pipeline/embed_new_articles.py`. The long-lived
+reader is `pill_scorer.score_new`: it opens a read-only connection and holds it across the
+LLM judging loop (`stage_batch` → `pill_judge.judge`). That connection lifetime was measured
+from `data/logs/embed_new.log` (`elapsed_s`) over the previous three days, 195 runs: **median
+302 s, p95 1041 s, max 1760 s** (all-time max 8931 s on 09-26, a hung judge).
+
+**Why the wait is 240 s and not 1800 s** — The first design sized the wait to cover the
+longest measured hold (1800 s). Checking the task before deploying showed
+`ExecutionTimeLimit PT10M` on `GDELT-Ingest`: Task Scheduler kills the process at ten
+minutes, so a 30-minute wait would be **killed mid-wait — no load, no `Ingest failed` line, a
+terminated task result**, which is the exact silent-failure shape issue #42 exists to
+eliminate. Covering a 1760 s reader hold is therefore impossible without changing the task
+definition (out of scope for this issue), so the fix queues for what the window can afford
+and defers the rest by name. Measured cycle work since 11-20 (n=256): median 79 s, p99
+152 s, max 386 s — hence the 240 s reserve. The live run at 16:13:46 that cycle day made
+the point: it waited **445 s** and then loaded 1,813 events / 7,130 mentions / 4,107 gkg and
+3,719 GAL articles, finishing 491 s after it started — a recovered cycle, but only 109 s
+short of being killed.
+
+**How it was verified** — `tests/test_loader_lock_retry.py`, **6 tests, all passing** on the
+host venv (`.venv\Scripts\python.exe -m pytest tests\test_loader_lock_retry.py -v`), using a
+real second interpreter that holds the write lock: a 4 s hold is waited out and the open
+succeeds (`opened after waiting`); a 1.5 s budget raises `DbLockTimeout` naming the holder's
+PID and its **resolved command line**; an uncontended open returns in under 5 s; and the
+budget arithmetic is pinned so `elapsed + wait + reserve` can never reach the task limit.
+Mutation-checked by reintroducing six behaviours one at a time — the old 82 s budget, giving
+up on the first conflict, dropping the holder from the log, dropping the command line,
+raising the raw error untyped, and exiting 0 on a deferral — **each mutation failed exactly
+one test**. The parsing test pins the exact production message text from `ingest.log`.
+
+**Files** — `pipeline/loader.py`, `pipeline/gal_loader.py`, `pipeline/gdelt_ingest.py`,
+`tests/test_loader_lock_retry.py`, `CHANGELOG.md`.
+
+**Notes** — Rejected: a 1800 s wait (killed by the task limit, above). Rejected: a cooperative
+reader/writer lock file — the readers are 15+ processes including the live dashboard, and
+making readers queue turns a one-writer problem into a site-wide one. **Residual:** holds
+longer than ~4 minutes now defer instead of loading; the slot is picked up by the next cycle
+(15 min later, `MultipleInstancesPolicy=IgnoreNew` so triggers do not pile up) and the 2-hour
+lookback means no data is lost. **Root cause left in place:** `pill_scorer` holding a
+read-only connection through minutes of LLM calls is the actual defect (the same anti-pattern
+the DuckDB rules forbid for writes); shrinking that hold is the follow-up that would make
+this budget unnecessary and would let the wait shrink again. **Unverified:** acceptance
+criterion "7 consecutive days with zero `Ingest failed`" needs its observation window, which
+starts at this deploy; it is measured by counting that line per day plus the existing
+freshness gate (`GDELT-PipelineCheck`, which returns a non-zero task result and posts to the
+news feed), and by counting `Ingest deferred` lines, which must stay rare and name a holder.
+Finally, the venv `python.exe` re-execs the base interpreter, so one scheduled run is two
+PIDs with identical command lines — that is why `embed_new.log` carries every summary twice,
+why DuckDB names the interpreter child rather than the launcher, and why the new test
+identifies the holder by self-reported PID instead of the `Popen` handle.
+
 ## 2026-11-22 — Freshness gate: make the failure actually surface
 
 **What** — Three follow-ups to the gate in the entry below. (1) Failures and recoveries

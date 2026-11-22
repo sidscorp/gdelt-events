@@ -17,7 +17,7 @@ import duckdb
 import pandas as pd
 
 from .config import DB_PATH
-from .loader import BATCH_COMMIT_SIZE, _open_connection
+from .loader import BATCH_COMMIT_SIZE, BULK_LOCK_WAIT_BUDGET_S, _open_connection
 
 log = logging.getLogger(__name__)
 
@@ -151,15 +151,22 @@ def load_gal_file(con: duckdb.DuckDBPyConnection, gal_path: Path) -> int:
 def load_gal_batch(
     gal_files: list[Path],
     db_path: Path | None = None,
+    lock_budget_s: float | None = None,
 ) -> dict:
-    """Load multiple GAL files with periodic commits."""
+    """Load multiple GAL files with periodic commits.
+
+    This is the freshness-gate's critical path (`max(gal.crawled_at)`), so it waits
+    out a long-lived reader instead of dropping the cycle: `lock_budget_s` defaults
+    to loader.BULK_LOCK_WAIT_BUDGET_S.
+    """
     db_path = db_path or DB_PATH
+    budget = BULK_LOCK_WAIT_BUDGET_S if lock_budget_s is None else float(lock_budget_s)
     summary = {"gal": 0, "files": 0, "skipped": 0, "errors": 0}
     total = len(gal_files)
     if total == 0:
         return summary
 
-    con = _open_connection(db_path)
+    con = _open_connection(db_path, budget_s=budget)
     sorted_files = sorted(gal_files)
 
     try:
@@ -182,7 +189,7 @@ def load_gal_batch(
                     "GAL progress: %d/%d loaded (%d rows, %d skipped, %d errors)",
                     i, total, summary["gal"], summary["skipped"], summary["errors"],
                 )
-                con = _open_connection(db_path)
+                con = _open_connection(db_path, budget_s=budget)
     finally:
         try:
             if summary["gal"] and _has_gal_recent(con):

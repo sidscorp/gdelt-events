@@ -124,6 +124,14 @@ def release_lock(lock_handle):
             pass
 
 
+def lock_holder() -> int | None:
+    """PID recorded in the lock file, or None if it is missing or unreadable."""
+    try:
+        return int(LOCK_FILE.read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
 def print_status() -> None:
     """Print pipeline status summary."""
     import duckdb
@@ -169,8 +177,17 @@ def run_ingest(force_prune: bool = False, prune_days: int | None = None) -> None
     # Acquire lock
     lock_fd = acquire_lock()
     if not lock_fd:
-        log.info("Another ingest is running, exiting.")
-        return
+        # Declining to run is not success. This used to log at INFO and return, so the
+        # 69-hour stall of Nov 2026 looked like 277 healthy cycles that each exited 0.
+        # Exit 2 (not 1) keeps "declined because another ingest holds the lock" distinct
+        # from "ran and failed", and names the holder so the next reader does not have
+        # to go looking for it.
+        holder = lock_holder()
+        log.error(
+            "Another ingest is running: %s held by PID %s. Declining to run; exiting 2.",
+            LOCK_FILE, holder if holder is not None else "unknown",
+        )
+        sys.exit(2)
 
     try:
         # Check disk space

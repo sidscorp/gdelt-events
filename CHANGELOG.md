@@ -17,6 +17,74 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-22 — A freshness gate: the check the 69-hour stall needed
+
+**What** — `pipeline.pipeline_health` gains a `freshness` check. It reads
+`SELECT max(gal.crawled_at)` on a read-only connection and reports **FAIL** when the newest
+row in the corpus is more than 60 minutes old. A failure is logged at ERROR and written to
+`data/alerts/freshness.json` (state, measured age, limit, first failure, consecutive count);
+the next healthy cycle rewrites that record to `state: recovered` instead of deleting it.
+`pipeline/gdelt_ingest.py::run_ingest` now logs the lock holder at ERROR and **exits 2**
+instead of returning 0 when `acquire_lock()` declines to run. `--only` and `--db` were added
+to the health check so the gate can be pointed at a fixture instead of the live corpus.
+
+**Why** — Ingestion was dead from 2026-11-16 18:45 EST to 2026-11-19 15:28 EST — 69 hours —
+and every automated check reported success the whole time. `GDELT-Ingest` exited 0 on ~277
+cycles with `Another ingest is running, exiting.`, `GDELT-PipelineCheck` recorded
+LastTaskResult 0, and `/api/stats` returned 200 with `latest_ago: "2d 20h ago"`. The existing
+checks assert on file mtimes and HTTP bodies; none of them can see a corpus that stopped
+growing, and an ingest that declines to run was indistinguishable from one that succeeded.
+Commit 5920e81 removed the specific trigger (a zombie PID) but not the blind spot.
+
+**How it was verified** —
+- `tests/test_freshness_gate.py`: **9 passed** against the repo venv, including two that run
+  the real `check_freshness()` against a DuckDB fixture (3 h stale, 10 min fresh).
+- Mutation test, real module, stale fixture: `--only freshness --db stale.duckdb` printed
+  `FAIL freshness newest article 180 min old (limit 60); last row 2026-11-22 16:14:14Z` and
+  **exit code 1**. Same command against a 10-minute fixture printed `HEALTHY: 1/1` and
+  **exit code 0**.
+- Mutation of the rule itself (threshold 60 → 600 minutes): **4 of 9 tests fail**; restoring
+  the rule returns 9/9. The suite has teeth.
+- Lock-decline path, with a live PID in a copy of the tree: exit **2** and
+  `ERROR gdelt_ingest: Another ingest is running: ...\.ingest.lock held by PID 14664.
+  Declining to run; exiting 2.` in both stdout and `ingest.log`.
+- Live corpus, read-only, 2026-11-22 19:14:52Z: `newest article 103 min old (limit 60);
+  last row 2026-11-22 17:32:00Z` — FAIL, exit 1. Cross-checked independently:
+  `max(crawled_at) = 20261122173200` against 19:14:52Z. (Ingestion was in fact stalled at the
+  time — issue #44's DuckDB lock contention — so the gate's first real verdict was correct.)
+- Cost of the new check: `max(gal.crawled_at)` measured **132 / 138 / 148 ms** on the 40 GB
+  live DB (3 runs). No writes to the database.
+
+**Files** — `pipeline/pipeline_health.py`, `pipeline/gdelt_ingest.py`,
+`tests/test_freshness_gate.py` (new), `CHANGELOG.md`.
+
+**Notes** —
+- **No alert channel was wired, deliberately.** There is no channel in this repo that this
+  host can reach without inventing a credential. `social_store.list_pending_notify()` is
+  Bluesky-candidate specific and is polled by beardy (writing a fake candidate would corrupt
+  it); beardy/Matrix has no HTTP ingress and its credentials live on snambiar-linux, not on
+  rainbow-boi; the `~/news` feed on snambiar-linux *is* reachable from rainbow-boi with the
+  existing ssh key (BatchMode verified) but it is a pull-based change log, not a push alert.
+  So delivery is one function, `notify_freshness_unhealthy()`, which logs ERROR and writes
+  the JSON record, and returns False because nothing was delivered. The record is shaped like
+  a sender's payload so a channel can be added without re-deriving the facts.
+- **The scheduled-task result is still 0 even when the check fails.** The task action is
+  `wscript.exe gdelt_pipeline_check_hidden.vbs`, and the wrapper launches the check with
+  `WScript.Shell.Run cmd, 0, False` — fire-and-forget, so `wscript` exits 0 immediately and
+  the python exit code is discarded. Observed on 2026-11-22: the log carried
+  `FAIL ingest` + `PROBLEMS: 4/5` at 18:18, 18:33, 18:48 and 19:03Z while
+  `LastTaskResult` stayed 0. Fixing it means editing the wrapper **and** re-running
+  `scripts/register_pipeline_check.ps1` (a task re-registration), which issue #42's scope
+  forbids. Until then the log is the record.
+- `data/.freshness_pause` (first line = reason) downgrades the check to WARN during
+  deliberate stops such as `prep_rebuild.ps1`, so planned maintenance is visible rather than
+  either alarming or silently passing.
+- A database held by the ingest writer is normal, so the check retries 3× then reports WARN
+  `skipped:` — it can never turn a busy DB into a false freshness alarm. `check_ingest`
+  (data_version.txt age) is what covers a writer that is stuck rather than busy.
+- The module docstring claimed Task Scheduler records the exit code in `LastTaskResult`; that
+  was wrong and is corrected in place.
+
 ## 2026-11-19 — Ingest wedge: zombie PID lock + gkg publication lag
 
 **What** — Two ingest fixes. (1) `_pid_alive()` now asks `GetExitCodeProcess`

@@ -15,7 +15,6 @@ import argparse
 import logging
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta
 from pathlib import Path
 
 import sys
@@ -27,6 +26,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
+from pipeline.backfill_range import resolve_range
 from pipeline.config import BACKFILL_WORKERS, DB_PATH, RAW_DIR
 from pipeline.downloader import download_file, fetch_file_list
 from pipeline.loader import load_batch
@@ -87,22 +87,17 @@ def main():
     parser = argparse.ArgumentParser(description="GDELT v2 historical backfill")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--days", type=int, help="Number of days to look back")
-    group.add_argument("--since", type=str, help="Start date (YYYY-MM-DD)")
-    parser.add_argument("--until", type=str, help="End date (YYYY-MM-DD), default: now")
+    group.add_argument("--since", type=str, help="Start date (YYYY-MM-DD, UTC)")
+    parser.add_argument("--until", type=str, help="End date (YYYY-MM-DD, UTC), default: now (UTC)")
     parser.add_argument("--workers", type=int, default=BACKFILL_WORKERS, help="Parallel download threads")
     parser.add_argument("--download-only", action="store_true", help="Download only, skip DB load")
     parser.add_argument("--load-only", action="store_true", help="Load existing zips, skip download")
     args = parser.parse_args()
 
-    # Resolve date range
-    if args.days:
-        since = datetime.now(tz=None) - timedelta(days=args.days)
-    else:
-        since = datetime.strptime(args.since, "%Y-%m-%d")
+    # Resolve date range (UTC: GDELT file timestamps are UTC)
+    since, until = resolve_range(days=args.days, since=args.since, until=args.until)
 
-    until = datetime.strptime(args.until, "%Y-%m-%d") if args.until else datetime.now(tz=None)
-
-    log.info("Backfill range: %s to %s", since.strftime("%Y-%m-%d"), until.strftime("%Y-%m-%d"))
+    log.info("Backfill range (UTC): %s to %s", since.strftime("%Y-%m-%d %H:%M"), until.strftime("%Y-%m-%d %H:%M"))
 
     if not args.load_only:
         # Fetch file list and download

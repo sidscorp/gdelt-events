@@ -17,6 +17,27 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-22 — Backfill date ranges are UTC (issue #46)
+
+**What** — `gdelt_backfill.py` and `gdelt_gal_backfill.py` now resolve `--days` /
+`--since` / `--until` through one helper, `pipeline/backfill_range.py`, which returns
+naive UTC datetimes. `downloader.fetch_file_list` defaults `until` to UTC now as well.
+`--since` / `--until` are documented as UTC in `--help`, and the range is logged with hours.
+**Why** — GDELT file timestamps are UTC, but `gdelt_backfill.py` compared them with a
+naive *local* `datetime.now()`. On an EST host a default backfill silently dropped the
+most recent ~5 hours and still reported success (worked around on 2026-11-19 with an
+ad-hoc script). The GAL script already used `utcnow()`, which is deprecated since Python 3.12.
+**How it was verified** — `tests/test_backfill_range.py` (6 tests, no network/DB). The
+EST regression test sets `TZ=America/New_York` and asserts a slot generated one hour ago
+is inside the default range; it fails against the old local-time behaviour (1 failed,
+5 passed) and passes with the fix (6 passed). `ruff check` clean on the touched files.
+**Files** — `pipeline/backfill_range.py` (new), `pipeline/gdelt_backfill.py`,
+`pipeline/gdelt_gal_backfill.py`, `pipeline/downloader.py`, `tests/test_backfill_range.py` (new).
+**Notes** — Unchanged on purpose: an explicit `--until YYYY-MM-DD` still means midnight
+UTC at the *start* of that day, as before. If "include the whole day" is the intended
+meaning, that is a one-line follow-up (`+ timedelta(days=1)`), left out to keep this
+change to the timezone bug only.
+
 ## 2026-11-14 — Repo hygiene pass 4: task snapshots, stale references, lint gate
 
 **What** — No application behaviour changed. Four things. (1) `deploy/tasks/`

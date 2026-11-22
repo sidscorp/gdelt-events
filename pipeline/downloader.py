@@ -8,6 +8,7 @@ from pathlib import Path
 
 import requests
 
+from .backfill_range import utc_now
 from .config import (
     BACKOFF_BASE,
     DOWNLOAD_TIMEOUT,
@@ -61,7 +62,7 @@ def fetch_file_list(since: datetime, until: datetime | None = None) -> list[dict
     resp.raise_for_status()
 
     since_str = since.strftime("%Y%m%d%H%M%S")
-    until_str = (until or datetime.now(tz=None)).strftime("%Y%m%d%H%M%S")
+    until_str = (until or utc_now()).strftime("%Y%m%d%H%M%S")  # GDELT timestamps are UTC
 
     entries = []
     for line in resp.text.splitlines():

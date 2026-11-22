@@ -36,9 +36,9 @@ connection across `pill_judge.judge(...)` — minutes of gateway round-trips —
 writer could not open `gdelt.duckdb` for the whole judging loop. Measured from
 `data/logs/embed_new.log` (runs since 2026-11-20, n=199; `elapsed_s` is an upper bound on the
 hold because the connection was open for essentially the whole run): **median 306 s, p95 1041 s,
-max 1760 s**. The ingest's log for 11-22 shows **24 `Ingest failed`** lines and **2 `Ingest
-deferred`** lines, both deferrals naming `embed_new_articles.py` (and therefore `pill_scorer`) as
-the competing holder. `bb98352` stopped the data loss by queueing and then deferring by name, but
+max 1760 s**. The ingest's log for 11-22 shows **24 `Ingest failed`** lines and **3 `Ingest
+deferred`** lines, all three deferrals naming `embed_new_articles.py` (and therefore
+`pill_scorer`) as the competing holder. `bb98352` stopped the data loss by queueing and then deferring by name, but
 with a 240 s wait ceiling and a 306 s median hold most contended cycles still deferred. This
 removes the cause rather than paying for it.
 

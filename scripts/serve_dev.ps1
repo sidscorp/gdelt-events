@@ -7,8 +7,8 @@
 
 $ErrorActionPreference = "Continue"
 
-$devRoot = "C:\Users\siddh\Code_Library\gdelt-events-dev"
-$python  = "C:\Users\siddh\Code_Library\gdelt-events\.venv\Scripts\python.exe"
+$devRoot = "$env:USERPROFILE\Code_Library\gdelt-events-dev"
+$python  = "$env:USERPROFILE\Code_Library\gdelt-events\.venv\Scripts\python.exe"
 
 $env:GDELT_DATA_DIR  = "$devRoot\data"
 $env:GDELT_DASH_PORT = "8016"

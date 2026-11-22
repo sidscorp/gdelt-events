@@ -8,7 +8,7 @@
 # the connection drops.
 
 $ErrorActionPreference = "Continue"
-$log = "C:\Users\siddh\Code_Library\gdelt-events-dev\data\logs\rebuild_slice.log"
+$log = "$env:USERPROFILE\Code_Library\gdelt-events-dev\data\logs\rebuild_slice.log"
 
 function Log($m) {
     $line = "[{0}] {1}" -f (Get-Date -Format "HH:mm:ss"), $m
@@ -24,8 +24,8 @@ Start-Sleep -Seconds 3
 $c = Get-NetTCPConnection -LocalPort 8016 -State Listen -ErrorAction SilentlyContinue
 if ($c) { Stop-Process -Id $c.OwningProcess -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 3 }
 
-$py = "C:\Users\siddh\Code_Library\gdelt-events\.venv\Scripts\python.exe"
-$script = "C:\Users\siddh\Code_Library\gdelt-events-dev\scripts\build_dev_snapshot.py"
+$py = "$env:USERPROFILE\Code_Library\gdelt-events\.venv\Scripts\python.exe"
+$script = "$env:USERPROFILE\Code_Library\gdelt-events-dev\scripts\build_dev_snapshot.py"
 
 $env:DEV_DAYS = "7"
 Log "running build_dev_snapshot.py (DEV_DAYS=7)"
@@ -34,6 +34,6 @@ $rc = $LASTEXITCODE
 Log "build_dev_snapshot.py exited rc=$rc"
 
 Log "restarting dev dashboard"
-& "C:\Users\siddh\Code_Library\gdelt-events-dev\scripts\restart_dev.ps1" 2>&1 | ForEach-Object { Add-Content -Path $log -Value $_ }
+& "$env:USERPROFILE\Code_Library\gdelt-events-dev\scripts\restart_dev.ps1" 2>&1 | ForEach-Object { Add-Content -Path $log -Value $_ }
 
 Log "=== rebuild done (rc=$rc) ==="

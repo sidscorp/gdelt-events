@@ -13,10 +13,10 @@
 
 $ErrorActionPreference = 'Stop'
 $taskName = 'GDELT-PipelineCheck'
-$repo = 'C:\Users\siddh\Code_Library\gdelt-events'
+$repo = "$env:USERPROFILE\Code_Library\gdelt-events"
 $py = Join-Path $repo '.venv\Scripts\python.exe'
 $module = 'pipeline.pipeline_health'
-$vbs = 'C:\Users\siddh\bin\gdelt_pipeline_check_hidden.vbs'
+$vbs = "$env:USERPROFILE\bin\gdelt_pipeline_check_hidden.vbs"
 $log = Join-Path $repo 'data\logs\pipeline_check.log'
 
 if (-not (Test-Path $py)) { throw "Python not found: $py" }

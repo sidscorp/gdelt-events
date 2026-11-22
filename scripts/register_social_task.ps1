@@ -6,10 +6,10 @@
 
 $ErrorActionPreference = 'Stop'
 $taskName = 'GDELT-SocialPublisher'
-$repo = 'C:\Users\siddh\Code_Library\gdelt-events'
+$repo = "$env:USERPROFILE\Code_Library\gdelt-events"
 $py = Join-Path $repo '.venv\Scripts\python.exe'
 $script = Join-Path $repo 'pipeline\social_publisher.py'
-$vbs = 'C:\Users\siddh\bin\gdelt_social_hidden.vbs'
+$vbs = "$env:USERPROFILE\bin\gdelt_social_hidden.vbs"
 $log = Join-Path $repo 'data\logs\social_task.log'
 
 if (-not (Test-Path $py)) { throw "Python not found: $py" }

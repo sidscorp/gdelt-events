@@ -52,8 +52,8 @@ import time
 
 log = logging.getLogger("build_dev_snapshot")
 
-PROD_ROOT = r"C:\Users\siddh\Code_Library\gdelt-events"
-DEV_ROOT = r"C:\Users\siddh\Code_Library\gdelt-events-dev"
+PROD_ROOT = os.path.expanduser("~/Code_Library/gdelt-events")
+DEV_ROOT = os.path.expanduser("~/Code_Library/gdelt-events-dev")
 PROD_DATA = os.path.join(PROD_ROOT, "data")
 DEV_DATA = os.path.join(DEV_ROOT, "data")
 PROD_DB = os.path.join(PROD_DATA, "gdelt.duckdb")

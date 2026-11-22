@@ -1644,7 +1644,7 @@ normal. `/sec-analysis` is now linked from the header and present in `sitemap.xm
    it. `&&` would have passed after a successful ingest and derive would have died on import,
    leaving **fresh snapshots with stale derived context** — precisely the failure the wrapper's
    own comment says it exists to prevent. Nothing would have reported it: this was the only
-   wrapper in `C:\Users\siddh\bin\` with no output redirect, and `ingest_log` only ever
+   wrapper in `%USERPROFILE%\bin\` with no output redirect, and `ingest_log` only ever
    recorded the ingest stage.
 2. **`rule_leverage` reassured the wrong filers.** The "that is normal for a lender" clause
    fired on the ratio alone. Boeing, SIC 3721, sits at **96%** liabilities-to-assets — the page
@@ -2044,7 +2044,7 @@ is **refused with exit 1** naming the holder and the reason, `restart_dash.ps1` 
 release by the rightful owner succeeds. `status` against the live tree correctly reported
 the branch, HEAD and the 3 uncommitted files.
 
-**Files** — `scripts/deploy_guard.ps1` (new), `C:\Users\siddh\restart_dash.ps1`
+**Files** — `scripts/deploy_guard.ps1` (new), `%USERPROFILE%\restart_dash.ps1`
 (outside the repo; backed up to `restart_dash.ps1.bak_20260802`), `CLAUDE.md`.
 
 **Notes**

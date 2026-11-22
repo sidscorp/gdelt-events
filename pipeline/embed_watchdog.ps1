@@ -15,10 +15,10 @@
 # Logic: if progress.json hasn't been updated in 5+ minutes and
 # embedding isn't complete, the process crashed. Restart it.
 
-$VenvPython = "C:\Users\siddh\Code_Library\gdelt-events\.venv\Scripts\python.exe"
-$Script = "C:\Users\siddh\Code_Library\gdelt-events\pipeline\bulk_embed.py"
-$LogDir = "C:\Users\siddh\Code_Library\gdelt-events\data\logs"
-$ProgressFile = "C:\Users\siddh\Code_Library\gdelt-events\data\embeddings\progress.json"
+$VenvPython = "$env:USERPROFILE\Code_Library\gdelt-events\.venv\Scripts\python.exe"
+$Script = "$env:USERPROFILE\Code_Library\gdelt-events\pipeline\bulk_embed.py"
+$LogDir = "$env:USERPROFILE\Code_Library\gdelt-events\data\logs"
+$ProgressFile = "$env:USERPROFILE\Code_Library\gdelt-events\data\embeddings\progress.json"
 
 # No progress file = hasn't started or was cleaned up
 if (-not (Test-Path $ProgressFile)) {

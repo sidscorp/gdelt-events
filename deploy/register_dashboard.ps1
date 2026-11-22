@@ -1,7 +1,7 @@
 # Register the GDELT dashboard as a Windows Scheduled Task that runs at startup
 # and stays running. Run as Administrator.
 
-$repoDir = "C:\Users\siddh\Code_Library\gdelt-events"
+$repoDir = "$env:USERPROFILE\Code_Library\gdelt-events"
 $python = "$repoDir\.venv\Scripts\python.exe"
 $script = "$repoDir\dashboard\serve.py"
 $taskName = "GDELT-Dashboard"

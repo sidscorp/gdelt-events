@@ -59,7 +59,7 @@ while ((Get-Date) -lt $deadline) {
 
 Write-Host "ERROR: prod dashboard did not become healthy within 120s"
 Write-Host "--- dashboard.log ---"
-Get-Content "C:\Users\siddh\Code_Library\gdelt-events\data\logs\dashboard.log" -Tail 30 -ErrorAction SilentlyContinue
+Get-Content "$env:USERPROFILE\Code_Library\gdelt-events\data\logs\dashboard.log" -Tail 30 -ErrorAction SilentlyContinue
 exit 1
 
 } catch {

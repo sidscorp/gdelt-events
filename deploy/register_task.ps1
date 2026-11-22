@@ -1,7 +1,7 @@
 # Register the GDELT ingest as a Windows Scheduled Task (runs every 15 minutes).
 # Run as Administrator.
 
-$repoDir = "C:\Users\siddh\Code_Library\gdelt-events"
+$repoDir = "$env:USERPROFILE\Code_Library\gdelt-events"
 $python = "$repoDir\.venv\Scripts\python.exe"
 $script = "$repoDir\pipeline\gdelt_ingest.py"
 $taskName = "GDELT-Ingest"

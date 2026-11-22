@@ -3,12 +3,12 @@
 # NO startup trigger - dev is started explicitly by CI or by hand.
 
 $taskName = "GDELT-Dashboard-Dev"
-$launcher = "C:\Users\siddh\Code_Library\gdelt-events-dev\scripts\serve_dev.ps1"
+$launcher = "$env:USERPROFILE\Code_Library\gdelt-events-dev\scripts\serve_dev.ps1"
 
 $action = New-ScheduledTaskAction `
     -Execute "powershell.exe" `
     -Argument "-ExecutionPolicy Bypass -NonInteractive -File `"$launcher`"" `
-    -WorkingDirectory "C:\Users\siddh\Code_Library\gdelt-events-dev"
+    -WorkingDirectory "$env:USERPROFILE\Code_Library\gdelt-events-dev"
 
 $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `

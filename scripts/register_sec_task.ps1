@@ -10,9 +10,9 @@
 # self-heals on the next successful one instead of leaving a permanent hole.
 
 $name = 'GDELT-SecIngest'
-$py   = 'C:\Users\siddh\Code_Library\gdelt-events\.venv\Scripts\python.exe'
-$repo = 'C:\Users\siddh\Code_Library\gdelt-events'
-$vbs  = 'C:\Users\siddh\bin\gdelt_sec_ingest_hidden.vbs'
+$py   = "$env:USERPROFILE\Code_Library\gdelt-events\.venv\Scripts\python.exe"
+$repo = "$env:USERPROFILE\Code_Library\gdelt-events"
+$vbs  = "$env:USERPROFILE\bin\gdelt_sec_ingest_hidden.vbs"
 
 # VBS shim so the task never flashes a console window (house convention here).
 @"

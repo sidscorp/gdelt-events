@@ -14,8 +14,8 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$prod = "C:\Users\siddh\Code_Library\gdelt-events"
-$dev  = "C:\Users\siddh\Code_Library\gdelt-events-dev"
+$prod = "$env:USERPROFILE\Code_Library\gdelt-events"
+$dev  = "$env:USERPROFILE\Code_Library\gdelt-events-dev"
 
 Set-Location $prod
 

@@ -8,7 +8,7 @@
 # backfill died this way once already. RE-ENABLING IT AFTERWARDS IS REQUIRED.
 
 $ErrorActionPreference = "Continue"
-$repo = "C:\Users\siddh\Code_Library\gdelt-events"
+$repo = "$env:USERPROFILE\Code_Library\gdelt-events"
 $py   = "$repo\.venv\Scripts\python.exe"
 $log  = "$repo\data\logs\rescore_backfill.log"
 

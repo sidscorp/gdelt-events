@@ -21,7 +21,7 @@ from pathlib import Path
 
 import duckdb
 
-REPO = Path(r"C:\Users\siddh\Code_Library\gdelt-events")
+REPO = Path.home() / "Code_Library" / "gdelt-events"
 sys.path.insert(0, str(REPO / "pipeline"))
 
 import embedding_store                       # noqa: E402

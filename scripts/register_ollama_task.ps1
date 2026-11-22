@@ -10,7 +10,7 @@
 # Run once. Elevation not required (S4U principal, Limited run level).
 
 $taskName = "Ollama-Serve"
-$exe = "C:\Users\siddh\AppData\Local\Programs\Ollama\ollama.exe"
+$exe = "$env:USERPROFILE\AppData\Local\Programs\Ollama\ollama.exe"
 
 if (-not (Test-Path $exe)) { throw "ollama.exe not found at $exe" }
 

@@ -114,9 +114,8 @@ MIN_POST_GAP_MIN = 5
 POST_LIMIT = 300
 EXPLANATION_LIMIT = 150
 SHADOW_DAILY_CAP = 30  # hard cost guard; real volume is <= MAX_QUEUE_PER_DAY
-SEARCH_URL = os.environ.get(
-    "GDELT_SOCIAL_SEARCH_URL", "http://100.121.22.84:8889/search"
-)
+SEARCH_URL_FILE = DATA_DIR / ".social_search_url"
+_search_url_warned = False
 LOCK_FILE = DATA_DIR / ".social_publisher.lock"
 SECRETS_FILE = DATA_DIR / ".bluesky_bot"
 GATEWAY_KEY_FILE = DATA_DIR / ".social_gateway_key"
@@ -313,6 +312,32 @@ def _gateway_key() -> str | None:
         GATEWAY_KEY_FILE.read_text(encoding="utf-8").strip()
         if GATEWAY_KEY_FILE.exists() else None
     )
+
+
+def _search_url() -> str | None:
+    """SearXNG endpoint used to corroborate a candidate before posting.
+
+    Configured on the host, never in the repo: the address is private
+    infrastructure and this repository is public. Resolution order matches the
+    gateway key: GDELT_SOCIAL_SEARCH_URL, then data/.social_search_url.
+
+    Returns None (and logs once) when neither is present, so the caller can
+    degrade loudly instead of silently posting unverified.
+    """
+    global _search_url_warned
+    url = os.environ.get("GDELT_SOCIAL_SEARCH_URL")
+    if not url and SEARCH_URL_FILE.exists():
+        url = SEARCH_URL_FILE.read_text(encoding="utf-8").strip()
+    if not url:
+        if not _search_url_warned:
+            _search_url_warned = True
+            LOG.error(
+                "no SearXNG endpoint configured: set GDELT_SOCIAL_SEARCH_URL or write "
+                "%s - shadow verdicts run without web corroboration until then",
+                SEARCH_URL_FILE,
+            )
+        return None
+    return url
 
 
 def _json_request(url: str, payload: dict, *, token: str | None = None,
@@ -550,8 +575,11 @@ def grounded_explanation(candidate: dict) -> tuple[str, str, dict, str]:
 
 def _web_search(query: str, n: int = 5) -> list[dict]:
     """Self-hosted SearXNG; free, no key. Empty list on failure."""
+    base = _search_url()
+    if not base:
+        return []
     try:
-        url = SEARCH_URL + "?" + urllib.parse.urlencode({"q": query, "format": "json"})
+        url = base + "?" + urllib.parse.urlencode({"q": query, "format": "json"})
         with urllib.request.urlopen(url, timeout=15) as response:
             results = json.loads(response.read().decode("utf-8", "replace")).get("results") or []
         return [

@@ -331,6 +331,39 @@ def test_worker_records_skip_and_insufficient_articles(users_db, client, monkeyp
     assert state["last_attempt_outcome"] == expected
 
 
+def test_a_window_we_cannot_read_is_not_reported_as_a_quiet_window(users_db, client, monkeypatch):
+    """A locked/failing database must not be labelled "insufficient articles".
+
+    Observed live on 2026-11-23: a forced global 3h refresh returned
+    failed:insufficient_articles in 3.9 s while the same query in a fresh process
+    returned 40 events. _fetch_briefing_events used to swallow the failure.
+    """
+    monkeypatch.setenv("GDELT_BRIEFING_WORKER_TOKEN", "test-worker-token")
+    _seed_cache(users_db, "_all:3", _utc(timedelta(hours=-5)))
+    _seed_attempt(users_db, "_all", 3, _utc(timedelta(hours=-4)), "ok", 0)
+
+    def locked(*a, **k):
+        raise BriefingGenerationError("db_busy", "no database connection available")
+
+    monkeypatch.setattr(route, "get_threads", lambda key: [])
+    monkeypatch.setattr(route, "_fetch_briefing_events", locked)
+
+    response = client.post("/api/briefing?hours=3&prewarm=1",
+                           headers={"X-GDELT-Briefing-Token": "test-worker-token"})
+    assert response.status_code == 200 and response.json["stale"] is True
+    assert response.json["last_attempt_outcome"] == "failed:db_busy"
+    assert response.json["consecutive_failures"] == 1
+
+
+def test_fetch_briefing_events_names_a_missing_connection(monkeypatch):
+    from briefing import _fetch_briefing_events
+    import briefing as briefing_mod
+    monkeypatch.setattr(briefing_mod, "get_db", lambda: None)
+    with pytest.raises(BriefingGenerationError) as exc:
+        _fetch_briefing_events("", 3)
+    assert exc.value.code == "db_busy"
+
+
 def test_worker_records_a_generation_failure_code(users_db, client, monkeypatch):
     monkeypatch.setenv("GDELT_BRIEFING_WORKER_TOKEN", "test-worker-token")
     _seed_cache(users_db, "_all:3", _utc(timedelta(hours=-5)))

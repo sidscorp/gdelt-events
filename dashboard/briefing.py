@@ -1104,14 +1104,23 @@ def _fetch_briefing_events(view_id, hours):
 
     Returns (events, view_name, view_desc), where each event has title,
     description, outlet, n_sources, and a 'link' to its event page (all outlets)
-    or the article."""
+    or the article.
+
+    A genuinely quiet window returns an empty list. A window we could not READ
+    raises ``BriefingGenerationError`` instead: this function used to swallow
+    every exception (and a null connection) into ``[]``, so a locked or failing
+    database was reported to the reader as "insufficient articles" — the same
+    class of untrue label this issue exists to remove. Observed live on
+    2026-11-23: a forced global 3h refresh returned `failed:insufficient_articles`
+    in 3.9 s while the same query in a fresh process returned 40 events.
+    """
     # Lazy import: articles.py imports the cluster helpers from this module, so a
     # module-level import here would create a cycle. By request time both are loaded.
     from articles import _window_events
 
     con = get_db()
     if con is None:
-        return [], "Global News", ""
+        raise BriefingGenerationError("db_busy", "no database connection available")
 
     events = []
     view_name, view_desc = "Global News", "All articles from 44K+ sources worldwide"
@@ -1146,8 +1155,9 @@ def _fetch_briefing_events(view_id, hours):
                 "first_seen": c.get("first_seen"),
                 "latest_seen": c.get("latest_seen"),
             })
-    except Exception:
-        events = []
+    except Exception as e:
+        req_log.warning("briefing event fetch failed: %s", e)
+        raise BriefingGenerationError("event_query_failed", str(e)) from e
     finally:
         try:
             con.close()

@@ -259,7 +259,11 @@ def api_briefing():
                 prev = None
         try:
             threads = get_threads(cache_key)
-            sources, view_name, view_desc = _fetch_briefing_events(view_id, hours)
+            try:
+                sources, view_name, view_desc = _fetch_briefing_events(view_id, hours)
+            except BriefingGenerationError as exc:
+                # A window we could not read is not a quiet window; name it.
+                return _unrefreshed(f"failed:{exc.code}", exc.detail)
             if len(sources) < 2:
                 return _unrefreshed("failed:insufficient_articles",
                                     f"{len(sources)} candidate articles in the window",

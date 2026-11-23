@@ -33,6 +33,9 @@ Format for each entry:
 2. `GET /api/briefing` (JSON and SSE) returns `last_attempt_at`, `last_attempt_outcome`,
    `consecutive_failures` and `next_eligible_at`, where `next_eligible_at` is the next
    **scheduled** prewarm run that may refresh the combo — not `generated_at + ttl`.
+   `_fetch_briefing_events` no longer swallows a null connection or a query exception into an
+   empty list: those now record `failed:db_busy` / `failed:event_query_failed`, so a database
+   problem is not reported to the reader as "insufficient articles".
 3. `updateFreshnessBar` (`dashboard/static/js/markdown.js`) renders observations only: while
    fresh, `Updated 12m ago · next ~15:00`; past the TTL, either
    `Updated 5h ago · last attempt 4m ago failed (provider_unavailable)` or
@@ -82,6 +85,14 @@ A forced `?prewarm=1` on `va-news:24` wrote the failure row from the real code p
 11 articles and cannot refresh), and a forced `?prewarm=1` on global 3h/24h wrote
 `skipped_fresh`; the first-ever skip initially recorded `consecutive_failures=1`, which is why the
 insert path now treats a skip as zero failures (bug fixed, row corrected, test added).
+
+A forced `?refresh=1` on global 3h then reported `failed:insufficient_articles` in **3.9 s** while
+the identical query in a fresh process returned **40 events** — the event fetch was swallowing a
+null connection / query error into an empty list. It now raises `BriefingGenerationError` and the
+attempt is recorded as `failed:db_busy` / `failed:event_query_failed`, pinned by two tests, so an
+unreadable window is no longer labelled a quiet one. After that fix the forced refresh returned
+**`ok`** (`cached: false`, `last_attempt_at == generated_at`, `consecutive_failures` back to 0,
+178.7 s) and the live bar read `Updated 4s ago · next ~15:00`.
 `tests/smoke.sh` from the Mac against :8015: **18/20**, both failures on `/api/gal_facets`
 (HTTP 500 after 8-9 s), which also failed at 08:52 and 05:01 the same morning **before this
 deploy** and is unrelated to the briefing path — see Notes.

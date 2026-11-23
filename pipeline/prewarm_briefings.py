@@ -65,7 +65,11 @@ def last_prewarmed_version():
         return ""
 
 
-def warm(view, hours, base_url, timeout=120):
+# 240s, not 120: a generation now runs two model calls with a 180s budget each and has
+# measured ~180s end to end. At 120s prewarm aborted while the server kept working, and
+# because regeneration holds ONE global slot, every following combo then failed instantly
+# with failed:busy. The task limit is PT72H, so waiting costs only wall time.
+def warm(view, hours, base_url, timeout=240):
     # prewarm=1 (not refresh=1): regenerate only if the cache is stale for THIS
     # window, so a 30-day briefing warms once a day instead of on every run.
     params = f"hours={hours}&prewarm=1"

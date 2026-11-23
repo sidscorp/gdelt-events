@@ -17,6 +17,25 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-23 — Prewarm waits long enough for a generation to finish
+
+**What** — `warm()`'s client timeout goes 120 s to 240 s.
+
+**Why** — `a9550ef` raised the briefing budget to 180 s per model call. A full generation measured
+about 180 s end to end, so prewarm aborted at 120 s while the server kept generating; regeneration
+holds a single global slot, so every following combo failed instantly with `failed:busy`. That is
+the mechanism behind the ~92% prewarm failure rate, and it was introduced by the timeout raise, not
+by the provider.
+
+**How it was verified** — Constant change, compile-checked. The 12:00 run is the first to use it;
+the skip rate and failure count for that run are the observation, recorded on #71/#72. Prior
+evidence: one slow generation produced 77 failures in 9 minutes.
+
+**Files** — `pipeline/prewarm_briefings.py`, `CHANGELOG.md`.
+
+**Notes** — Stopgap. The real fix is for prewarm to stop waiting synchronously and poll
+`briefing_attempt_state`, which #71 now writes, so one slow combo cannot block the rest.
+
 ## 2026-11-23 — Briefing freshness reports attempts, not promises (#71)
 
 **What** — Three linked changes.

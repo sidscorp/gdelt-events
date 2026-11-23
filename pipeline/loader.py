@@ -35,7 +35,7 @@ BATCH_COMMIT_SIZE = 50
 
 # Cap DuckDB memory. The gpu-host has 48 GB total; 8 GB leaves plenty for
 # Frigate + Ollama + other workloads.
-DUCKDB_MEMORY_LIMIT = "8GB"
+DUCKDB_MEMORY_LIMIT = "12GB"
 
 # How long an open may wait for the single-writer lock.
 #
@@ -188,6 +188,12 @@ def _configure(con: duckdb.DuckDBPyConnection, db_path: Path | None = None) -> N
     """Apply memory limits and other pragmas."""
     con.execute(f"SET memory_limit = '{DUCKDB_MEMORY_LIMIT}'")
     con.execute("SET threads = 2")  # Keep CPU usage modest on the shared box
+    # Checkpoints have been dying at the memory ceiling (7.4 GiB/7.4 GiB): on
+    # 2026-11-23 that was 38 FDA-matcher, 21 tagger and 51 prune failures, all
+    # swallowed as non-fatal (gdelt-events#74). Preserving insertion order buffers
+    # the whole insert for an ordering nothing here depends on; disabling it lets
+    # the same work spill instead of dying at CHECKPOINT.
+    con.execute("SET preserve_insertion_order = false")
     # Give CTAS / GROUP BY / QUALIFY a writable scratch dir (Windows default
     # is blank and fails on operations that need to spill). It lives next to the
     # database file, which is DATA_DIR in production and a temp dir under test.

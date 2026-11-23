@@ -17,6 +17,31 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-23 — Raise the loader's DuckDB memory limit after checkpoint OOMs
+
+**What** — `loader.DUCKDB_MEMORY_LIMIT` goes 8 GB to 12 GB, and the connection sets
+`preserve_insertion_order = false`.
+
+**Why** — Every ingest cycle on 2026-11-23 loaded rows and then failed FDA matching (38 times),
+tagging (21) and the `gal_recent` prune (51) with `Failed to create checkpoint ... Out of Memory
+(7.4 GiB/7.4 GiB used)`. All were swallowed as non-fatal, so `Ingest failed` was **0** and no monitor
+saw it. The cost is invisible but real: tags are not written, which starves the pills, and FDA
+matches stop.
+
+**How it was verified** — `preserve_insertion_order = false` alone did **not** fix it: the 16:13
+cycle still OOM'd at the tagger's `CHECKPOINT`, which is why the limit was raised as well. With
+12 GB, the 16:16 cycle (no new files) and the 16:28 cycle (1,130 events) both completed FDA matching
+and tagging with no error. **Neither carried a gkg+GAL load**, so this is promising but unproven —
+the next cycles with `gkg` decide. The failing 16:13 cycle did carry gkg 1,586, so the comparison is
+like-for-like only once one lands.
+
+**Files** — `pipeline/loader.py`, `CHANGELOG.md`.
+
+**Notes** — 12 GB on a 47 GB host; the ingest is the only writer, and readers use `db.py`'s separate
+connection. If a full cycle still OOMs, the next levers are `SET threads = 1` and dropping the
+explicit post-load `CHECKPOINT`s in `tagger.py` and `fda_matcher.py` — DuckDB checkpoints on its own
+WAL threshold, so those calls buy little and fail at the ceiling. Tracked as gdelt-events#74.
+
 ## 2026-11-23 — Prewarm warms combos on a pool sized to the server's cap
 
 **What** — `pipeline/prewarm_briefings.py` no longer waits for each combo in turn. A thread pool sized

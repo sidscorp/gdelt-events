@@ -565,12 +565,26 @@ def _build_briefing_prompt(sources: list[dict], view_name: str, view_desc: str,
         for t in threads[:8]:
             if (t.get("status") or "active") != "active":
                 continue
-            lines.append(f"- {t.get('title')} (tracking since {t.get('first_seen')}): {t.get('summary')}")
+            since = str(t.get("first_seen") or "")
+            age = ""
+            try:
+                days = (datetime.utcnow() - datetime.strptime(since, "%Y-%m-%d")).days
+                if days >= 0:
+                    age = f", {days}d old"
+            except (ValueError, TypeError):
+                age = ""
+            lines.append(f"- {t.get('title')} (tracking since {since}{age}): {t.get('summary')}")
         if lines:
             threads_block = (
-                "ONGOING STORY THREADS you have been tracking across briefings (use these "
-                "to convey progression — e.g. 'day 4 of…', 'the third such incident this "
-                "week' — and note when one resolves):\n" + "\n".join(lines) + "\n\n"
+                "ONGOING STORY THREADS you have been tracking across briefings. Use them "
+                "ONLY to convey progression ('day 4 of...', 'the third such incident this "
+                "week') and to note when one resolves. They are notes from earlier "
+                "briefings and may be out of date, so do NOT copy a temporal or political "
+                "claim out of a thread: phrases like 'ahead of the election', 'next week', "
+                "'later this year', 'incoming' or 'newly installed' are allowed only when a "
+                "cited source in THIS briefing says so. If a thread calls something "
+                "upcoming that CURRENT TIME is already past, it is stale - say it has "
+                "happened, or leave it out.\n" + "\n".join(lines) + "\n\n"
             )
 
     # Numbering is the CANDIDATE index (1..N over the full candidate list), not

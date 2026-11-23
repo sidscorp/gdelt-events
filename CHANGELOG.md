@@ -17,6 +17,35 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-23 — Regeneration slots per key; threads cannot leak stale timing
+
+**What** — Two fixes. (1) `_try_start_regen` refuses only the SAME cache key and allows up to two
+concurrent generations, instead of one global slot. (2) The writer prompt's thread block now renders
+each thread's age and forbids copying temporal or political claims out of a thread.
+
+**Why** — Europe briefings were one to two days old. The 07:00 prewarm run logged
+`3 successful, 77 failed of 80 combos`: a generation that outlived prewarm's client timeout kept the
+single global slot, so every following combo was refused with `failed:busy` within seconds. The same
+day's briefing also carried "secured at least 258 House seats ... tightening their margin ahead of the
+2026 elections", traced to a thread created 2026-11-11 ("...aggressive agenda ahead of 2026
+midterms") copied into a results sentence whose citation did not support it. CURRENT TIME
+(November 23, 2026) and first/last-seen ages were both in the prompt; the writer ignored them because
+thread text carried neither an age nor a prohibition.
+
+**How it was verified** — Europe forced to regenerate: 3h -> `ok`, generated 2026-11-23 15:56:16,
+8 articles, 276 s; 24h -> `ok`, 16:00:14, 12 articles, 238 s. Both had been 2026-11-21 20:2x. The
+writer prompt built directly with a synthetic thread renders
+`(tracking since 2026-11-11, 12d old)` and contains the new instruction next to CURRENT TIME.
+Dashboard restarted to load both modules (PIDs 14068/25148 -> 27968/30468), healthy.
+
+**Files** — `dashboard/routes/api_briefing.py`, `dashboard/briefing.py`, `CHANGELOG.md`.
+
+**Notes** — Generation latency is now the binding constraint, and it is measured: 238-276 s per
+briefing against a 240 s prewarm client timeout and a 3h cadence over ~20 views x 2 windows. At
+~4.5 min each, 34 combos is ~2.5 h per run, so the cadence cannot hold sequentially no matter how
+long the client waits. #72 (request without blocking, then poll `briefing_attempt_state`) is required;
+a longer timeout only buys one more combo per run.
+
 ## 2026-11-23 — Prewarm waits long enough for a generation to finish
 
 **What** — `warm()`'s client timeout goes 120 s to 240 s.

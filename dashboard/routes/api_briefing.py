@@ -63,10 +63,23 @@ _regen_lock = threading.Lock()
 _regen_in_flight: set = set()
 
 
+REGEN_MAX_CONCURRENT = 2
+
+
 def _try_start_regen(cache_key: str) -> bool:
-    """Acquire regeneration slot. Returns True if this caller should generate."""
+    """Acquire a regeneration slot. True if this caller should generate.
+
+    Per cache key, with a small global cap. The previous rule was ONE global slot,
+    so a generation that outlived its caller's timeout (prewarm aborts at its
+    client timeout while the server keeps working) blocked every following combo
+    with `failed:busy` -- 77 of 80 combos in nine minutes on 2026-11-23, and the
+    reason region briefings sat a day or more old. Refusing the SAME key twice is
+    still correct; the cap bounds concurrent model streams.
+    """
     with _regen_lock:
-        if _regen_in_flight:
+        if cache_key in _regen_in_flight:
+            return False
+        if len(_regen_in_flight) >= REGEN_MAX_CONCURRENT:
             return False
         _regen_in_flight.add(cache_key)
         return True

@@ -780,16 +780,187 @@ def _generate_briefing_stream(sources, view_name, view_desc, hours, prev=None, t
                 req_log.debug("Langfuse briefing trace failed", exc_info=True)
 
 
+class BriefingGenerationError(RuntimeError):
+    """A generation attempt that produced no briefing.
+
+    Carries a short, stable ``code`` so the attempt record — and the reader's
+    freshness line — can name what went wrong instead of a bare "failed".
+    Codes are deliberately coarse: they are read by a person under a briefing,
+    not by a debugger. See ``classify_generation_error`` for the mapping.
+    """
+
+    def __init__(self, code: str, detail: str = ""):
+        super().__init__(code)
+        self.code = code
+        self.detail = detail
+
+
+def classify_generation_error(exc: BaseException) -> str:
+    """Map a generation exception to one attempt code ('failed:<code>').
+
+    ``provider_unavailable`` is the case the label exists for: the gateway
+    refused or errored (429/5xx), so nothing was written and the reader is
+    still looking at old text. Timeouts are called out separately because a
+    180s read timeout looks identical from the outside to "no attempt at all".
+    """
+    import socket
+    from urllib.error import HTTPError, URLError
+    if isinstance(exc, HTTPError):
+        code = getattr(exc, "code", 0) or 0
+        if code in (429, 500, 502, 503, 504):
+            return "provider_unavailable"
+        return f"http_{code}" if code else "provider_error"
+    if isinstance(exc, (socket.timeout, TimeoutError)):
+        return "timeout"
+    if isinstance(exc, URLError):
+        if isinstance(getattr(exc, "reason", None), (socket.timeout, TimeoutError)):
+            return "timeout"
+        return "provider_unreachable"
+    if isinstance(exc, RuntimeError) and "no gateway key" in str(exc):
+        return "no_gateway_key"
+    return "generation_error"
+
+
 def _generate_briefing(sources, view_name, view_desc, hours, prev=None, threads=None, prompt=None):
-    """Non-streaming briefing generation (for caching)."""
+    """Non-streaming briefing generation (for caching).
+
+    Raises ``BriefingGenerationError`` instead of returning None so the caller
+    can record *why* an attempt produced nothing. Until 2026-11-23 that reason
+    was dropped on the floor and the reader's bar kept promising an update that
+    had already failed.
+    """
+    if not _get_openrouter_key():
+        raise BriefingGenerationError("no_gateway_key", "briefing gateway key is not configured")
     parts = []
     try:
         for chunk in _generate_briefing_stream(sources, view_name, view_desc, hours, prev=prev, threads=threads, prompt=prompt):
             parts.append(chunk)
+    except BriefingGenerationError:
+        raise
     except Exception as e:
-        req_log.warning("Briefing generation failed: %s", e)
+        code = classify_generation_error(e)
+        req_log.warning("Briefing generation failed (%s): %s", code, e)
+        raise BriefingGenerationError(code, str(e)) from e
+    text = "".join(parts).strip() if parts else ""
+    if not text:
+        raise BriefingGenerationError("empty_response", "model returned no text")
+    return text
+
+
+# Per-(view, window) attempt state — what the reader's freshness line reads.
+#
+# This is a small STATE table, not another history log:
+#   * briefing_history is the append-only archive of *successful* generations
+#     with the full briefing body (NOT NULL). A failure has no body, and the
+#     Bluesky publisher reads that table — writing ~250 failed-attempt rows a
+#     day into it would corrupt a consumer for no benefit.
+#   * "last attempt / consecutive failures" is by definition one row per combo,
+#     so an upsert keyed on (view_id, hours) is ~150 rows total and every read
+#     on the public briefing path is a single point lookup.
+# It lives in users.db (SQLite) beside briefing_cache: the article DB is DuckDB
+# single-writer, and a write there would contend with ingest for a status row.
+ATTEMPT_TABLE_DDL = """
+CREATE TABLE IF NOT EXISTS briefing_attempt_state (
+    view_id               TEXT NOT NULL,
+    hours                 INTEGER NOT NULL,
+    cache_key             TEXT,
+    last_attempt_at       TEXT,
+    last_attempt_outcome  TEXT,
+    last_attempt_trigger  TEXT,
+    last_attempt_detail   TEXT,
+    last_success_at       TEXT,
+    consecutive_failures  INTEGER NOT NULL DEFAULT 0,
+    attempt_count         INTEGER NOT NULL DEFAULT 0,
+    failure_count         INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (view_id, hours)
+)
+"""
+
+
+def _attempt_view_id(view_id) -> str:
+    """briefing_history stores the global briefing as '_all'; match it."""
+    return view_id or "_all"
+
+
+def record_briefing_attempt(view_id, hours, outcome, trigger="prewarm", detail=None):
+    """Record one generation attempt for a (view, window) combo.
+
+    outcome is 'ok', 'skipped_fresh', or 'failed:<code>'. A success resets
+    consecutive_failures; a skip (the cache was still fresh, nothing was tried)
+    leaves the counter alone — it says nothing about the provider. Never
+    raises: this is telemetry for the freshness label and must not break the
+    briefing the reader is waiting for.
+    """
+    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+    is_ok = outcome == "ok"
+    try:
+        from models import get_user_db
+        con = get_user_db()
+        try:
+            con.execute(ATTEMPT_TABLE_DDL)
+            con.execute(
+                "INSERT INTO briefing_attempt_state "
+                "(view_id, hours, cache_key, last_attempt_at, last_attempt_outcome, "
+                " last_attempt_trigger, last_attempt_detail, last_success_at, "
+                " consecutive_failures, attempt_count, failure_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?) "
+                "ON CONFLICT(view_id, hours) DO UPDATE SET "
+                " cache_key = excluded.cache_key,"
+                " last_attempt_at = excluded.last_attempt_at,"
+                " last_attempt_outcome = excluded.last_attempt_outcome,"
+                " last_attempt_trigger = excluded.last_attempt_trigger,"
+                " last_attempt_detail = excluded.last_attempt_detail,"
+                " last_success_at = COALESCE(excluded.last_success_at, last_success_at),"
+                " consecutive_failures = CASE"
+                "   WHEN excluded.last_attempt_outcome = 'ok' THEN 0"
+                "   WHEN excluded.last_attempt_outcome = 'skipped_fresh' THEN consecutive_failures"
+                "   ELSE consecutive_failures + 1 END,"
+                " attempt_count = attempt_count + 1,"
+                " failure_count = failure_count + CASE"
+                "   WHEN excluded.last_attempt_outcome LIKE 'failed:%' THEN 1 ELSE 0 END",
+                (
+                    _attempt_view_id(view_id), int(hours),
+                    f"{_attempt_view_id(view_id)}:{int(hours)}",
+                    now, outcome, trigger, (detail or "")[:300] or None,
+                    now if is_ok else None,
+                    # A first-ever row: a skip is not a failure (found live on
+                    # 2026-11-23 — the first attempt for global:24 was a skip
+                    # and the row was born with consecutive_failures=1).
+                    0 if (is_ok or outcome == "skipped_fresh") else 1,
+                    1 if outcome.startswith("failed:") else 0,
+                ),
+            )
+            con.commit()
+        finally:
+            con.close()
+    except Exception:
+        req_log.warning("briefing attempt record failed for %s:%s",
+                        _attempt_view_id(view_id), hours, exc_info=True)
+
+
+def get_briefing_attempt(view_id, hours):
+    """Last recorded attempt for a (view, window), or None.
+
+    Returns None on an install that has never recorded an attempt (the table is
+    created on first write), so the public read path must treat "no row" as
+    "no observation", never as a failure.
+    """
+    try:
+        from models import get_user_db
+        con = get_user_db()
+        try:
+            row = con.execute(
+                "SELECT last_attempt_at, last_attempt_outcome, last_attempt_trigger,"
+                "       last_attempt_detail, last_success_at, consecutive_failures,"
+                "       attempt_count, failure_count "
+                "FROM briefing_attempt_state WHERE view_id = ? AND hours = ?",
+                (_attempt_view_id(view_id), int(hours)),
+            ).fetchone()
+        finally:
+            con.close()
+    except Exception:
         return None
-    return "".join(parts).strip() if parts else None
+    return dict(row) if row else None
 
 
 def record_briefing_history(cache_key, view_id, hours, briefing, sources_json,

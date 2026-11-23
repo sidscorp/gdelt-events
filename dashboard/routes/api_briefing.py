@@ -16,11 +16,45 @@ from briefing import (
     _build_briefing_prompt, _fetch_briefing_events, _select_events,
     _generate_briefing, _generate_briefing_stream,
     _normalize_briefing,
+    BriefingGenerationError, get_briefing_attempt, record_briefing_attempt,
     get_threads, record_briefing_history, update_threads_async,
     should_update_threads,
 )
 
 bp = Blueprint("api_briefing", __name__)
+
+
+def _freshness_fields(view_id, hours, generated_at):
+    """Attempt state + schedule for the reader's freshness line.
+
+    ``next_eligible_at`` is deliberately the next *scheduled* prewarm run that
+    is allowed to refresh this combo — not ``generated_at + ttl``. The ttl only
+    says when the cache stops counting as fresh; the prewarm slot is when an
+    update can actually happen. On 2026-11-23 the bar derived its countdown from
+    the ttl alone and promised "any moment" across an 8-hour overnight gap the
+    schedule could never cover.
+
+    Returns nulls rather than failing: an install with no recorded attempts, or
+    an unreadable schedule, must still serve the briefing.
+    """
+    attempt = get_briefing_attempt(view_id, hours) or {}
+    next_at = None
+    if generated_at:
+        try:
+            from pipeline.prewarm_briefings import next_run_at
+            eligible_at = datetime.strptime(generated_at, "%Y-%m-%d %H:%M:%S") \
+                + timedelta(seconds=fresh_s(hours))
+            nxt = next_run_at(hours, max(datetime.utcnow(), eligible_at))
+            if nxt is not None:
+                next_at = nxt.strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            next_at = None
+    return {
+        "last_attempt_at": attempt.get("last_attempt_at"),
+        "last_attempt_outcome": attempt.get("last_attempt_outcome"),
+        "consecutive_failures": int(attempt.get("consecutive_failures") or 0),
+        "next_eligible_at": next_at,
+    }
 
 # One scheduled generation at a time in the single Waitress process. Public
 # requests never enter this guard or invoke the model. Multiple server processes
@@ -131,6 +165,8 @@ def api_briefing():
     if not is_worker:
         # GET is always cache-only, including misses, stale entries, and SSE.
         # No ambient browser credentials can grant generation authority.
+        freshness = _freshness_fields(view_id, hours,
+                                      cached["generated_at"] if cached else None)
         payload = {
             "briefing": cached["briefing"] if cached else None,
             "sources": cached_sources,
@@ -138,6 +174,7 @@ def api_briefing():
             "generated_at": cached["generated_at"] if cached else None,
             "cache_ttl_s": fresh_s(hours), "cached": bool(cached),
             "stale": is_stale, "view": view_id or None, "hours": hours,
+            **freshness,
         }
         if not cached:
             payload["error"] = "No cached briefing; scheduled update pending"
@@ -146,7 +183,10 @@ def api_briefing():
         def cached_stream():
             if cached:
                 yield f"data: {json.dumps({'sources': cached_sources})}\n\n"
-                yield f"data: {json.dumps({'text': cached['briefing'], 'cached': True, 'done': False, 'stale': is_stale, 'generated_at': cached['generated_at'], 'cache_ttl_s': fresh_s(hours)})}\n\n"
+                # The attempt fields ride the first paint too: phase 1 can sit on
+                # screen for the whole (slow) regeneration, and the bar must be
+                # able to say "last attempt failed 4m ago" during it.
+                yield f"data: {json.dumps({'text': cached['briefing'], 'cached': True, 'done': False, 'stale': is_stale, 'generated_at': cached['generated_at'], 'cache_ttl_s': fresh_s(hours), **freshness})}\n\n"
             terminal = {k: v for k, v in payload.items() if k not in ('briefing', 'sources')}
             terminal["done"] = True
             yield f"data: {json.dumps(terminal)}\n\n"
@@ -158,19 +198,20 @@ def api_briefing():
 
     # ── non-streaming path ──
     if not stream:
-        if cached and not needs_regen:
-            return jsonify({
-                "briefing": cached["briefing"],
-                "sources": cached_sources,
-                "article_count": cached["article_count"],
-                "generated_at": cached["generated_at"],
-                "cache_ttl_s": fresh_s(hours),
-                "cached": True,
-                "view": view_id or None,
-                "hours": hours,
-            })
-        if not should_regen:
-            # Another request is already regenerating; just return stale content
+        def _record(outcome, detail=None):
+            # Every attempt is recorded, including the ones that never reached
+            # the model: "busy" and "insufficient articles" are exactly the
+            # outcomes that were invisible while the bar kept promising an
+            # update.
+            record_briefing_attempt(view_id, hours, outcome,
+                                    trigger=history_trigger, detail=detail)
+
+        def _unrefreshed(outcome, detail=None, message="Briefing generation unavailable",
+                         status=503, extra=None):
+            """Serve what we have and record why it was not refreshed."""
+            _record(outcome, detail)
+            fields = _freshness_fields(view_id, hours,
+                                       cached["generated_at"] if cached else None)
             if cached:
                 return jsonify({
                     "briefing": cached["briefing"],
@@ -182,8 +223,32 @@ def api_briefing():
                     "stale": True,
                     "view": view_id or None,
                     "hours": hours,
+                    **fields,
                 })
-            return jsonify({"briefing": None, "error": "Generation in progress, no cache yet"}), 503
+            body = {"briefing": None, "error": message, **fields}
+            if extra:
+                body.update(extra)
+            return jsonify(body), status
+
+        if cached and not needs_regen:
+            # Fresh for this window: no model call, but the attempt is still an
+            # observation (this is the "skip" the prewarm log counts).
+            _record("skipped_fresh")
+            return jsonify({
+                "briefing": cached["briefing"],
+                "sources": cached_sources,
+                "article_count": cached["article_count"],
+                "generated_at": cached["generated_at"],
+                "cache_ttl_s": fresh_s(hours),
+                "cached": True,
+                "view": view_id or None,
+                "hours": hours,
+                **_freshness_fields(view_id, hours, cached["generated_at"]),
+            })
+        if not should_regen:
+            # Another request is already regenerating; just return stale content
+            return _unrefreshed("failed:busy", "another generation was in flight",
+                                message="Generation in progress, no cache yet")
 
         prev = None
         if cached:
@@ -196,19 +261,10 @@ def api_briefing():
             threads = get_threads(cache_key)
             sources, view_name, view_desc = _fetch_briefing_events(view_id, hours)
             if len(sources) < 2:
-                if cached:
-                    return jsonify({
-                        "briefing": cached["briefing"],
-                        "sources": cached_sources,
-                        "article_count": cached["article_count"],
-                        "generated_at": cached["generated_at"],
-                        "cache_ttl_s": fresh_s(hours),
-                        "cached": True,
-                        "stale": True,
-                        "view": view_id or None,
-                        "hours": hours,
-                    })
-                return jsonify({"briefing": None, "error": "Not enough articles", "found": len(sources)})
+                return _unrefreshed("failed:insufficient_articles",
+                                    f"{len(sources)} candidate articles in the window",
+                                    message="Not enough articles", status=200,
+                                    extra={"found": len(sources)})
 
             candidates = sources
             sources, sources_payload, editor_meta = _editor_pass(
@@ -218,19 +274,14 @@ def api_briefing():
                                             prev=prev, threads=threads)
             gen_t0 = _time.time()
 
-            briefing = _normalize_briefing(_generate_briefing(sources, view_name, view_desc, hours,
-                                                               prev=prev, threads=threads, prompt=prompt), view_name, hours)
+            try:
+                briefing = _normalize_briefing(_generate_briefing(sources, view_name, view_desc, hours,
+                                                                   prev=prev, threads=threads, prompt=prompt),
+                                               view_name, hours)
+            except BriefingGenerationError as exc:
+                return _unrefreshed(f"failed:{exc.code}", exc.detail)
             if not briefing:
-                if cached:
-                    return jsonify({
-                        "briefing": cached["briefing"], "sources": cached_sources,
-                        "article_count": cached["article_count"],
-                        "generated_at": cached["generated_at"],
-                        "cache_ttl_s": fresh_s(hours),
-                        "cached": True, "stale": True,
-                        "view": view_id or None, "hours": hours,
-                    })
-                return jsonify({"briefing": None, "error": "Briefing generation unavailable"}), 503
+                return _unrefreshed("failed:empty_briefing", "normalised to empty text")
 
             generated_at = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
             meta_json = json.dumps({
@@ -256,6 +307,7 @@ def api_briefing():
             )
             uc.commit()
             uc.close()
+            _record("ok")
             record_briefing_history(cache_key, view_id or "_all", hours, briefing,
                                     sources_json, len(sources), meta_json, generated_at,
                                     trigger=history_trigger)
@@ -266,6 +318,7 @@ def api_briefing():
                 "article_count": len(sources), "generated_at": generated_at,
                 "cache_ttl_s": fresh_s(hours),
                 "cached": False, "view": view_id or None, "hours": hours,
+                **_freshness_fields(view_id, hours, generated_at),
             })
         finally:
             _finish_regen(cache_key)

@@ -1,10 +1,11 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
+﻿<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.3" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <URI>\GDELT-BriefingPrewarm</URI>
   </RegistrationInfo>
   <Principals>
     <Principal id="Author">
+      <UserId>S-1-5-21-2512699296-1746762344-1301134065-1001</UserId>
       <LogonType>S4U</LogonType>
     </Principal>
   </Principals>
@@ -21,41 +22,19 @@
     <UseUnifiedSchedulingEngine>true</UseUnifiedSchedulingEngine>
   </Settings>
   <Triggers>
-    <CalendarTrigger>
-      <StartBoundary>2026-08-01T23:00:00-05:00</StartBoundary>
-      <ScheduleByDay>
-        <DaysInterval>1</DaysInterval>
-      </ScheduleByDay>
-    </CalendarTrigger>
-    <CalendarTrigger>
-      <StartBoundary>2026-08-02T07:00:00-05:00</StartBoundary>
-      <ScheduleByDay>
-        <DaysInterval>1</DaysInterval>
-      </ScheduleByDay>
-    </CalendarTrigger>
-    <CalendarTrigger>
-      <StartBoundary>2026-08-02T11:00:00-05:00</StartBoundary>
-      <ScheduleByDay>
-        <DaysInterval>1</DaysInterval>
-      </ScheduleByDay>
-    </CalendarTrigger>
-    <CalendarTrigger>
-      <StartBoundary>2026-08-02T15:00:00-05:00</StartBoundary>
-      <ScheduleByDay>
-        <DaysInterval>1</DaysInterval>
-      </ScheduleByDay>
-    </CalendarTrigger>
-    <CalendarTrigger>
-      <StartBoundary>2026-08-02T19:00:00-05:00</StartBoundary>
-      <ScheduleByDay>
-        <DaysInterval>1</DaysInterval>
-      </ScheduleByDay>
-    </CalendarTrigger>
+    <TimeTrigger>
+      <StartBoundary>2026-11-23T00:00:00-05:00</StartBoundary>
+      <Repetition>
+        <Interval>PT3H</Interval>
+        <Duration>P3650D</Duration>
+        <StopAtDurationEnd>true</StopAtDurationEnd>
+      </Repetition>
+    </TimeTrigger>
   </Triggers>
   <Actions Context="Author">
     <Exec>
       <Command>wscript.exe</Command>
-      <Arguments>"%USERPROFILE%\bin\gdelt_prewarm_hidden.vbs"</Arguments>
+      <Arguments>"C:\Users\siddh\bin\gdelt_prewarm_hidden.vbs"</Arguments>
     </Exec>
   </Actions>
 </Task>

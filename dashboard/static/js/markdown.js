@@ -165,30 +165,85 @@ function stopFreshnessTicker() {
   _freshnessData = null;
 }
 
+// "45s" / "12m" / "5h" / "3d". Never a bare number, never a promise.
+function _bfAge(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  if (s < 60) return s + 's';
+  if (s < 3600) return Math.floor(s / 60) + 'm';
+  if (s < 86400) return Math.floor(s / 3600) + 'h';
+  return Math.floor(s / 86400) + 'd';
+}
+
+// Reader-local 24h clock from a server UTC 'YYYY-MM-DD HH:MM:SS' stamp.
+function _bfClock(stamp) {
+  if (!stamp) return null;
+  const d = new Date(String(stamp).replace(' ', 'T') + 'Z');
+  if (isNaN(d.getTime())) return null;
+  const h = d.getHours(), m = d.getMinutes();
+  return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+}
+
+function _bfTime(stamp) {
+  if (!stamp) return null;
+  const d = new Date(String(stamp).replace(' ', 'T') + 'Z');
+  return isNaN(d.getTime()) ? null : d;
+}
+
+// The attempt fields the server sends beside generated_at. Kept in one place so
+// the SSE phase-1 paint, the terminal paint and the dismiss→restore path can
+// never disagree about what was observed.
+function _freshnessAttempt(data) {
+  if (!data) return {};
+  return {
+    nextEligibleAt: data.next_eligible_at || null,
+    lastAttemptAt: data.last_attempt_at || null,
+    lastAttemptOutcome: data.last_attempt_outcome || null,
+    consecutiveFailures: data.consecutive_failures || 0,
+  };
+}
+
+// Renders observations only — never a countdown the schedule cannot keep.
+//
+// Until 2026-11-23 this bar computed "generated_at + ttl" and, for the whole
+// band where a 3h briefing was 3h-6h old, printed "Next update in any moment".
+// That was unachievable by construction: prewarm ran 5x/day with an 8-hour
+// overnight gap against a 3h TTL, and nothing recorded whether an attempt had
+// actually succeeded. Past the TTL the bar now says how old the text is and why
+// it has not moved — the next scheduled run while fresh, or the failure while
+// overdue. "any moment" is gone, not special-cased.
 function updateFreshnessBar() {
   if (!_freshnessData) return;
   const el = document.getElementById('briefingFreshness');
   if (!el) return;
-  const { generatedAt, ttlS, articleCount } = _freshnessData;
-  const now = Date.now();
+  const { generatedAt, ttlS, articleCount, attempt } = _freshnessData;
   const gen = new Date(generatedAt + 'Z');
   if (isNaN(gen.getTime())) { el.innerHTML = ''; return; }
-  const elapsed = Math.max(0, Math.floor((now - gen.getTime()) / 1000));
-  const remaining = Math.max(0, ttlS - elapsed);
+  const elapsed = Math.max(0, Math.floor((Date.now() - gen.getTime()) / 1000));
+  const age = _bfAge(elapsed);
+  const sep = ' <span class="bf-sep">·</span> ';
+  const count = articleCount
+    ? sep + '<span class="bf-count">From ' + articleCount + ' articles</span>'
+    : '';
+  const a = attempt || {};
+  const overdue = ttlS > 0 && elapsed >= ttlS;
 
-  const elapsedLabel = elapsed < 60 ? `${elapsed}s` : elapsed < 3600 ? `${Math.floor(elapsed / 60)}m ago` : elapsed < 86400 ? `${Math.floor(elapsed / 3600)}h ago` : `${Math.floor(elapsed / 86400)}d ago`;
-  const remainLabel = remaining <= 0 ? 'any moment' : remaining < 60 ? `~${remaining}s` : remaining < 3600 ? `~${Math.floor(remaining / 60)}m` : `~${Math.floor(remaining / 3600)}h`;
-
-  // 2026-11-09: a combo past its TTL used to promise "Next update in any moment"
-  // even when the cache was weeks old (non-prewarmed windows never refreshed).
-  // When it is THIS overdue, say so instead of promising.
-  const overdueS = elapsed - ttlS;
-  const isStale = ttlS > 0 && overdueS > Math.max(3600, ttlS);
-  if (isStale) {
+  if (overdue) {
+    const dueAt = gen.getTime() + ttlS * 1000;
+    const lastAt = _bfTime(a.lastAttemptAt);
+    const outcome = a.lastAttemptOutcome ? String(a.lastAttemptOutcome) : '';
+    const failedSinceDue = outcome.indexOf('failed:') === 0
+      && lastAt && lastAt.getTime() >= dueAt;
     el.className = 'briefing-freshness bf-stale';
-    el.innerHTML = '<span class="bf-elapsed">Generated ' + elapsedLabel + '</span>'
-      + ' <span class="bf-sep">·</span> <span class="bf-next">Stale — refresh overdue</span>'
-      + (articleCount ? ' <span class="bf-sep">·</span> <span class="bf-count">From ' + articleCount + ' articles</span>' : '');
+    let html = '<span class="bf-elapsed">Updated ' + age + ' ago</span>';
+    if (failedSinceDue) {
+      const code = outcome.slice('failed:'.length) || 'unknown';
+      const agoS = Math.max(1, Math.floor((Date.now() - lastAt.getTime()) / 1000));
+      html += sep + '<span class="bf-next">last attempt ' + _bfAge(agoS) +
+        ' ago failed (' + code + ')</span>';
+    } else {
+      html += sep + '<span class="bf-next">update overdue</span>';
+    }
+    el.innerHTML = html + count;
     return;
   }
 
@@ -197,16 +252,20 @@ function updateFreshnessBar() {
   if (ratio > 0.9) cls = 'bf-stale';
   else if (ratio > 0.5) cls = 'bf-aging';
 
+  // next_eligible_at is the next scheduled run that may refresh this combo, so
+  // the time shown is the schedule's, not a countdown invented from the TTL.
+  const next = _bfClock(a.nextEligibleAt);
   el.className = 'briefing-freshness ' + cls;
-  el.innerHTML = '<span class="bf-elapsed">Generated ' + elapsedLabel + '</span>'
-    + (ttlS > 0 ? ' <span class="bf-sep">·</span> <span class="bf-next">Next update in ' + remainLabel + '</span>' : '')
-    + (articleCount ? ' <span class="bf-sep">·</span> <span class="bf-count">From ' + articleCount + ' articles</span>' : '');
+  el.innerHTML = '<span class="bf-elapsed">Updated ' + age + ' ago</span>'
+    + (next ? sep + '<span class="bf-next">next ~' + next + '</span>' : '')
+    + count;
 }
 
-function startFreshnessTicker(generatedAt, ttlS, articleCount) {
+function startFreshnessTicker(generatedAt, ttlS, articleCount, attempt) {
   if (!generatedAt) return;
   stopFreshnessTicker();
-  _freshnessData = { generatedAt, ttlS: ttlS || 0, articleCount: articleCount || 0 };
+  _freshnessData = { generatedAt, ttlS: ttlS || 0, articleCount: articleCount || 0,
+                     attempt: attempt || {} };
   _lastFreshness = _freshnessData;
   updateFreshnessBar();
   _freshnessTimer = setInterval(updateFreshnessBar, 15000);
@@ -232,7 +291,8 @@ function restoreBriefing() {
   // dismissBriefing() blanked the freshness line and stopped its ticker; without
   // re-arming here the restored briefing sits there with no age on it forever.
   if (_lastFreshness) {
-    startFreshnessTicker(_lastFreshness.generatedAt, _lastFreshness.ttlS, _lastFreshness.articleCount);
+    startFreshnessTicker(_lastFreshness.generatedAt, _lastFreshness.ttlS,
+                         _lastFreshness.articleCount, _lastFreshness.attempt);
   }
 }
 
@@ -447,7 +507,8 @@ function noteBriefProgressPrior(generatedAt) {
         // the moment it is painted — waiting for `done` means the whole time the
         // reader is on stale copy there is nothing on screen saying so.
         if (data.generated_at && !data.done) {
-          startFreshnessTicker(data.generated_at, data.cache_ttl_s, data.article_count);
+          startFreshnessTicker(data.generated_at, data.cache_ttl_s, data.article_count,
+                               _freshnessAttempt(data));
           textEl.dataset.generatedAt = data.generated_at;
           noteBriefProgressPrior(data.generated_at);
         }
@@ -468,7 +529,8 @@ function noteBriefProgressPrior(generatedAt) {
           // element's innerHTML, so saving first persisted an empty label and the
           // instant-paint on next boot could never restore it.
           if (data.generated_at || data.cache_ttl_s) {
-            startFreshnessTicker(data.generated_at, data.cache_ttl_s, data.article_count);
+            startFreshnessTicker(data.generated_at, data.cache_ttl_s, data.article_count,
+                                 _freshnessAttempt(data));
           }
           if (data.generated_at) textEl.dataset.generatedAt = data.generated_at;
           if (typeof setBriefingCoverage === 'function') setBriefingCoverage(sourcesMap);
@@ -738,7 +800,8 @@ function backToLiveBriefing() {
   if (metaEl && _liveBackup) metaEl.textContent = _liveBackup.meta;
   _liveBackup = null;
   _histViewing = null;
-  if (_freshnessData) startFreshnessTicker(_freshnessData.generatedAt, _freshnessData.ttlS, _freshnessData.articleCount);
+  if (_freshnessData) startFreshnessTicker(_freshnessData.generatedAt, _freshnessData.ttlS,
+                                           _freshnessData.articleCount, _freshnessData.attempt);
 }
 
 document.addEventListener('DOMContentLoaded', () => setTimeout(updateBriefHistoryLink, 2000));

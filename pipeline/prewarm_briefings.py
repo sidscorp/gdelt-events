@@ -14,8 +14,14 @@ import os
 from pathlib import Path
 
 CURATED_HOURS = (3, 24)
-SLOW_HOURS = (6, 72)      # widened 2026-11-09: refreshed on the 00 and 12 UTC runs
-DAILY_HOURS = (168, 720)  # refreshed on the 00 UTC run
+SLOW_HOURS = (6, 72)      # widened 2026-11-09: refreshed twice a day
+DAILY_HOURS = (168, 720)  # refreshed once a day
+# The GDELT-BriefingPrewarm trigger repeats every this many hours (8 runs/day
+# since 2026-11-23; it was five fixed daily triggers with an 8h overnight gap,
+# which no 3h TTL could survive). The trigger is anchored to a LOCAL clock time,
+# so every hourly rule in this module is local too — a DST change moves the UTC
+# hour of a run and must not silently stop a window from ever being warmed.
+CADENCE_HOURS = 3
 CURATED_VIEWS = (
     "",                        # global / all topics
     "ai-general",               # AI Sector
@@ -99,20 +105,54 @@ def warm(view, hours, base_url, timeout=120):
 
 
 def scheduled_hours(now=None):
-    """Windows this run should warm. 3h/24h every run (5x/day); the other four
-    windows used to never refresh at all — 69/103 cached briefings were >4
-    weeks stale on 2026-11-09. 6h/3d join the 00 and 12 UTC runs, 7d/30d the
-    00 UTC run. The server's own fresh_s() gate still decides whether a combo
-    actually regenerates, so these only cost LLM calls when due.
+    """Windows this run should warm. 3h/24h every run; the other four windows
+    used to never refresh at all — 69/103 cached briefings were >4 weeks stale
+    on 2026-11-09. 6h/3d join the runs at 00 and 12 local, 7d/30d the 00 local
+    run. The server's own fresh_s() gate still decides whether a combo actually
+    regenerates, so these only cost LLM calls when due.
+
+    Local, not UTC: the trigger is a local-clock repetition (see CADENCE_HOURS),
+    and the previous UTC test made the widened windows depend on the DST offset
+    — at UTC-4 no run lands on hour 0 or 12, so they would stop refreshing.
     """
-    from datetime import datetime, timezone
-    h = (now or datetime.now(timezone.utc)).hour
+    from datetime import datetime
+    h = (now or datetime.now()).hour
     hours = list(CURATED_HOURS)
     if h % 12 == 0:
         hours += SLOW_HOURS
     if h == 0:
         hours += DAILY_HOURS
     return hours
+
+
+def next_run_at(hours, after=None):
+    """The next scheduled run that may warm this window, as naive UTC.
+
+    This is what the reader's freshness line counts down to, so it has to be
+    the schedule, not the TTL: the TTL only says when a cache stops counting as
+    fresh, and a run that lands before that moment will skip the combo. Before
+    2026-11-23 the line was derived from the TTL alone, so a 3h briefing showed
+    "next update in any moment" through an 8-hour hole in the schedule.
+
+    ``after`` is naive UTC, the convention used by briefing_cache.generated_at.
+    Returns None if no run in the next three weeks warms this window.
+    """
+    from datetime import datetime, timedelta
+    # Exact local<->UTC offset for right now (whole minutes; DST-aware). Reading
+    # utcnow() and now() as two clock samples instead rounds to 11:59:59.999999
+    # at a minute boundary, which the bar then prints as "next ~11:59" for a
+    # 12:00 run.
+    tz_offset = datetime.now().astimezone().utcoffset() or timedelta()
+    after_local = (after or datetime.utcnow()) + tz_offset
+    slot = after_local.replace(minute=0, second=0, microsecond=0)
+    slot -= timedelta(hours=slot.hour % CADENCE_HOURS)
+    if slot < after_local:
+        slot += timedelta(hours=CADENCE_HOURS)
+    for _ in range(8 * 21):
+        if int(hours) in scheduled_hours(slot):
+            return slot - tz_offset
+        slot += timedelta(hours=CADENCE_HOURS)
+    return None
 
 
 def curated_combos(now=None):

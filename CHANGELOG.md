@@ -17,6 +17,108 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-23 — Briefing freshness reports attempts, not promises (#71)
+
+**What** — Three linked changes.
+
+1. Every briefing generation attempt is now recorded per (view, window) in a new
+   `briefing_attempt_state` table in `users.db`: `last_attempt_at`, `last_attempt_outcome`
+   (`ok` / `failed:<code>` / `skipped_fresh`), `last_attempt_trigger`, `last_attempt_detail`,
+   `last_success_at`, `consecutive_failures`, `attempt_count`, `failure_count`. A success resets
+   the failure counter; a skip leaves it alone (a skip says nothing about the provider).
+   `_generate_briefing` raises `BriefingGenerationError(code)` instead of returning `None`, so the
+   code survives the call; `classify_generation_error` maps timeouts, gateway 429/5xx
+   (`provider_unavailable`), other HTTP codes, a missing key and empty output onto the codes the
+   reader sees.
+2. `GET /api/briefing` (JSON and SSE) returns `last_attempt_at`, `last_attempt_outcome`,
+   `consecutive_failures` and `next_eligible_at`, where `next_eligible_at` is the next
+   **scheduled** prewarm run that may refresh the combo — not `generated_at + ttl`.
+3. `updateFreshnessBar` (`dashboard/static/js/markdown.js`) renders observations only: while
+   fresh, `Updated 12m ago · next ~15:00`; past the TTL, either
+   `Updated 5h ago · last attempt 4m ago failed (provider_unavailable)` or
+   `Updated 5h ago · update overdue`. The `any moment` branch is deleted, not special-cased.
+   `GDELT-BriefingPrewarm` now repeats every 3 hours (8/day) instead of five fixed daily
+   triggers, and `static/sw.js` CACHE is bumped to `gdelt-shell-v37`.
+
+**Why** — Three definitions of "fresh" disagreed, and the visible one could only promise.
+The 3h window's bar printed "Next update in any moment" for the whole band where a 3h briefing
+was 3h-6h old (observed 2026-11-22 at 5h), because it computed `generated_at + ttl` client-side
+and knew nothing about the schedule: prewarm ran 5x/day at 23/07/11/15/19 local — an **8h
+overnight gap** (04:00→12:00 UTC) — against a **3h TTL**. Nothing recorded whether an attempt
+succeeded, so the failure half was invisible.
+
+Measured before the change (`data/logs/prewarm.log`, last 5 completed runs, 320 combos):
+**skip rate 7.8%** and **fail rate 91.6%** (27 ok / 293 failed / 25 skipped); last 10 runs 8.3%
+and 84.7%. So the promise was broken twice over. The dominant failure mode found while
+measuring: one slow generation (observed **124 s** and **225 s** against the 180 s writer
+timeout) outlives the prewarm client's own **120 s** timeout, and the server's single global
+regeneration slot (`_regen_in_flight`) then answers every following combo with the stale cached
+copy in ~0.01 s — logged as FAIL. 77 of 80 combos "failed" in 9 minutes this way on 2026-11-23
+07:00 local. **That generation path is not changed here**; recording outcomes is what makes it
+visible instead of invisible.
+
+**How it was verified** — `tests/test_briefing_freshness.py` **16 passed** (the 15 new checks plus
+`test_a_first_ever_skip_is_not_a_failure`, added after the live probe found that bug); the
+pre-existing briefing suites still pass (`test_briefing_access`, `test_briefing_prompt`,
+`test_briefing_threads`, `test_admin_metrics` → **29 passed**). The render assertions run the
+shipped `markdown.js` in Node, not a Python copy of its strings.
+
+Live, on rainbow-boi: task trigger read back as **one `MSFT_TaskTimeTrigger`, `Repetition.Interval
+= PT3H`**, next run **12:00 local** (was `NextRunTime 11:00` under five daily triggers), action and
+S4U principal unchanged. Dashboard restarted via the scheduled task; serving PIDs went
+`27196/3376` (created 2026-11-22 19:44) → `30708/32184` (2026-11-23 10:14:01), `/api/stats` 200
+with `latest 27m ago`.
+
+Real payloads from the live API, rendered by the shipped bar:
+
+| combo | payload | bar |
+| --- | --- | --- |
+| global 3h | `generated_at 14:45:20`, `next_eligible_at 20:00:00`, `skipped_fresh`, 0 failures | `Updated 31m ago · next ~15:00 · From 12 articles` |
+| global 24h | `generated_at 12:01:45`, `next_eligible_at 23:00:00`, `skipped_fresh` | `Updated 3h ago · next ~18:00` |
+| va-news 24h | `generated_at 2026-11-20 16:17:05`, `failed:insufficient_articles`, 1 failure | `Updated 2d ago · last attempt 1m ago failed (insufficient_articles)` |
+| europe 3h | `generated_at 2026-11-21 20:21:28`, no attempt recorded | `Updated 1d ago · update overdue` |
+
+A forced `?prewarm=1` on `va-news:24` wrote the failure row from the real code path (the view has
+11 articles and cannot refresh), and a forced `?prewarm=1` on global 3h/24h wrote
+`skipped_fresh`; the first-ever skip initially recorded `consecutive_failures=1`, which is why the
+insert path now treats a skip as zero failures (bug fixed, row corrected, test added).
+`tests/smoke.sh` from the Mac against :8015: **18/20**, both failures on `/api/gal_facets`
+(HTTP 500 after 8-9 s), which also failed at 08:52 and 05:01 the same morning **before this
+deploy** and is unrelated to the briefing path — see Notes.
+
+**Files** — `dashboard/briefing.py`, `dashboard/routes/api_briefing.py`,
+`pipeline/prewarm_briefings.py`, `dashboard/static/js/markdown.js`, `dashboard/static/sw.js`,
+`dashboard/templates/index.html` (markdown.js `?v=32`), `deploy/tasks/GDELT-BriefingPrewarm.xml`,
+`tests/test_briefing_freshness.py`, `tests/js/freshness_bar.mjs`, `tests/cic/briefing-freshness.md`,
+`CHANGELOG.md`.
+
+**Notes** — The attempt state is a state table, not a second history log: `briefing_history` is
+the append-only archive of *successful* generations with a `NOT NULL` briefing body and is read by
+the Bluesky publisher, so failed attempts (no body) do not belong there, and "last attempt /
+consecutive failures" is one row per combo by definition. It lives in SQLite beside
+`briefing_cache`; the article DB is DuckDB single-writer and a status row must not contend with
+ingest.
+
+`pipeline/prewarm_briefings.py::scheduled_hours` now keys on **local** hours, not UTC. The trigger
+is a local-clock repetition, so a UTC test made the widened 6h/72h/168h/720h windows depend on the
+DST offset — at UTC-4 no run lands on hour 0 or 12 and they would have stopped refreshing for
+eight months a year. Behaviour in EST is unchanged (00 local still carries 6h/72h/168h/720h).
+
+Rollback: revert the commit (payload additions are additive and an old client ignores them); drop
+`briefing_attempt_state`; restore the five daily triggers recorded in the deployment report
+(`23:00`, `07:00`, `11:00`, `15:00`, `19:00` local, `MSFT_TaskDailyTrigger`, `DaysInterval=1`).
+`scripts/set_prewarm_cadence.ps1 -Hours <n>` re-applies a cadence and `-DryRun` prints the current
+one; Windows rejects an *indefinite* repetition duration through the object model ("Duration
+P99999999DT23H59M59S ... out of range"), so the repetition carries `P3650D` and would stop in
+2036 if it is never revisited.
+
+**Outstanding** — the skip-rate claim is a 24-hour observation and is **not** claimed here. The
+baseline measured before this change was 7.8% skip / 91.6% fail over the last 5 prewarm runs; the
+3h cadence against a 3h TTL should lift the skip rate above 20% while the deep failures behind the
+`failed:busy` cascade are worked separately. Also unrelated but observed while verifying:
+`/api/gal_facets` intermittently 500s after 8-17 s on its full-`gal` `GROUP BY` (05:01, 08:52,
+10:17 on 2026-11-23, i.e. before and after this deploy); it needs its own issue.
+
 ## 2026-11-22 — Judge and briefing timeouts raised; judge latency published
 
 **What** — `pipeline/pill_eval.py` gains `JUDGE_HTTP_TIMEOUT_S = 180` (was a hardcoded 90),

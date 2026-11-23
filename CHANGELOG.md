@@ -17,6 +17,47 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-22 — Judge and briefing timeouts raised; judge latency published
+
+**What** — `pipeline/pill_eval.py` gains `JUDGE_HTTP_TIMEOUT_S = 180` (was a hardcoded 90),
+shared by the production judge (`pill_judge` imports `_judge_call` from it) and the eval
+harness. `dashboard/briefing.py` raises its model-call timeout from 90 s and 120 s to 180 s.
+Every judge HTTP attempt is now timed and published as `judge_latency` (n / p50 / p95 / max) in
+`data/pill_judge_health.json`, alongside the `db_hold_s` / `judge_s` fields added by #70.
+
+**Why** — Judging and briefing generation were failing continuously, not occasionally. A
+judge-sized call (20 candidates, max_tokens 6000) measured **95.9 s** and **71.5 s** on
+2026-11-22 against a 90 s client cap, so any call landing in the slow tail became
+`provider_unavailable after 3 attempts`, opened the circuit, and halted the whole judging
+cycle. The same cap took the briefings with it: prewarm runs that day succeeded on 25/120,
+15/80, 4/40, 4/40 and 15/120 combos. 1,143 such timeouts are in the log since September.
+
+This is throughput, not availability: idle 5-token probes return in **1.3 s**, every call
+answers 200 with correct output, and the gateway shows no 5xx. At 442 output tokens in 95 s
+(~5 tokens/s) the bottleneck is provider-side queueing under load. The judge alias resolves to
+Venice Private with no gateway fallback, yet some responses arrive as `e2ee-gpt-oss-120b-p` —
+that substitution is Venice-side and is the slower path (95.9 s vs 71.5 s).
+
+**How it was verified** — After deploying, four consecutive pill-category runs logged
+`3/3`, `3/3`, `2/2`, `3/3 batches (100%), failures=0` where the two cycles before the change
+had halted with `halted_on_judge_failure`. The scorer still closes its read connection first
+(`read connection held 7.6 s and closed before judging`). 18/18 pill tests pass. Dashboard
+restarted to pick up `briefing.py` (PIDs 30620/30256 -> 3376/27196, healthy in 14 s), then
+`/api/stats` and `/` returned 200.
+
+**Files** — `pipeline/pill_eval.py`, `pipeline/pill_scorer.py`, `dashboard/briefing.py`,
+`CHANGELOG.md`.
+
+**Notes** — The `judge_latency` field appears in the receipt at the end of the next completed
+cycle; the deploy landed mid-cycle, so the first receipt after it was still the old shape.
+A judge cycle now runs longer, and one was still working when the following scheduled run
+began — the task's instance policy and the 15-minute cadence both need checking before this is
+called settled (a duplicate run would re-judge and re-pay). If p95 stays near the new ceiling,
+the next lever is `reasoning_effort: "low"` for judge calls, which changes judgement behaviour
+and must be A/B'd against the existing verdict corpus and the `pill_eval` precision harness —
+not switched blind. Max tokens and batch size were deliberately left alone: at 442 tokens the
+response is already lean, so the cost is throughput, not volume.
+
 ## 2026-11-22 — Pill scorer closes its read connection before judging
 
 **What** — `pipeline/pill_scorer.py` splits `score_new`'s per-chunk work into `plan_batch` (the

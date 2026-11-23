@@ -46,6 +46,7 @@ try:
     from .config import DATA_DIR, DB_PATH
     from .loader import _open_connection
     from . import embedding_store
+    from .pill_eval import judge_call_latency
     from .tagger import CATEGORIES, SEM_HI_DEFAULT, SEM_LO_DEFAULT
 except ImportError:
     import sys as _sys
@@ -55,6 +56,7 @@ except ImportError:
     from pipeline.config import DATA_DIR, DB_PATH
     from pipeline.loader import _open_connection
     from pipeline import embedding_store
+    from pipeline.pill_eval import judge_call_latency
     from pipeline.tagger import CATEGORIES, SEM_HI_DEFAULT, SEM_LO_DEFAULT
 
 log = logging.getLogger("pill_scorer")
@@ -528,6 +530,7 @@ def _write_judge_health(totals: dict, watermark_before: int,
         "articles": totals.get("articles", 0),
         "judged": totals.get("judged", 0),
         "judge_calls": totals.get("judge_calls", 0),
+        "judge_latency": judge_call_latency(),
         "inserted": totals.get("inserted", 0),
         "demoted": totals.get("demoted", 0),
         "watermark_before": watermark_before,

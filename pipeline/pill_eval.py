@@ -25,12 +25,41 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
 
 from .config import DATA_DIR, DB_PATH
 
 GATEWAY_URL_FILE = DATA_DIR / ".gateway_url"
+
+# A judge-sized call (20 items, max_tokens 6000) measured 71-96 s on 2026-11-22 against a
+# 90 s client timeout, so every call landing in the slow tail became
+# "provider_unavailable after 3 attempts" and opened the circuit. 180 s covers the measured
+# p100 with margin; p95 is published in the health receipt so this stays visible.
+JUDGE_HTTP_TIMEOUT_S = 180
+
+# Recent attempt latencies (seconds), newest last. Bounded: the receipt only needs a p95.
+_JUDGE_CALL_SECONDS: deque = deque(maxlen=200)
+
+
+def judge_call_latency() -> dict:
+    """Latency of recent judge HTTP attempts, for the health receipt.
+
+    Recorded so a provider slowdown shows up as a number instead of only as
+    "unavailable after 3 attempts" in a log line. Watch p95 against
+    JUDGE_HTTP_TIMEOUT_S: when p95 approaches it, calls start failing.
+    """
+    vals = sorted(_JUDGE_CALL_SECONDS)
+    if not vals:
+        return {"n": 0}
+
+    def at(fraction: float) -> float:
+        idx = int(round((len(vals) - 1) * fraction))
+        return round(vals[idx], 1)
+
+    return {"n": len(vals), "p50_s": at(0.50), "p95_s": at(0.95),
+            "max_s": round(vals[-1], 1)}
 
 
 def _gateway_url() -> str:
@@ -295,8 +324,9 @@ def _judge_call(prompt: str, retries: int = 3) -> str:
     retries = max(1, int(retries))
     last_code = "provider_unavailable"
     for attempt in range(retries):
+        started = time.monotonic()
         try:
-            with urllib.request.urlopen(req, timeout=90) as resp:
+            with urllib.request.urlopen(req, timeout=JUDGE_HTTP_TIMEOUT_S) as resp:
                 body = json.loads(resp.read().decode("utf-8", "replace"))
             choices = body.get("choices") if isinstance(body, dict) else None
             if (choices or [{}])[0].get("finish_reason") == "length":
@@ -328,6 +358,8 @@ def _judge_call(prompt: str, retries: int = 3) -> str:
             delay = 2.0 * (attempt + 1)
         except (json.JSONDecodeError, UnicodeError, TypeError, KeyError) as exc:
             raise JudgeResponseError("judge returned invalid JSON") from exc
+        finally:
+            _JUDGE_CALL_SECONDS.append(time.monotonic() - started)
 
         if attempt + 1 < retries:
             time.sleep(delay)

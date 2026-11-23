@@ -299,7 +299,7 @@ EDITOR_MAX_TOKENS = 4000
 
 
 def _chat(prompt: str, max_tokens: int, temperature: float,
-          timeout: int = 90, reasoning_effort: str | None = None) -> tuple[str, dict]:
+          timeout: int = 180, reasoning_effort: str | None = None) -> tuple[str, dict]:
     """One non-streaming gateway completion -> (content, usage)."""
     from urllib.request import Request, urlopen
 
@@ -727,7 +727,7 @@ def _generate_briefing_stream(sources, view_name, view_desc, hours, prev=None, t
     collected = []
     usage = None
     try:
-        with urlopen(req, timeout=120) as resp:
+        with urlopen(req, timeout=180) as resp:
             for line in resp:
                 # 'replace' so a chunk-boundary split can never crash (and truncate)
                 # the stream; malformed events are skipped by the json guard below.

@@ -84,6 +84,13 @@ DEFAULT_REGEN_CAP = 2
 # run and still holds a slot), so retrying immediately would collide again.
 BUSY_RETRY_WAIT_S = 60
 
+# Failure codes that clear on their own within seconds: the generation cap was
+# full, or the ingest held the DuckDB write lock while the event query tried to
+# open its read-only connection (`failed:db_busy`, which the ingest produces for
+# ~30s every 15 min). Left alone they leave a combo stale for another 3h; one
+# retry after the queue drains turns them back into normal combos.
+RETRYABLE_FAILURES = ("db_busy",)
+
 
 def current_version():
     try:
@@ -142,7 +149,7 @@ class RunReport:
     workers: int = 1
     elapsed: float = 0.0
     max_in_flight: int = 0
-    retried_busy: int = 0
+    retried: int = 0
     attempts: int = 0
 
     def count(self, status, reason=None):
@@ -266,7 +273,8 @@ def run_combos(combos, base_url, *, workers=None, timeout=CLIENT_TIMEOUT_S, forc
     will grant: extra workers would only collect failed:busy. A combo told busy
     is deferred and retried once after the queue drains - it is a skip, not a
     failure, since the generation it collided with is still running and the next
-    scheduled run would pick it up anyway.
+    scheduled run would pick it up anyway. The same deferral covers the failure
+    codes in RETRYABLE_FAILURES, which also clear on their own within seconds.
     """
     cap = regen_cap()
     workers = max(1, min(int(workers), cap)) if workers else cap
@@ -304,12 +312,13 @@ def run_combos(combos, base_url, *, workers=None, timeout=CLIENT_TIMEOUT_S, forc
                 log(format_outcome(out))
                 report.attempts += 1
                 report.outcomes[out.key] = out
-                if out.status == "busy":
+                if out.status == "busy" or (out.status == "fail"
+                                            and out.reason in RETRYABLE_FAILURES):
                     deferred.append((view, hours))
             if not deferred or tries >= busy_retries:
                 break
             tries += 1
-            report.retried_busy += len(deferred)
+            report.retried += len(deferred)
             pending = deferred
             if busy_retry_wait:
                 time.sleep(busy_retry_wait)
@@ -442,9 +451,9 @@ def main():
     skipped = report.count("skip")
     print(f"[{time.strftime('%H:%M:%S')}] still-fresh, no LLM call: "
           f"{skipped}/{total}", flush=True)
-    if report.retried_busy:
-        print(f"[{time.strftime('%H:%M:%S')}] {report.retried_busy} combo(s) found the server "
-              f"at its generation cap and were retried once", flush=True)
+    if report.retried:
+        print(f"[{time.strftime('%H:%M:%S')}] {report.retried} combo(s) hit a held resource "
+              f"(generation cap or a database lock) and were retried once", flush=True)
 
     ok_count = report.count("ok")
     busy_count = report.count("busy")

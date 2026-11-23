@@ -51,11 +51,13 @@ class StubDashboard:
     like briefing_attempt_state.
     """
 
-    def __init__(self, slow=(), slow_s=0.5, busy_once=(), busy=(), fail=(), fresh=()):
+    def __init__(self, slow=(), slow_s=0.5, busy_once=(), busy=(), db_busy_once=(),
+                 fail=(), fresh=()):
         self.slow = set(slow)
         self.slow_s = slow_s
         self.busy_once = set(busy_once)
         self.busy = set(busy)
+        self.db_busy_once = set(db_busy_once)
         self.fail = set(fail)
         self.fresh = set(fresh)
         self.lock = threading.Lock()
@@ -125,12 +127,17 @@ class StubDashboard:
             if key in self.busy_once:
                 self.busy_once.discard(key)
                 busy = True
+            db_busy = False
+            if key in self.db_busy_once:
+                self.db_busy_once.discard(key)
+                db_busy = True
         if busy:
             outcome, status = "failed:busy", 503
             body = {"briefing": None, "error": "Generation in progress, no cache yet",
                     "last_attempt_outcome": outcome}
-        elif key in self.fail:
-            outcome, status = "failed:provider_unavailable", 200
+        elif db_busy or key in self.fail:
+            outcome = "failed:db_busy" if db_busy else "failed:provider_unavailable"
+            status = 200
             body = {"briefing": "yesterday", "cached": True, "stale": True,
                     "last_attempt_outcome": outcome}
         elif key in self.fresh:
@@ -232,7 +239,7 @@ def test_busy_is_deferred_and_retried_not_reported_as_a_failure():
     with StubDashboard(busy_once=["europe:3h"]) as stub:
         report, lines = _run(stub, combos)
 
-    assert report.retried_busy == 1
+    assert report.retried == 1
     assert report.outcomes["europe:3h"].status == "ok"      # retry won
     assert report.count("fail") == 0
     assert sum("BUSY" in line for line in lines) == 1
@@ -250,6 +257,34 @@ def test_a_permanently_busy_combo_is_a_skip_and_still_recorded():
     assert report.outcomes["europe:3h"].reason == "busy"
     busy_line = next(l for l in lines if "BUSY" in l)
     assert "generation cap" in busy_line and "FAIL" not in busy_line
+
+
+def test_a_database_lock_is_retried_instead_of_left_stale():
+    """failed:db_busy is the ingest holding the write lock for ~30 s; it clears.
+
+    The 12:00 run on 2026-11-23 lost 7 combos in 27 s this way. They are now
+    deferred like a busy slot, so the retry lands after the lock is gone.
+    """
+    combos = [("cyber-attacks", 3), ("public-health", 3), ("europe", 3)]
+    with StubDashboard(db_busy_once=["cyber-attacks:3h", "public-health:3h"]) as stub:
+        report, lines = _run(stub, combos)
+
+    assert report.retried == 2
+    assert report.count("fail") == 0
+    assert report.outcomes["cyber-attacks:3h"].status == "ok"
+    assert report.outcomes["public-health:3h"].status == "ok"
+    assert sum("failed:db_busy" in line for line in lines) == 2
+
+
+def test_a_persistent_database_failure_is_still_a_failure():
+    combos = [("cyber-attacks", 3), ("europe", 3)]
+    with StubDashboard(fail=["cyber-attacks:3h"]) as stub:
+        report, _ = _run(stub, combos)
+
+    assert report.outcomes["cyber-attacks:3h"].status == "fail"
+    assert report.outcomes["cyber-attacks:3h"].reason == "provider_unavailable"
+    assert report.count("fail") == 1
+    assert report.outcomes["europe:3h"].status == "ok"
 
 
 def test_every_combo_ends_with_an_outcome_recorded():

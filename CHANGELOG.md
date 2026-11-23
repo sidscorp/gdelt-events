@@ -23,7 +23,8 @@ Format for each entry:
 to `dashboard/routes/api_briefing.py::REGEN_MAX_CONCURRENT` (2) warms the queue; each combo's outcome
 is classified from the `last_attempt_outcome` the worker response already carries (`ok` /
 `skipped_fresh` / `failed:<code>`); a combo told `failed:busy` is **deferred and retried once**, not
-recorded as a failure; a client timeout is reported as that combo's timeout. `warm()` returns an
+recorded as a failure; so is `failed:db_busy`, which the first pooled run proved is a transient lock
+rather than a broken combo; a client timeout is reported as that combo's timeout. `warm()` returns an
 `Outcome` instead of `True`/`False`/`None`, and the run summary now separates generated, still-fresh,
 busy-skipped, failed and timed-out.
 
@@ -34,13 +35,39 @@ client timeout, kept holding a slot, and every following combo was refused in ~2
 slot (per cache key, cap 2); this fixes the loop that made the cap unreachable, because a serial
 client can only ever have one generation in flight.
 
-**How it was verified** — `tests/test_prewarm_concurrency.py` (8 tests, new) runs a real HTTP stub that
-behaves like the route: one combo sleeps 10x the others and they still complete and *overlap* with it;
-8 simultaneous slow combos show the stub never seeing more than 2 in flight; a combo that outlives the
-client timeout is recorded as `fail/timeout` while the other four return `ok` (no cascade); a busy slot
-is deferred, retried, and ends `ok` with zero failures; every combo ends with an outcome both in the
-report and in the stub's attempt record. The pool size is read from the server constant, not
-hardcoded, and a test asserts the two agree. Live measurement: see the run line below.
+**How it was verified** — `tests/test_prewarm_concurrency.py` (10 tests, new) runs a real HTTP stub
+that behaves like the route: one combo sleeps 10x the others and they still complete and *overlap*
+with it; 8 simultaneous slow combos show the stub never seeing more than 2 in flight; a combo that
+outlives the client timeout is recorded as `fail/timeout` while the other four return `ok` (no
+cascade); a busy slot and a DuckDB lock are deferred, retried, and end `ok` with zero failures, while a
+persistent provider failure stays a failure; every combo ends with an outcome both in the report and
+in the stub's attempt record. The pool size is read from the server constant, not hardcoded, and a
+test asserts the two agree. 25 tests pass in that file plus `tests/test_briefing_access.py` on the
+Windows venv (`bee44b0`).
+
+Measured live on the first pooled run, the **12:00 run on 2026-11-23** (80 combos: the widened 00/12
+window set, and a catch-up queue because four days of runs had been cascading):
+
+```
+[13:19:32] done: 60 successful, 6 still fresh, 0 busy-skipped, 14 failed (0 timeout)
+           of 80 combos in 4770.7s (2 workers, max in flight 2)
+```
+
+**79.5 min of wall time for 60 real generations** (per generation: min 33.8 s, median 160.1 s, max
+282.2 s), against a 90 min target and a 3 h cadence; those 60 generations account for **155.1 min** of
+generation time, so the pool ran at **1.95x** (serial would have been ~2.6 h and would have overrun
+the cadence). **Zero `failed:busy` and zero timeouts**
+— the two things the issue was about — and the run's own in-flight high-water mark was 2, i.e. exactly
+the server cap. The skip lines landed inside the run (`6 still fresh`, logged while other combos were
+still generating) instead of after a 20-minute wait. A deliberate two-combo forced run through the
+same pool measured **231.1 s wall for 225.1 s + 230.6 s of generation** (max in flight 2, both `ok` in
+`briefing_attempt_state` 5 s apart), which is the concurrency proof outside the scheduler.
+
+The 14 failures were 3 × `failed:insufficient_articles` (`nih-news`, `va-news`,
+`oss-vulnerabilities` — structural, they have no articles in a 3h window) and **11 × `failed:db_busy`**
+in two clusters (`12:29:19`-`12:29:46`, 4-5 s each) — GDELT-Ingest holds the DuckDB write lock for
+~30 s every 15 min and these combos hit it. That is what made them deferrable: they now retry once
+after the queue drains, when the lock is gone.
 
 **Files** — `pipeline/prewarm_briefings.py`, `tests/test_prewarm_concurrency.py`,
 `tests/test_briefing_access.py` (two assertions updated for the new `warm()` contract and for
@@ -53,7 +80,10 @@ state is keyed on `(view, hours)` with no run id, so one attempt cannot be told 
 alone removes the serialisation. `--force` was parsed but never used; it is now wired to `refresh=1`
 (the scheduled task never passes it). Niche views (`va-news`, `oss-vulnerabilities`) still fail every
 run with `failed:insufficient_articles` — structural, unchanged, and the summary now names it instead
-of the generic "scheduled request failed".
+of the generic "scheduled request failed". The measurement run's two forced `europe:24h`/`asia:24h`
+regenerations were taken early (refresh, not prewarm) and wrote `trigger='prewarm'` history rows like
+any other manual force; that is 2 rows of ~1400. The pool's high-water mark is the server's own cap:
+a bigger pool cannot help, because `_try_start_regen` refuses the third request.
 
 ## 2026-11-23 — Prewarm waits 420 s, above the measured generation time
 

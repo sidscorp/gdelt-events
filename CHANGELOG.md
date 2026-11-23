@@ -17,6 +17,44 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-23 — Prewarm warms combos on a pool sized to the server's cap
+
+**What** — `pipeline/prewarm_briefings.py` no longer waits for each combo in turn. A thread pool sized
+to `dashboard/routes/api_briefing.py::REGEN_MAX_CONCURRENT` (2) warms the queue; each combo's outcome
+is classified from the `last_attempt_outcome` the worker response already carries (`ok` /
+`skipped_fresh` / `failed:<code>`); a combo told `failed:busy` is **deferred and retried once**, not
+recorded as a failure; a client timeout is reported as that combo's timeout. `warm()` returns an
+`Outcome` instead of `True`/`False`/`None`, and the run summary now separates generated, still-fresh,
+busy-skipped, failed and timed-out.
+
+**Why** — Generation measured 238 s and 276 s end to end on 2026-11-23. A run has 34-40 combos, so a
+serial loop needs ~2.5 h against a 3 h cadence and any slower generation pushes it over. The 07:00 run
+that day logged `3 successful, 77 failed of 80 combos in 542.9s`: one generation outlived prewarm's
+client timeout, kept holding a slot, and every following combo was refused in ~2 s. #6294add fixed the
+slot (per cache key, cap 2); this fixes the loop that made the cap unreachable, because a serial
+client can only ever have one generation in flight.
+
+**How it was verified** — `tests/test_prewarm_concurrency.py` (8 tests, new) runs a real HTTP stub that
+behaves like the route: one combo sleeps 10x the others and they still complete and *overlap* with it;
+8 simultaneous slow combos show the stub never seeing more than 2 in flight; a combo that outlives the
+client timeout is recorded as `fail/timeout` while the other four return `ok` (no cascade); a busy slot
+is deferred, retried, and ends `ok` with zero failures; every combo ends with an outcome both in the
+report and in the stub's attempt record. The pool size is read from the server constant, not
+hardcoded, and a test asserts the two agree. Live measurement: see the run line below.
+
+**Files** — `pipeline/prewarm_briefings.py`, `tests/test_prewarm_concurrency.py`,
+`tests/test_briefing_access.py` (two assertions updated for the new `warm()` contract and for
+#6294add's per-key cap), `CHANGELOG.md`.
+
+**Notes** — The 202/poll design from the issue was **rejected**: the synchronous POST response is
+already the completion signal and already carries the attempt outcome, so polling
+`briefing_attempt_state` would add a round-trip, a new endpoint contract, and a correlation race (the
+state is keyed on `(view, hours)` with no run id, so one attempt cannot be told from another). The pool
+alone removes the serialisation. `--force` was parsed but never used; it is now wired to `refresh=1`
+(the scheduled task never passes it). Niche views (`va-news`, `oss-vulnerabilities`) still fail every
+run with `failed:insufficient_articles` — structural, unchanged, and the summary now names it instead
+of the generic "scheduled request failed".
+
 ## 2026-11-23 — Prewarm waits 420 s, above the measured generation time
 
 **What** — `warm()`'s client timeout goes 240 s to 420 s.

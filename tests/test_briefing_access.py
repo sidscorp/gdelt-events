@@ -129,11 +129,23 @@ def test_worker_failure_does_not_leak_slot(cache_client, monkeypatch):
     assert not route._regen_in_flight
 
 
-def test_generation_concurrency_is_global():
+def test_generation_concurrency_is_per_key_with_a_cap():
+    """#6294add: slots are per cache key with a small global cap.
+
+    The previous rule was one global slot, so one abandoned generation refused
+    every other combo with failed:busy. This test still asserted that rule and
+    was left red by the change; prewarm's pool is sized from this cap, so it is
+    pinned here.
+    """
     route._regen_in_flight.clear()
     try:
         assert route._try_start_regen("a:3")
-        assert not route._try_start_regen("b:24")
+        # A different key is allowed while the cap has room...
+        assert route._try_start_regen("b:24")
+        # ...but the same key twice is not, and neither is a third key.
+        assert not route._try_start_regen("a:3")
+        assert not route._try_start_regen("c:3")
+        assert route.REGEN_MAX_CONCURRENT == 2
     finally:
         route._regen_in_flight.clear()
 
@@ -154,7 +166,10 @@ def test_prewarm_posts_host_local_token_without_logging_it(monkeypatch, capsys):
         assert "synthetic-secret" not in req.full_url
         return Result()
     monkeypatch.setattr(prewarm.urllib.request, "urlopen", request)
-    assert prewarm.warm("", 24, "http://localhost:1234") is True
+    # warm() returns the combo's Outcome (it used to return True/False/None,
+    # which could not tell a busy slot from a timeout).
+    outcome = prewarm.warm("", 24, "http://localhost:1234")
+    assert outcome.status == "skip" and outcome.reason == "fresh"
     assert "synthetic-secret" not in capsys.readouterr().out
 
 

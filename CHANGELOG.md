@@ -17,6 +17,23 @@ Format for each entry:
 **Notes** — rejected alternatives, follow-ups, anything that would surprise the next reader.
 ```
 
+## 2026-11-23 — Prewarm waits 420 s, above the measured generation time
+
+**What** — `warm()`'s client timeout goes 240 s to 420 s.
+
+**Why** — Forced regenerations on 2026-11-23 took **238 s** and **276 s** end to end. At 240 s a
+combo that succeeds server-side still records `failed:timeout`, so the new freshness line would read
+"last attempt failed" for a briefing that had in fact just updated. 420 s is 1.5x the observed
+maximum.
+
+**How it was verified** — Measured from the forced `?refresh=1` responses for `europe` 3h and 24h
+(276 s and 238 s). Constant change, compile-checked; the next scheduled run is the observation.
+
+**Files** — `pipeline/prewarm_briefings.py`, `CHANGELOG.md`.
+
+**Notes** — Still a stopgap. Generation latency (~4.5 min) makes a 3 h cadence over ~34 combos
+arithmetically impossible sequentially (~2.5 h per run); #72's async request-and-poll is the fix.
+
 ## 2026-11-23 — Regeneration slots per key; threads cannot leak stale timing
 
 **What** — Two fixes. (1) `_try_start_regen` refuses only the SAME cache key and allows up to two
